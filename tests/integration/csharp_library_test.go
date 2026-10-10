@@ -69,7 +69,7 @@ func Derive(ctx context.Context)([]byte,error){return crypto.HKDFSHA256([]byte{1
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !strings.Contains(string(generated), "namespace Goalchemy.Generated;") || !strings.Contains(string(generated), "Library.submit(") {
+	if !strings.Contains(string(generated), "namespace Goalchemy.Generated;") || !strings.Contains(string(generated), "Library.submit<") {
 		t.Fatal("missing native exports")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)

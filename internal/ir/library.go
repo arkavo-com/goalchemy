@@ -174,24 +174,3 @@ func isHandleShape(t *Type, roots map[string]bool) bool {
 	e := t.Elem
 	return e.Kind == KNamed && roots[e.Pkg] && token.IsExported(e.Obj) && e.U().Kind == KStruct
 }
-
-// HandleShape returns the name of the first root struct whose pointer appears
-// in an export signature, or "" when no export uses a handle.
-func (p *Program) HandleShape() string {
-	roots := map[string]bool{}
-	for _, pkg := range p.Packages {
-		if pkg.Root {
-			roots[pkg.Path] = true
-		}
-	}
-	for _, f := range p.Exports {
-		for _, ts := range [][]*Type{f.Sig.Params, f.Sig.Results} {
-			for _, t := range ts {
-				if isHandleShape(t, roots) {
-					return t.Elem.Obj
-				}
-			}
-		}
-	}
-	return ""
-}

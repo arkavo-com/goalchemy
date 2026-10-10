@@ -339,6 +339,10 @@ final class GOwner {
   var main: GTask?
   var callbacks: [String: CallbackProvider] = [:]
   var keys: [GWeakCryptoKey] = []
+  /// Library calls receive the keys still open at shutdown instead of closing
+  /// them, so an instance can keep them; abandoned counts unfinished goroutines.
+  var retainKeys: ((GCryptoKey) -> Void)?
+  var abandoned = 0
   var nextCollection = 4096
   var harness = false
   static var current: GOwner?
@@ -519,6 +523,7 @@ final class GOwner {
   func shutdown() {
     if !active { return }
     active = false
+    abandoned = tasks.filter { !$0.done && $0 !== main }.count
     for task in tasks {
       task.cleanup?()
       task.cleanup = nil
@@ -539,7 +544,16 @@ final class GOwner {
     queue = []
     timers = []
     tasks = []
-    for weak in keys { if let key = weak.value, !key.escaped { key.close() } }
+    for weak in keys {
+      if let key = weak.value, !key.escaped {
+        if let retain = retainKeys {
+          key.escaped = true
+          retain(key)
+        } else {
+          key.close()
+        }
+      }
+    }
     keys = []
   }
 }

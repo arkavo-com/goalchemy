@@ -362,8 +362,16 @@ struct gx_Sched {
     void (*retire)(gx_Sched *s);
     void (*library_poll)(void);
     void (*native_cleanup)(void);
+    /* Library instance identity: native keys created under one domain stay
+     * usable by later calls of the instance. Zero means this owner's
+     * generation. keep_native retains them past this owner's cleanup. */
+    uint64_t domain;
+    bool keep_native;
 };
 extern gx_Sched *gx_sched;
+static inline uint64_t gx_domain(void) { return gx_sched->domain ? gx_sched->domain : gx_sched->generation; }
+/* Releases native resources of a retired library instance domain. */
+extern void (*gx_native_domain_release)(uint64_t domain);
 gx_Frame *gx_new_frame(int nl, gx_Step step, gx_Results results);
 static inline gx_V gx_vframe(gx_Frame *f) { gx_V v = {0}; v.t = GX_FRAME; v.u.p = f; return v; }
 static inline gx_Frame *gx_frameof(gx_V v) { return (gx_Frame *)v.u.p; }

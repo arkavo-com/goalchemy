@@ -55,6 +55,8 @@ thread_local! {
     static ROOTS: RefCell<Vec<*mut FrData>> = RefCell::new(Vec::new());
     static TEMP: RefCell<Vec<V>> = RefCell::new(Vec::new());
     static PERM: RefCell<Vec<V>> = RefCell::new(Vec::new());
+    /// Source objects referenced by library handles of this owner thread.
+    pub static LIBRARY_ROOTS: RefCell<std::collections::BTreeMap<u64, V>> = RefCell::new(std::collections::BTreeMap::new());
 }
 
 /// Keeps a runtime-owned value alive for the rest of the program.
@@ -271,6 +273,7 @@ pub fn collect() {
     });
     TEMP.with(|t| stack.extend(t.borrow().iter().cloned()));
     PERM.with(|t| stack.extend(t.borrow().iter().cloned()));
+    LIBRARY_ROOTS.with(|t| stack.extend(t.borrow().values().cloned()));
     trace_globals(&mut stack);
     trace_sched(&mut stack, &mut frames);
     let mut seen_frames: Vec<*const Frame> = Vec::new();

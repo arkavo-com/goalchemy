@@ -2,8 +2,7 @@
 
 Exported functions and methods can return and accept pointers to exported
 struct types of the root package. The host receives an opaque handle with the
-type's exported methods. Supported targets: Go, TypeScript and Python. Other
-targets reject handle exports with `GCE007` until their bindings land (#22).
+type's exported methods, on every target.
 
 ```go
 package counter
@@ -20,6 +19,15 @@ func (c *Counter) Close() error          { return nil } // optional
 | Go | `*counter.Counter` with methods taking `ctx` and returning `error` | `Close() error` |
 | TypeScript | `class Counter` with Promise-returning methods | `close()`, `await using` (`Symbol.asyncDispose`) |
 | Python | `class Counter` with methods returning a library operation | `close()`, `with` and `async with` |
+| Java | `Generated.Counter` with methods returning `Library.Operation` | `close()` (`AutoCloseable`), `closeAsync()` |
+| C# | `GoProgram.Counter` with methods returning `Library.Operation` | `Dispose()`, `DisposeAsync()`, `CloseAsync()` |
+| Rust | `Counter` (cloneable, `Eq` by identity) with methods returning `Operation` | `close()`; dropping the last clone releases |
+| C | `gxc_handle *` in `GXC_HANDLE` values; methods are `goalchemy_invoke("Counter.Add", ...)` with the receiver first | `gxc_handle_close`, `gxc_handle_free` |
+| Swift | `final class Counter` with methods returning `Operation` | `close()`; `deinit` releases |
+
+Rust renames a method named `Self` to `Self_`. Error kinds for closed,
+poisoned and mixed handles are `closed`, `poisoned` and `instance_mismatch`
+(Rust `ErrorKind::Closed`, `Poisoned`, `InstanceMismatch`; C kinds 7, 8, 9).
 
 ## What crosses
 
@@ -63,11 +71,17 @@ free functions.
   `Close` error is returned after the handle is released.
 - The instance retires when its last handle is released: its globals and native
   resources are dropped.
-- A handle collected without `Close` is released by a finalizer, which never
-  runs source code and logs a warning.
+- A handle collected without `Close` is released by a finalizer (Rust `Drop`,
+  Swift `deinit`), which never runs source code and logs a warning. C has no
+  finalizer: `gxc_handle_free` releases an open handle without Close.
 - A source panic, fatal error or host fault during an instance call poisons the
   instance: later calls fail with `poisoned`, and `Close` only releases.
 
-Warnings go to standard error. Go hosts can replace `rt.LibraryWarn`,
-TypeScript hosts `setLibraryWarn` in `rt/runtime/library.js`, and Python hosts
-`rt.set_library_warn`.
+Rust and C run each instance's calls on owner threads that keep its heap;
+the other targets swap the instance's globals in and out around each call.
+
+Warnings go to standard error. Hosts can replace the sink: Go `rt.LibraryWarn`,
+TypeScript `setLibraryWarn` in `rt/runtime/library.js`, Python
+`rt.set_library_warn`, Java `Library.warn`, C# `Library.Warn`, Rust
+`set_library_warn`, C `gxc_set_warning_handler` and Swift
+`setGoalchemyWarningHandler`.

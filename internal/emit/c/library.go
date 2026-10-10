@@ -40,6 +40,7 @@ func (e *emitter) valueLibrary(out *bytes.Buffer) ([]byte, error) {
 	out.WriteString(`#include "library.h"
 extern const gxc_options *gxc_active_options;
 #include <stdlib.h>
+#include <stdio.h>
 #include <limits.h>
 void goalchemy_wake(void) {gx_library_wake();}
 static pthread_mutex_t gxc_serial = PTHREAD_MUTEX_INITIALIZER;
@@ -66,8 +67,44 @@ static gxc_value gxc_list_out(gxc_kind kind,size_t n) {
 static void gxc_name(gxc_value *v,size_t i,const char *name) {
  size_t n=strlen(name); v->names[i]=gxc_alloc(n+1); memcpy(v->names[i],name,n+1);
 }
+typedef struct gxc_instance {gx_V *globals,*objects;gxc_handle **handles;size_t count,cap,live;bool poisoned;uint64_t domain;} gxc_instance;
+struct gxc_handle {gxc_instance *inst;size_t slot;const char *type;int close_entry;atomic_bool closed,cancel;bool released;};
+static gxc_instance *gxc_inst;
+static bool gxc_fresh,gxc_keep;
+static gxc_handle *gxc_self;
+static gxc_handle *gxc_hargs[256];
+static size_t gxc_left;
+static void (*gxc_warn_handler)(void *,const char *);static void *gxc_warn_state;
+void gxc_set_warning_handler(void (*handler)(void *state,const char *message),void *state){pthread_mutex_lock(&gxc_serial);gxc_warn_handler=handler;gxc_warn_state=state;pthread_mutex_unlock(&gxc_serial);}
+static void gxc_warn(const char *m){if(gxc_warn_handler)gxc_warn_handler(gxc_warn_state,m);else fprintf(stderr,"goalchemy: warning: %s\n",m);}
+const char *gxc_handle_type(const gxc_handle *h){return h?h->type:NULL;}
+static gx_V gxc_obj(const gxc_value *v){gxc_handle *h=v->kind==GXC_HANDLE?v->handle:NULL;return h&&!h->released?h->inst->objects[h->slot]:gx_nil();}
+static gxc_handle *gxc_arg_handle(const gxc_value *v,const char *type){if(v->kind==GXC_NIL)return NULL;if(v->kind!=GXC_HANDLE||!v->handle||strcmp(v->handle->type,type))gxc_invalid();return v->handle;}
+static gxc_value gxc_wrap(gx_V v,const char *type,int close_entry){
+ if(gx_is_nil(v))return (gxc_value){0};
+ gxc_instance *in=gxc_inst;
+ for(size_t i=0;i<in->count;i++){gxc_handle *h=in->handles[i];if(h&&!atomic_load(&h->closed)&&in->objects[i].t==v.t&&in->objects[i].u.p==v.u.p&&in->objects[i].l==v.l&&in->objects[i].pad==v.pad)return (gxc_value){.kind=GXC_HANDLE,.handle=h};}
+ if(in->count==in->cap){size_t c=in->cap?in->cap*2:8;gx_V *o=GC_MALLOC_UNCOLLECTABLE(c*sizeof(gx_V));gxc_handle **hs=calloc(c,sizeof(*hs));if(!o||!hs)gx_host_fault("handle table allocation");
+  if(in->count){memcpy(o,in->objects,in->count*sizeof(gx_V));memcpy(hs,in->handles,in->count*sizeof(*hs));}GC_FREE(in->objects);free(in->handles);in->objects=o;in->handles=hs;in->cap=c;}
+ gxc_handle *h=calloc(1,sizeof(*h));if(!h)gx_host_fault("handle allocation");
+ h->inst=in;h->slot=in->count;h->type=type;h->close_entry=close_entry;atomic_init(&h->closed,false);atomic_init(&h->cancel,false);
+ in->objects[in->count]=v;in->handles[in->count]=h;in->count++;in->live++;
+ return (gxc_value){.kind=GXC_HANDLE,.handle=h};
+}
+static void gxc_retire(gxc_instance *in){
+ if(gx_native_domain_release&&in->domain)gx_native_domain_release(in->domain);
+ for(size_t i=0;i<in->count;i++)if(in->handles[i])in->handles[i]->inst=NULL;
+ GC_FREE(in->globals);GC_FREE(in->objects);free(in->handles);free(in);
+}
+/* Requires the serial lock. Returns true when the instance retired. */
+static bool gxc_release(gxc_handle *h){
+ if(h->released)return false;h->released=true;gxc_instance *in=h->inst;
+ in->objects[h->slot]=gx_nil();in->handles[h->slot]=NULL;
+ if(--in->live)return false;
+ gxc_retire(in);return true;
+}
 static void gxc_poll(void) {
- if(gxc_opts && gxc_opts->canceled && atomic_load(gxc_opts->canceled))
+ if((gxc_opts && gxc_opts->canceled && atomic_load(gxc_opts->canceled))||(gxc_self&&atomic_load(&gxc_self->cancel)))
   gx_cancel_ctx(gxc_context,gx_context_canceled());
 }
 `)
@@ -163,24 +200,49 @@ static void gxc_poll(void) {
 		}
 		out.WriteString("}\n")
 	}
+	abi, err := e.p.LibraryHandles(func(t *ir.Type) bool { return cValueType(t, map[*ir.Type]bool{}) })
+	if err != nil {
+		return nil, err
+	}
+	type entry struct {
+		name  string
+		f     *ir.Func
+		recv  *ir.Handle
+		close bool
+	}
+	var entries []entry
 	for _, f := range e.p.Exports {
-		for _, t := range f.Sig.Params {
-			if cContext(t) {
-				continue
-			}
-			if !cValueType(t, map[*ir.Type]bool{}) {
-				return nil, fmt.Errorf("unsupported C library input %s", ir.TypeString(t))
-			}
-			convert(t)
+		entries = append(entries, entry{name: f.Name[strings.LastIndex(f.Name, ".")+1:], f: f})
+	}
+	closeEntry := map[*ir.Handle]int{}
+	for _, h := range abi.Handles {
+		for _, f := range h.Methods {
+			entries = append(entries, entry{name: h.Name + "." + ir.MethodName(f), f: f, recv: h})
 		}
-		for _, t := range f.Sig.Results {
-			if cError(t) {
-				continue
+	}
+	for _, h := range abi.Handles {
+		closeEntry[h] = -1
+		if h.Close != nil {
+			closeEntry[h] = len(entries)
+			entries = append(entries, entry{name: "", f: h.Close, recv: h, close: true})
+		}
+	}
+	params := func(en entry) []*ir.Type {
+		if en.recv != nil {
+			return en.f.Sig.Params[1:]
+		}
+		return en.f.Sig.Params
+	}
+	for _, en := range entries {
+		for _, t := range params(en) {
+			if !cContext(t) && abi.Handle(t) == nil {
+				convert(t)
 			}
-			if !cValueType(t, map[*ir.Type]bool{}) {
-				return nil, fmt.Errorf("unsupported C library output %s", ir.TypeString(t))
+		}
+		for _, t := range en.f.Sig.Results {
+			if !cError(t) && abi.Handle(t) == nil {
+				convert(t)
 			}
-			convert(t)
 		}
 	}
 	var errors []*ir.Type
@@ -196,14 +258,31 @@ static void gxc_poll(void) {
 		fmt.Fprintf(out, " if(gx_is_type(v,&td_%s)) { gxc_failure->fields=gxc_out_%s(gx_unboxed(v)); return; }\n", e.names.Type(t, ""), e.names.Type(t.Elem.U(), ""))
 	}
 	out.WriteString("}\n")
-	fmt.Fprintf(out, "static void gxc_init_source(void) { init_zero_globals(); f_%s(); }\n", e.names.Symbol(e.p.Init.Sym))
+	out.WriteString("static void gxc_save(gxc_instance *in) {\n if(!in->globals){in->globals=GC_MALLOC_UNCOLLECTABLE(sizeof(gx_V)*" + fmt.Sprint(len(e.p.Globals)+1) + ");if(!in->globals)gx_host_fault(\"instance globals allocation\");}\n")
+	for i, g := range e.p.Globals {
+		fmt.Fprintf(out, " in->globals[%d]=%s;\n", i, e.names.Symbol(g.Sym))
+	}
+	out.WriteString("}\nstatic void gxc_load(gxc_instance *in) {\n")
+	for i, g := range e.p.Globals {
+		fmt.Fprintf(out, " %s=in->globals[%d];\n", e.names.Symbol(g.Sym), i)
+	}
+	out.WriteString("}\n")
+	fmt.Fprintf(out, "static void gxc_init_source(void) {\n if(gxc_fresh){init_zero_globals();gxc_inst->domain=gx_domain();gx_sched->domain=gxc_inst->domain;f_%s();}\n else {gxc_load(gxc_inst);gx_sched->domain=gxc_inst->domain;}\n}\n", e.names.Symbol(e.p.Init.Sym))
 	out.WriteString("static gx_V gxc_call_source(void) { gx_V c=gx_std_context_with_cancel(gx_background()); gxc_context=gx_at(c,0);\n if(gxc_opts && gxc_opts->timeout_nanoseconds>0) gxc_context=gx_at(gx_std_context_with_timeout(gxc_context,gx_int(gxc_opts->timeout_nanoseconds)),0);\n gxc_poll(); switch(gxc_export) {\n")
-	for k, f := range e.p.Exports {
+	for k, en := range entries {
+		f := en.f
 		var as []string
 		index := 0
-		for _, t := range f.Sig.Params {
+		if en.recv != nil {
+			as = append(as, "gxc_obj(&gxc_args[0])")
+			index++
+		}
+		for _, t := range params(en) {
 			if cContext(t) {
 				as = append(as, "gxc_context")
+			} else if abi.Handle(t) != nil {
+				as = append(as, fmt.Sprintf("gxc_obj(&gxc_args[%d])", index))
+				index++
 			} else {
 				as = append(as, fmt.Sprintf("gxc_in_%s(&gxc_args[%d])", e.names.Type(t.U(), ""), index))
 				index++
@@ -217,68 +296,164 @@ static void gxc_poll(void) {
 		}
 	}
 	out.WriteString(" } gx_host_fault(\"unknown export\"); }\nstatic void gxc_root_step(gx_Task *t,gx_Frame *f) {if(!f->pc){f->pc=1;gx_call(t,gxc_call_source());return;}gx_ret(t,f); }\nstatic gx_V gxc_entry(void) {return gx_vframe(gx_new_frame(0,gxc_root_step,NULL));}\nstatic void gxc_finish(gx_Task *t) { switch(gxc_export) {\n")
-	for k, f := range e.p.Exports {
+	for k, en := range entries {
+		f := en.f
 		n := len(f.Sig.Results)
 		hasError := n > 0 && cError(f.Sig.Results[n-1])
 		if hasError {
 			n--
+		}
+		res := func(i int) string {
+			if h := abi.Handle(f.Sig.Results[i]); h != nil {
+				return fmt.Sprintf("gxc_wrap(gx_rv(t,%d),%q,%d)", i, h.Name, closeEntry[h])
+			}
+			return fmt.Sprintf("gxc_out_%s(gx_rv(t,%d))", e.names.Type(f.Sig.Results[i].U(), ""), i)
 		}
 		fmt.Fprintf(out, " case %d:\n", k)
 		if hasError {
 			fmt.Fprintf(out, " if(!gx_is_nil(gx_rv(t,%d))) {gxc_source_error(gx_rv(t,%d)); break;}\n", n, n)
 		}
 		if n == 1 {
-			fmt.Fprintf(out, " *gxc_result=gxc_out_%s(gx_rv(t,0));\n", e.names.Type(f.Sig.Results[0].U(), ""))
+			fmt.Fprintf(out, " *gxc_result=%s;\n", res(0))
 		} else if n > 1 {
 			fmt.Fprintf(out, " *gxc_result=gxc_list_out(GXC_LIST,%d);\n", n)
 			for i := 0; i < n; i++ {
-				fmt.Fprintf(out, " gxc_result->items[%d]=gxc_out_%s(gx_rv(t,%d));\n", i, e.names.Type(f.Sig.Results[i].U(), ""), i)
+				fmt.Fprintf(out, " gxc_result->items[%d]=%s;\n", i, res(i))
 			}
 		}
 		out.WriteString(" break;\n")
 	}
-	out.WriteString(` } }
+	out.WriteString(` }
+ gxc_keep=!gxc_fresh||gxc_inst->live>0;
+ if(gxc_keep){
+  gxc_save(gxc_inst);gx_sched->keep_native=true;gxc_left=0;
+  for(gx_Task *x=gx_sched->all;x;x=x->next_all)if(x!=t&&!x->done)gxc_left++;
+ }
+}
+/* Runs one entry; requires the serial lock and validated handles. */
+static int gxc_run(int which,const gxc_value *args,const gxc_options *opts,gxc_value *result,gxc_error *error){
+ gxc_args=args;gxc_opts=opts;gxc_active_options=opts;gxc_result=result;gxc_failure=error;gxc_export=which;
+ gxc_output_bytes=0;gxc_output_nodes=0;gxc_output_depth=0;gxc_keep=false;gxc_left=0;
+ uint8_t *report=NULL;size_t n=0;
+ int rc=gx_run_library_host(gxc_init_source,gxc_entry,gxc_finish,gxc_poll,&report,&n);
+ gxc_allocation_release(rc!=0);
+ if(rc) {int kind=error->kind?error->kind:rc;memset(result,0,sizeof(*result));memset(error,0,sizeof(*error));error->kind=kind;error->message=(gxc_value){.kind=GXC_BYTES,.bytes=report,.length=n};}
+ else free(report);
+ if(!rc&&!gxc_fresh&&error->kind==1&&((opts&&opts->canceled&&atomic_load(opts->canceled))||(gxc_self&&atomic_load(&gxc_self->cancel)))){gxc_error_free(error);memset(result,0,sizeof(*result));error->kind=6;}
+ if(!rc&&gxc_keep&&gxc_left){char m[96];snprintf(m,sizeof m,"%zu goroutine(s) still running when a handle call returned were abandoned",gxc_left);gxc_warn(m);}
+ gxc_context=gx_nil();gxc_args=NULL;gxc_opts=NULL;gxc_active_options=NULL;gxc_result=NULL;gxc_failure=NULL;
+ return rc;
+}
+static int gxc_serial_lock(const gxc_options *opts,gxc_handle *self){
+ while(pthread_mutex_trylock(&gxc_serial)) {
+  if(opts && opts->canceled && atomic_load(opts->canceled)) return 6;
+  if(self && atomic_load(&self->closed)) return 7;
+  struct timespec pause={0,1000000};nanosleep(&pause,NULL);
+ }
+ return 0;
+}
 int goalchemy_invoke(const char *name,const gxc_value *args,size_t count,const gxc_options *opts,gxc_value *result,gxc_error *error) {
  if(!result || !error) return 5;
  memset(result,0,sizeof(*result)); memset(error,0,sizeof(*error));
  if(gxc_callback_thread) return error->kind=3;
  if(!name || count>256 || (count && !args)) return error->kind=5;
- int which=-1; size_t expected=0;
+ int which=-1; size_t expected=0; const char *recv=NULL; const char *types[256]={0};
 `)
-	for k, f := range e.p.Exports {
-		n := 0
-		for _, t := range f.Sig.Params {
-			if !cContext(t) {
-				n++
-			}
+	for k, en := range entries {
+		if en.close {
+			continue
 		}
-		name := f.Name[strings.LastIndex(f.Name, ".")+1:]
-		fmt.Fprintf(out, " if(!strcmp(name,%q)) {which=%d;expected=%d;}\n", name, k, n)
+		n := 0
+		var types []string
+		if en.recv != nil {
+			n++
+			types = append(types, fmt.Sprintf("types[0]=%q;", en.recv.Name))
+		}
+		for _, t := range params(en) {
+			if cContext(t) {
+				continue
+			}
+			if h := abi.Handle(t); h != nil {
+				types = append(types, fmt.Sprintf("types[%d]=%q;", n, h.Name))
+			}
+			n++
+		}
+		r := "NULL"
+		if en.recv != nil {
+			r = fmt.Sprintf("%q", en.recv.Name)
+		}
+		fmt.Fprintf(out, " if(!strcmp(name,%q)) {which=%d;expected=%d;recv=%s;%s}\n", en.name, k, n, r, strings.Join(types, ""))
 	}
 	out.WriteString(` if(which<0 || count!=expected) return error->kind=5;
+ gxc_handle *self=NULL;
+ for(size_t i=0;i<count;i++) if(types[i]) {
+  if(args[i].kind==GXC_NIL) {if(i==0&&recv)return error->kind=5;continue;}
+  if(args[i].kind!=GXC_HANDLE||!args[i].handle||strcmp(args[i].handle->type,types[i])) return error->kind=5;
+  if(!self) self=args[i].handle;
+ } else if(args[i].kind==GXC_HANDLE) return error->kind=5;
+ if(self&&atomic_load(&self->closed)) return error->kind=7;
  gxc_value *snapshot=calloc(count?count:1,sizeof(*snapshot)); if(!snapshot) return error->kind=3;
  int rc=0; for(size_t i=0;i<count;i++) {rc=gxc_value_copy(&snapshot[i],&args[i]);if(rc)break;}
  if(rc) {for(size_t i=0;i<count;i++) gxc_value_free(&snapshot[i]);free(snapshot);return error->kind=rc==3?3:5;}
- while(pthread_mutex_trylock(&gxc_serial)) {
-  if(opts && opts->canceled && atomic_load(opts->canceled)) {rc=6;break;}
-  struct timespec pause={0,1000000};nanosleep(&pause,NULL);
- }
+ rc=gxc_serial_lock(opts,self);
  if(!rc) {
-  if(opts && opts->canceled && atomic_load(opts->canceled)) {rc=6;} else {
-   gxc_args=snapshot;gxc_opts=opts;gxc_active_options=opts;gxc_result=result;gxc_failure=error;gxc_export=which;
-   gxc_output_bytes=0;gxc_output_nodes=0;gxc_output_depth=0;
-   uint8_t *report=NULL;size_t n=0;
-   rc=gx_run_library_host(gxc_init_source,gxc_entry,gxc_finish,gxc_poll,&report,&n);
-   gxc_allocation_release(rc!=0);
-   if(rc) {int kind=error->kind?error->kind:rc;memset(result,0,sizeof(*result));memset(error,0,sizeof(*error));error->kind=kind;error->message=(gxc_value){.kind=GXC_BYTES,.bytes=report,.length=n};}
-   else free(report);
-   gxc_context=gx_nil();gxc_args=NULL;gxc_opts=NULL;gxc_active_options=NULL;gxc_result=NULL;gxc_failure=NULL;
+  gxc_instance *in=NULL;
+  for(size_t i=0;i<count&&!rc;i++) if(types[i]&&snapshot[i].kind==GXC_HANDLE) {
+   gxc_handle *h=snapshot[i].handle;
+   if(h->released||atomic_load(&h->closed)) rc=7;
+   else if(in&&h->inst!=in) rc=9;
+   else in=h->inst;
+  }
+  if(!rc&&in&&in->poisoned) rc=8;
+  if(!rc&&opts && opts->canceled && atomic_load(opts->canceled)) rc=6;
+  if(!rc) {
+   gxc_fresh=!in;
+   if(!in){in=calloc(1,sizeof(*in));if(!in)rc=3;}
+   if(!rc){
+    gxc_inst=in;gxc_self=self;
+    rc=gxc_run(which,snapshot,opts,result,error);
+    if(!gxc_fresh&&(rc==2||rc==3||rc==4))in->poisoned=true;
+    if(gxc_fresh&&(rc||!gxc_keep))free(in);
+    gxc_inst=NULL;gxc_self=NULL;
+   }
   }
   pthread_mutex_unlock(&gxc_serial);
  }
  for(size_t i=0;i<count;i++)gxc_value_free(&snapshot[i]);free(snapshot);
  if(rc && !error->kind)error->kind=rc;
  return error->kind;
+}
+int gxc_handle_close(gxc_handle *h,gxc_error *error){
+ gxc_error ignored;if(!error)error=&ignored;
+ memset(error,0,sizeof(*error));
+ if(!h) return error->kind=5;
+ if(atomic_exchange(&h->closed,true)) return 0;
+ atomic_store(&h->cancel,true);
+ pthread_mutex_lock(&gxc_serial);
+ int rc=0;
+ if(!h->released) {
+  gxc_instance *in=h->inst;
+  if(h->close_entry>=0&&!in->poisoned) {
+   gxc_value recv={.kind=GXC_HANDLE,.handle=h},result={0};
+   atomic_store(&h->cancel,false);
+   gxc_fresh=false;gxc_inst=in;gxc_self=NULL;
+   rc=gxc_run(h->close_entry,&recv,NULL,&result,error);
+   if(rc==2||rc==3||rc==4)in->poisoned=true;
+   gxc_inst=NULL;gxc_value_free(&result);
+  }
+  gxc_release(h);
+ }
+ pthread_mutex_unlock(&gxc_serial);
+ if(rc&&!error->kind)error->kind=rc;
+ return error->kind;
+}
+void gxc_handle_free(gxc_handle *h){
+ if(!h)return;
+ atomic_store(&h->closed,true);atomic_store(&h->cancel,true);
+ pthread_mutex_lock(&gxc_serial);
+ if(!h->released&&h->inst)gxc_release(h);
+ pthread_mutex_unlock(&gxc_serial);
+ free(h);
 }
 `)
 	return []byte("/* Generated owned C value library API. */\n#include \"library.h\"\n"), nil

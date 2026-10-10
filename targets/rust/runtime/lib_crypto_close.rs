@@ -53,14 +53,14 @@ fn own_key(k: NativeKey) -> V {
         id
     });
     KEYS.with(|keys| keys.borrow_mut().insert(id, k));
-    V::Obj(alloc(Obj::NativeKey(id, sched(|s| s.owner))))
+    V::Obj(alloc(Obj::NativeKey(id, sched(|s| s.domain))))
 }
 fn key_id(v: &V) -> Result<u64, String> {
     if v.is_nil() {
         return Err(bad());
     }
     with(v.h(), |o| match o {
-        Obj::NativeKey(id, owner) if *owner == sched(|s| s.owner) => Ok(*id),
+        Obj::NativeKey(id, owner) if *owner == sched(|s| s.domain) => Ok(*id),
         _ => Err("foreign key".into()),
     })
 }

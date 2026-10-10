@@ -16,7 +16,7 @@ func TestLibraryBoundaryDiagnostics(t *testing.T) {
 	}
 	for name, source := range map[string]string{
 		"map":             "func Export()(map[string]string,error){return nil,nil}",
-		"pointer":         "type Value struct{Data []byte};func Export(v *Value)(int,error){return 0,nil}",
+		"pointer":         "func Export(v *int)(int,error){return 0,nil}",
 		"function":        "func Export(v func())(int,error){return 0,nil}",
 		"private-field":   "type Value struct{hidden []byte};func Export(v Value)(int,error){return 0,nil}",
 		"variadic":        "func Export(v ...int)(int,error){return 0,nil}",

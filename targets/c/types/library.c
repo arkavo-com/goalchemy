@@ -16,7 +16,7 @@ void gxc_error_free(gxc_error *e) {
 static int copy_value(gxc_value *d,const gxc_value *s,unsigned depth,size_t *budget,size_t *bytes) {
     if (!s || depth>64 || !*budget || s->length>UINT32_MAX) return 1;
     (*budget)--;
-    if (s->kind<GXC_NIL || s->kind>GXC_FLOAT) return 1;
+    if (s->kind<GXC_NIL || s->kind>GXC_HANDLE) return 1;
     d->kind=s->kind; d->integer=s->integer; d->floating=s->floating; d->length=s->length;
     if (s->kind==GXC_BYTES) {
         if (s->length>*bytes || s->length>128u*1024u*1024u || (s->length && !s->bytes)) return 1;
@@ -39,7 +39,10 @@ static int copy_value(gxc_value *d,const gxc_value *s,unsigned depth,size_t *bud
             }
             int rc=copy_value(&d->items[i],&s->items[i],depth+1,budget,bytes); if(rc) return rc;
         }
-    } else if (s->length || s->bytes || s->items || s->names) return 1;
+    } else if (s->kind==GXC_HANDLE) {
+        if (s->length || s->bytes || s->items || s->names) return 1;
+        d->handle=s->handle; if(!d->handle) d->kind=GXC_NIL;
+    } else if (s->length || s->bytes || s->items || s->names || s->handle) return 1;
     return 0;
 }
 int gxc_value_copy(gxc_value *d,const gxc_value *s) {

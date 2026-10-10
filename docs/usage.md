@@ -160,8 +160,8 @@ maintained cryptography; HTTP uses the standard library. See the adjacent
 with serialized source owners and cleanup-before-publication. Native crypto/HTTP
 use maintained locked crates; see [Rust TDF3 delivery](../../sdk/docs/generated-rust-library.md).
 Unsupported public value shapes on supported value-library targets fail with `GCE007`.
-Go, TypeScript and Python libraries can also return stateful
-[handles](library-handles.md): pointers to exported structs with methods.
+Libraries can also return stateful [handles](library-handles.md): pointers
+to exported structs with methods.
 
 C aggregate or suspending exports emit `goalchemy.h`, `main.c`, `rt/` and
 `build.sh`, producing `libgoalchemy.a`. The owned `gxc_value` API recursively

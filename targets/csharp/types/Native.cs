@@ -34,6 +34,9 @@ public static class Native
     }
     static State current;
     public static void install(){R.sched.assertDriver();if(current!=null)throw new HostFault("native owner already installed");var state=new State();current=state;R.sched.disposers.Add(()=>{try{state.retire();}finally{if(current==state)current=null;}});}
+    /// Installs a library instance's persistent registry; driver shutdown detaches it without closing its keys.
+    public static void install(State state){R.sched.assertDriver();if(current!=null)throw new HostFault("native owner already installed");state.stopped=false;current=state;R.sched.disposers.Add(()=>{if(current==state)current=null;});}
+    public static void detach(){current=null;}
     public static void retire(){var state=current;if(state!=null)try{state.retire();}finally{if(current==state)current=null;}}
     public static void requestStop(){if(current!=null)current.stopped=true;}
     public static State state(){R.sched.assertDriver();if(current==null)install();return current;}

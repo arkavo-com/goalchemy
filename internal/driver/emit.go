@@ -32,10 +32,6 @@ type EmitOptions struct {
 }
 
 // Emit writes a target with readable private identifiers.
-// handleTargets support exported handles: pointers to exported root structs
-// with methods, owned by library instances.
-var handleTargets = map[string]bool{"go": true, "typescript": true, "python": true, "ir": true}
-
 func Emit(name string, res *Result, out string) []diagnostics.Diagnostic {
 	return EmitWithOptions(name, res, out, EmitOptions{})
 }
@@ -66,13 +62,6 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 		return []diagnostics.Diagnostic{{Code: "GCE006", Severity: diagnostics.Error, Feature: "library build",
 			Message: "target " + name + " cannot build a library",
 			Remedy:  "Compile package main for this target, or choose a target with a supported library API."}}
-	}
-	if res.IR != nil && res.IR.Library && !handleTargets[name] {
-		if h := res.IR.HandleShape(); h != "" {
-			return []diagnostics.Diagnostic{{Code: "GCE007", Severity: diagnostics.Error, Feature: "library handles",
-				Message: fmt.Sprintf("exported handle *%s is not yet supported on the %s target", h, name),
-				Remedy:  "Return copied struct values on this target, or build the library for go, typescript or python."}}
-		}
 	}
 	// Fail before target type lowering when a declared capability has no
 	// implementation; opaque native keys must never become fake target values.
