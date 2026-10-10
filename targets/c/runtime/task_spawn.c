@@ -12,6 +12,7 @@
 #include <limits.h>
 
 static void retire_owner(gx_Sched *s);
+void (*gx_native_domain_release)(uint64_t domain);
 static void host_cleanup_action(gx_Sched *s, gx_HostAction action, void *arg);
 
 /* xorshift32 choice source, identical on every target. */

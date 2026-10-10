@@ -56,8 +56,20 @@ func (e *emitter) library() (string, error) {
 	for _, f := range e.p.Exports {
 		roots[f.Pkg] = true
 	}
+	abi, err := e.p.LibraryHandles(func(t *ir.Type) bool { return libraryValue(t, map[*ir.Type]bool{}) })
+	if err != nil {
+		return "", &LibraryBoundaryError{err.Error()}
+	}
+	handleElems := map[*ir.Type]bool{}
+	for _, h := range abi.Handles {
+		if used[h.Name] || reserved[h.Name] {
+			return "", boundary("Swift public name collision: %s", h.Name)
+		}
+		used[h.Name] = true
+		handleElems[h.Elem] = true
+	}
 	for _, t := range e.p.Types.All {
-		if t.Kind == ir.KNamed && roots[t.Pkg] && token.IsExported(t.Obj) && t.U().Kind == ir.KStruct && libraryValue(t, map[*ir.Type]bool{}) {
+		if t.Kind == ir.KNamed && roots[t.Pkg] && token.IsExported(t.Obj) && t.U().Kind == ir.KStruct && !handleElems[t] && libraryValue(t, map[*ir.Type]bool{}) {
 			if used[t.Obj] || reserved[t.Obj] {
 				return "", boundary("Swift public name collision: %s", t.Obj)
 			}
@@ -222,25 +234,23 @@ func (e *emitter) library() (string, error) {
 		}
 		b.WriteString("}\n")
 	}
-	for _, f := range e.p.Exports {
-		if f.Sig.Variadic {
-			return "", boundary("variadic Swift export %s", f.Name)
+	funcs := append([]*ir.Func{}, e.p.Exports...)
+	for _, h := range abi.Handles {
+		funcs = append(funcs, h.Methods...)
+	}
+	for _, f := range funcs {
+		params := f.Sig.Params
+		if f.Recv != nil {
+			params = params[1:]
 		}
-		for _, t := range f.Sig.Params {
-			if sourceContext(t) {
-				continue
+		for _, t := range params {
+			if !sourceContext(t) && abi.Handle(t) == nil {
+				convert(t)
 			}
-			if !libraryValue(t, map[*ir.Type]bool{}) {
-				return "", boundary("unsupported Swift public parameter %s", t.String())
-			}
-			convert(t)
 		}
 		for i, t := range f.Sig.Results {
-			if i == len(f.Sig.Results)-1 && sourceError(t) {
+			if (i == len(f.Sig.Results)-1 && sourceError(t)) || abi.Handle(t) != nil {
 				continue
-			}
-			if !libraryValue(t, map[*ir.Type]bool{}) {
-				return "", boundary("unsupported Swift public result %s", t.String())
 			}
 			convert(t)
 		}
@@ -265,60 +275,121 @@ func (e *emitter) library() (string, error) {
 	for _, g := range e.p.Globals {
 		fmt.Fprintf(&b, "    %s.value = GTypes.zero(%d)\n", e.names.Symbol(g.Sym), g.Type.ID)
 	}
-	b.WriteString("}\n")
+	b.WriteString("}\nprivate func gLibrarySave() -> [GValue] {\n    return [")
+	var saves []string
+	for _, g := range e.p.Globals {
+		saves = append(saves, e.names.Symbol(g.Sym)+".value")
+	}
+	b.WriteString(strings.Join(saves, ", "))
+	b.WriteString("]\n}\nprivate func gLibraryLoad(_ v: [GValue]) {\n    _ = gTypeRegistration\n    gSetupMethods()\n")
+	for i, g := range e.p.Globals {
+		fmt.Fprintf(&b, "    %s.value = v[%d]\n", e.names.Symbol(g.Sym), i)
+	}
+	b.WriteString("}\nprivate let gLibraryState = GLibraryState(reset: gLibraryReset, save: gLibrarySave, load: gLibraryLoad)\n")
+	initFrame := "{ " + e.names.Symbol(e.p.Init.Sym) + "([], []) }"
+	for _, h := range abi.Handles {
+		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close() when\n/// done; deinit releases it without running Close.\npublic final class %s {\n    let handle: GHandle\n    init(_ handle: GHandle) { self.handle = handle }\n    deinit { GLibrary.finalize(handle) }\n", h.Name, swiftPublic(h.Name))
+		start := "nil"
+		if h.Close != nil {
+			start = fmt.Sprintf("{ args, context, objects in %s([objects[0]], []) }", e.names.Symbol(h.Close.Sym))
+		}
+		fmt.Fprintf(&b, "    /// Runs the source Close, if any, and releases the handle. Queued calls\n    /// fail and an active call is canceled first.\n    public func close() throws {\n        try GLibrary.close(handle, gLibraryState, %s, %s, { rv, _ in if let error = try gSourceError(rv[0]) { throw error } })\n    }\n", initFrame, start)
+		for _, f := range h.Methods {
+			if err := e.libraryWrapper(&b, abi, ir.MethodName(f), h, f, typ, initFrame, used, reserved); err != nil {
+				return "", err
+			}
+		}
+		b.WriteString("}\n")
+	}
 	for _, f := range e.p.Exports {
 		name := f.Name[strings.LastIndex(f.Name, ".")+1:]
 		if used[name] || reserved[name] {
 			return "", boundary("Swift public export collision %s", name)
 		}
 		used[name] = true
-		n := len(f.Sig.Results)
-		hasErr := n > 0 && sourceError(f.Sig.Results[n-1])
-		if hasErr {
-			n--
+		if err := e.libraryWrapper(&b, abi, name, nil, f, typ, initFrame, used, reserved); err != nil {
+			return "", err
 		}
-		result := "Void"
-		if n == 1 {
-			result = typ(f.Sig.Results[0])
-		} else if n > 1 {
-			var ts []string
-			for _, t := range f.Sig.Results[:n] {
-				ts = append(ts, typ(t))
-			}
-			result = "(" + strings.Join(ts, ", ") + ")"
-		}
-		var ps, inputs, args []string
-		inputIndex := 0
-		for i, t := range f.Sig.Params {
-			if sourceContext(t) {
-				args = append(args, "context")
-				continue
-			}
-			ps = append(ps, fmt.Sprintf("_ a%d: %s", i, typ(t)))
-			inputs = append(inputs, fmt.Sprintf("try gInput%d(a%d)", t.U().ID, i))
-			args = append(args, fmt.Sprintf("args[%d]", inputIndex))
-			inputIndex++
-		}
-		ps = append(ps, "_ options: CallOptions = CallOptions()")
-		fmt.Fprintf(&b, "public func %s(%s) -> Operation<%s> {\n    do {\n        let args = try GLibrary.prepare {\n            _ = gTypeRegistration\n            return [%s]\n        }\n", swiftPublic(name), strings.Join(ps, ", "), result, strings.Join(inputs, ", "))
-		fmt.Fprintf(&b, "        return GLibrary.submit(args, options, gLibraryReset, { %s([], []) }, { args, context in %s([%s], []) }, { rv in\n", e.names.Symbol(e.p.Init.Sym), e.names.Symbol(f.Sym), strings.Join(args, ", "))
-		if hasErr {
-			fmt.Fprintf(&b, "            if let error = try gSourceError(rv[%d]) { throw error }\n", n)
-		}
-		if n == 0 {
-			b.WriteString("            return ()\n")
-		} else {
-			var xs []string
-			for i, t := range f.Sig.Results[:n] {
-				xs = append(xs, fmt.Sprintf("try gOutput%d(rv[%d])", t.U().ID, i))
-			}
-			ret := strings.Join(xs, ", ")
-			if n > 1 {
-				ret = "(" + ret + ")"
-			}
-			fmt.Fprintf(&b, "            return %s\n", ret)
-		}
-		b.WriteString("        })\n    } catch { return Operation(options.cancellation) { throw error } }\n}\n")
 	}
 	return b.String(), nil
+}
+
+func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, typ func(*ir.Type) string, initFrame string, used, reserved map[string]bool) error {
+	ptyp := func(t *ir.Type) string {
+		if h := abi.Handle(t); h != nil {
+			// Qualified: inside a handle class a method may shadow the type name.
+			return "GoalchemyGenerated." + swiftPublic(h.Name) + "?"
+		}
+		return typ(t)
+	}
+	results := f.Sig.Results
+	n := len(results)
+	hasErr := n > 0 && sourceError(results[n-1])
+	if hasErr {
+		n--
+	}
+	result := "Void"
+	if n == 1 {
+		result = ptyp(results[0])
+	} else if n > 1 {
+		var ts []string
+		for _, t := range results[:n] {
+			ts = append(ts, ptyp(t))
+		}
+		result = "(" + strings.Join(ts, ", ") + ")"
+	}
+	params := f.Sig.Params
+	var ps, inputs, args, hs []string
+	if recv != nil {
+		params = params[1:]
+		hs = append(hs, "handle")
+		args = append(args, "objects[0]")
+	}
+	inputIndex := 0
+	for i, t := range params {
+		if sourceContext(t) {
+			args = append(args, "context")
+			continue
+		}
+		ps = append(ps, fmt.Sprintf("_ a%d: %s", i, ptyp(t)))
+		if abi.Handle(t) != nil {
+			hs = append(hs, fmt.Sprintf("a%d?.handle", i))
+			args = append(args, fmt.Sprintf("objects[%d]", len(hs)-1))
+			continue
+		}
+		inputs = append(inputs, fmt.Sprintf("try gInput%d(a%d)", t.U().ID, i))
+		args = append(args, fmt.Sprintf("args[%d]", inputIndex))
+		inputIndex++
+	}
+	ps = append(ps, "_ options: CallOptions = CallOptions()")
+	indent, prefix := "", "public func"
+	if recv != nil {
+		indent, prefix = "    ", "public func"
+	}
+	fmt.Fprintf(b, "%s%s %s(%s) -> Operation<%s> {\n%s    do {\n%s        let args = try GLibrary.prepare {\n%s            _ = gTypeRegistration\n%s            return [%s]\n%s        }\n", indent, prefix, swiftPublic(name), strings.Join(ps, ", "), result, indent, indent, indent, indent, strings.Join(inputs, ", "), indent)
+	fmt.Fprintf(b, "%s        return GLibrary.submitHandles(args, options, gLibraryState, [%s], nil, %s, { args, context, objects in %s([%s], []) }, { rv, instance in\n", indent, strings.Join(hs, ", "), initFrame, e.names.Symbol(f.Sym), strings.Join(args, ", "))
+	if hasErr {
+		fmt.Fprintf(b, "%s            if let error = try gSourceError(rv[%d]) { throw error }\n", indent, n)
+	}
+	out := func(i int) string {
+		if h := abi.Handle(results[i]); h != nil {
+			return fmt.Sprintf("GLibrary.wrap(instance, rv[%d], %q, GoalchemyGenerated.%s.init)", i, h.Name, swiftPublic(h.Name))
+		}
+		return fmt.Sprintf("try gOutput%d(rv[%d])", results[i].U().ID, i)
+	}
+	if n == 0 {
+		fmt.Fprintf(b, "%s            return ()\n", indent)
+	} else {
+		var xs []string
+		for i := 0; i < n; i++ {
+			xs = append(xs, out(i))
+		}
+		ret := strings.Join(xs, ", ")
+		if n > 1 {
+			ret = "(" + ret + ")"
+		}
+		fmt.Fprintf(b, "%s            return %s\n", indent, ret)
+	}
+	fmt.Fprintf(b, "%s        })\n%s    } catch { return Operation(options.cancellation) { throw error } }\n%s}\n", indent, indent, indent)
+	return nil
 }

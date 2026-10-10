@@ -56,6 +56,10 @@ public final class Native {
     }
     private static State current;
     public static void install(){TaskSpawn.sched.assertDriver();if(current!=null)throw new TaskSpawn.HostFault("native owner already installed");current=new State();State state=current;TaskSpawn.sched.disposers.add(()->{try{state.retire();}finally{if(current==state)current=null;}});}
+    /** Installs a library instance's persistent registry; driver shutdown
+     * detaches it without closing its keys. */
+    public static void install(State state){TaskSpawn.sched.assertDriver();if(current!=null)throw new TaskSpawn.HostFault("native owner already installed");state.stopped.set(false);current=state;TaskSpawn.sched.disposers.add(()->{if(current==state)current=null;});}
+    public static void detach(){current=null;}
     public static void retire(){State state=current;if(state!=null)try{state.retire();}finally{if(current==state)current=null;}}
     public static void requestStop(){if(current!=null)current.stopped.set(true);}
     public static State state(){TaskSpawn.sched.assertDriver();if(current==null){install();}return current;}

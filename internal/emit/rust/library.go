@@ -58,8 +58,23 @@ func (e *emitter) library() (string, error) {
 		}
 		used[name] = true
 	}
+	abi, err := e.p.LibraryHandles(func(t *ir.Type) bool { return libraryValue(t, map[*ir.Type]bool{}) })
+	if err != nil {
+		return "", &LibraryBoundaryError{err.Error()}
+	}
+	handleElems := map[*ir.Type]bool{}
+	for _, h := range abi.Handles {
+		if reserved[h.Name] {
+			return "", &LibraryBoundaryError{fmt.Sprintf("reserved Rust public type name %s", h.Name)}
+		}
+		if used[h.Name] {
+			return "", &LibraryBoundaryError{fmt.Sprintf("duplicate Rust public type name %s", h.Name)}
+		}
+		used[h.Name] = true
+		handleElems[h.Elem] = true
+	}
 	for _, t := range e.p.Types.All {
-		if t.Kind == ir.KNamed && roots[t.Pkg] && t.U().Kind == ir.KStruct && token.IsExported(t.Obj) && libraryValue(t, map[*ir.Type]bool{}) {
+		if t.Kind == ir.KNamed && roots[t.Pkg] && t.U().Kind == ir.KStruct && token.IsExported(t.Obj) && !handleElems[t] && libraryValue(t, map[*ir.Type]bool{}) {
 			n := t.Obj
 			if reserved[n] {
 				return "", &LibraryBoundaryError{fmt.Sprintf("reserved Rust public type name %s", n)}
@@ -193,27 +208,27 @@ func (e *emitter) library() (string, error) {
 		}
 		b.WriteString("}\n")
 	}
-	for _, f := range e.p.Exports {
-		for _, t := range f.Sig.Params {
-			if sourceContext(t) {
-				continue
+	funcs := append([]*ir.Func{}, e.p.Exports...)
+	for _, h := range abi.Handles {
+		funcs = append(funcs, h.Methods...)
+	}
+	for _, f := range funcs {
+		params := f.Sig.Params
+		if f.Recv != nil {
+			params = params[1:]
+		}
+		for _, t := range params {
+			if !sourceContext(t) && abi.Handle(t) == nil {
+				convert(t)
 			}
-			if !libraryValue(t, map[*ir.Type]bool{}) {
-				return "", &LibraryBoundaryError{"unsupported Rust library parameter"}
-			}
-			convert(t)
 		}
 		for _, t := range f.Sig.Results {
-			if sourceError(t) {
-				continue
+			if !sourceError(t) && abi.Handle(t) == nil {
+				convert(t)
 			}
-			if !libraryValue(t, map[*ir.Type]bool{}) {
-				return "", &LibraryBoundaryError{"unsupported Rust library result"}
-			}
-			convert(t)
 		}
 	}
-	b.WriteString("pub use rt::{Operation, CallOptions, LibraryError, ErrorKind, Cancellation, Provider, ProviderRequest, ProviderError, HostWire, set_log_handler, LogRecord, LogHandler};\nfn source_failure(v: &V) -> LibraryError {\nif veq(v,&context_canceled()) {return LibraryError::new(ErrorKind::Canceled,\"context canceled\");}\nif veq(v,&context_deadline_exceeded()) {return LibraryError::new(ErrorKind::DeadlineExceeded,\"context deadline exceeded\");}\n")
+	b.WriteString("pub use rt::{Operation, CallOptions, LibraryError, ErrorKind, Cancellation, Provider, ProviderRequest, ProviderError, HostWire, set_log_handler, LogRecord, LogHandler, set_library_warn, WarningHandler};\nfn source_failure(v: &V) -> LibraryError {\nif veq(v,&context_canceled()) {return LibraryError::new(ErrorKind::Canceled,\"context canceled\");}\nif veq(v,&context_deadline_exceeded()) {return LibraryError::new(ErrorKind::DeadlineExceeded,\"context deadline exceeded\");}\n")
 	var errorTypes []*ir.Type
 	for _, t := range e.p.Types.All {
 		if t.Kind == ir.KPointer && t.Elem.U().Kind == ir.KStruct && libraryValue(t.Elem, map[*ir.Type]bool{}) && e.tds[t] {
@@ -238,52 +253,107 @@ func (e *emitter) library() (string, error) {
 		b.WriteString("return err.normalize_cause(); }\n")
 	}
 	b.WriteString("LibraryError::from_bytes(ErrorKind::Source,format_panic_value(v))\n}\n")
+	init := fmt.Sprintf("%s()", e.symbol(e.p.Init.Sym, "f_"))
+	if !e.p.Init.MaySuspend {
+		init = fmt.Sprintf("sync_frame(func(-1,%s,vec![]),vec![],0)", e.symbol(e.p.Init.Sym, "w_"))
+	}
+	call := func(f *ir.Func, args []string) string {
+		if !f.MaySuspend {
+			return fmt.Sprintf("sync_frame(func(-1,%s,vec![]),vec![%s],%d)", e.symbol(f.Sym, "w_"), strings.Join(args, ","), len(f.Sig.Results))
+		}
+		return fmt.Sprintf("%s(%s)", e.symbol(f.Sym, "f_"), strings.Join(args, ","))
+	}
+	owner := func(f *ir.Func, args []string, output string) string {
+		c := call(f, args)
+		return fmt.Sprintf("library_owner_call(%d, init_zero_globals, options, &inst, fresh, move |ctx| {\nlet _ = &ctx;\nif fresh { library_sequence(%s, move || %s) } else { library_call(move || %s) }\n}, |rv, inst| {\nlet _ = inst;\n%s\n})", len(e.p.Globals), init, c, c, output)
+	}
+	for _, h := range abi.Handles {
+		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close when done;\n/// dropping the last clone releases it without running Close.\n#[derive(Clone)]\npub struct %s(std::sync::Arc<rt::Handle>);\nimpl PartialEq for %s { fn eq(&self, other: &Self) -> bool { rt::Handle::same(&self.0, &other.0) } }\nimpl Eq for %s {}\nimpl std::fmt::Debug for %s { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(%q) } }\n#[allow(non_snake_case)]\nimpl %s {\n", h.Name, h.Name, h.Name, h.Name, h.Name, h.Name, h.Name)
+		b.WriteString("/// Runs the source Close, if any, and releases the handle. Queued calls fail\n/// and an active call is canceled first.\npub fn close(&self) -> Operation<()> {\n")
+		if h.Close != nil {
+			fmt.Fprintf(&b, "let h0 = Some(self.0.clone());\nlibrary_close(&self.0, move |options, inst, fresh| %s)\n}\n", owner(h.Close, []string{"library_obj(&h0)"}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
+		} else {
+			b.WriteString("library_close(&self.0, |_, _, _| Ok(()))\n}\n")
+		}
+		for _, f := range h.Methods {
+			name := ir.MethodName(f)
+			// Self is a Rust keyword that has no raw identifier form.
+			if name == "Self" {
+				name = "Self_"
+			}
+			e.libraryWrapper(&b, abi, name, h, f, typ, owner)
+		}
+		b.WriteString("}\n")
+	}
 	for _, f := range e.p.Exports {
 		name := f.Name[strings.LastIndex(f.Name, ".")+1:]
-		var ps, args []string
-		for i, t := range f.Sig.Params {
-			if sourceContext(t) {
-				args = append(args, "ctx.clone()")
-				continue
-			}
-			a := fmt.Sprintf("a%d", i)
-			ps = append(ps, a+": "+typ(t))
-			args = append(args, fmt.Sprintf("input_%s(%s)", e.names.Type(t.U(), ""), a))
-		}
-		n := len(f.Sig.Results)
-		hasError := n > 0 && sourceError(f.Sig.Results[n-1])
-		if hasError {
-			n--
-		}
-		var rs, outs []string
-		for i := 0; i < n; i++ {
-			rs = append(rs, typ(f.Sig.Results[i]))
-			outs = append(outs, fmt.Sprintf("output_%s(rv[%d].clone())", e.names.Type(f.Sig.Results[i].U(), ""), i))
-		}
-		result := "()"
-		out := "()"
-		if n == 1 {
-			result = rs[0]
-			out = outs[0]
-		} else if n > 1 {
-			result = "(" + strings.Join(rs, ",") + ")"
-			out = "(" + strings.Join(outs, ",") + ")"
-		}
-		ps = append(ps, "options: CallOptions")
-		fmt.Fprintf(&b, "pub fn %s(%s) -> Operation<%s> {\nOperation::submit(options, move |options| {\nlibrary_owner(%d, init_zero_globals, options, |ctx| {\n", name, strings.Join(ps, ","), result, len(e.p.Globals))
-		init := fmt.Sprintf("%s()", e.symbol(e.p.Init.Sym, "f_"))
-		if !e.p.Init.MaySuspend {
-			init = fmt.Sprintf("sync_frame(func(-1,%s,vec![]),vec![],0)", e.symbol(e.p.Init.Sym, "w_"))
-		}
-		call := fmt.Sprintf("%s(%s)", e.symbol(f.Sym, "f_"), strings.Join(args, ","))
-		if !f.MaySuspend {
-			call = fmt.Sprintf("sync_frame(func(-1,%s,vec![]),vec![%s],%d)", e.symbol(f.Sym, "w_"), strings.Join(args, ","), len(f.Sig.Results))
-		}
-		fmt.Fprintf(&b, "library_sequence(%s, move || %s)\n}, |rv| {\n", init, call)
-		if hasError {
-			fmt.Fprintf(&b, "if !rv[%d].is_nil() {return Err(source_failure(&rv[%d]));}\n", n, n)
-		}
-		fmt.Fprintf(&b, "Ok(%s)\n})\n})\n}\n", out)
+		e.libraryWrapper(&b, abi, name, nil, f, typ, owner)
 	}
 	return b.String(), nil
+}
+
+func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, typ func(*ir.Type) string, owner func(*ir.Func, []string, string) string) {
+	ptyp := func(t *ir.Type, param bool) string {
+		if h := abi.Handle(t); h != nil {
+			if param {
+				return "Option<&" + h.Name + ">"
+			}
+			return "Option<" + h.Name + ">"
+		}
+		return typ(t)
+	}
+	params := f.Sig.Params
+	var ps, args, hs, pre []string
+	if recv != nil {
+		params = params[1:]
+		ps = append(ps, "&self")
+		pre = append(pre, "let h0 = Some(self.0.clone());")
+		hs = append(hs, "h0.clone()")
+		args = append(args, "library_obj(&h0)")
+	}
+	for i, t := range params {
+		if sourceContext(t) {
+			args = append(args, "ctx.clone()")
+			continue
+		}
+		a := fmt.Sprintf("a%d", i)
+		ps = append(ps, a+": "+ptyp(t, true))
+		if abi.Handle(t) != nil {
+			pre = append(pre, fmt.Sprintf("let h%d = %s.map(|x| x.0.clone());", i+1, a))
+			hs = append(hs, fmt.Sprintf("h%d.clone()", i+1))
+			args = append(args, fmt.Sprintf("library_obj(&h%d)", i+1))
+			continue
+		}
+		args = append(args, fmt.Sprintf("input_%s(%s)", e.names.Type(t.U(), ""), a))
+	}
+	results := f.Sig.Results
+	n := len(results)
+	hasError := n > 0 && sourceError(results[n-1])
+	if hasError {
+		n--
+	}
+	var rs, outs []string
+	for i := 0; i < n; i++ {
+		rs = append(rs, ptyp(results[i], false))
+		if h := abi.Handle(results[i]); h != nil {
+			outs = append(outs, fmt.Sprintf("library_wrap(inst, rv[%d].clone(), %q).map(%s)", i, h.Name, h.Name))
+			continue
+		}
+		outs = append(outs, fmt.Sprintf("output_%s(rv[%d].clone())", e.names.Type(results[i].U(), ""), i))
+	}
+	result, out := "()", "()"
+	if n == 1 {
+		result, out = rs[0], outs[0]
+	} else if n > 1 {
+		result = "(" + strings.Join(rs, ",") + ")"
+		out = "(" + strings.Join(outs, ",") + ")"
+	}
+	ps = append(ps, "options: CallOptions")
+	output := ""
+	if hasError {
+		output = fmt.Sprintf("if !rv[%d].is_nil() {return Err(source_failure(&rv[%d]));}\n", n, n)
+	}
+	output += "Ok(" + out + ")"
+	fmt.Fprintf(b, "pub fn %s(%s) -> Operation<%s> {\n%s\nOperation::submit_handles(options, vec![%s], None, move |options, inst, fresh| %s)\n}\n",
+		name, strings.Join(ps, ","), result, strings.Join(pre, "\n"), strings.Join(hs, ","), owner(f, args, output))
 }

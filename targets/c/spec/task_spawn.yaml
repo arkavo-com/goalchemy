@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: b95b2428b3ab5c697525d462a523f9e704a073ab22c84388681219cb3e0bbf79
 symbol: "gx_spawn"
 implementation: runtime/task_spawn.c
-implementation_hash: eb8c4294a20a9e5aaf9ceba81c4cefdb5f75f936eb3ce7b5c0cc363bd0f3e9b4
+implementation_hash: 96906668bd5332d7e2b6c40b8d7a5ce3d9bcd60ba597735f043d7d36f75b0538
 summary: "go f(args): enqueue a new task after evaluating its callee and arguments; the parent continues."
 suspension: may
 determinism: controlled

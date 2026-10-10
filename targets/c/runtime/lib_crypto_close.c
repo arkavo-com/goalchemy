@@ -27,16 +27,21 @@ static void keys_cleanup(void) {
  EVP_PKEY_CTX_free(crypto_pc);crypto_pc=NULL;EVP_MD_CTX_free(crypto_md);crypto_md=NULL;
  EVP_CIPHER_CTX_free(crypto_cipher);crypto_cipher=NULL;EVP_PKEY_free(crypto_p);crypto_p=NULL;BIO_free(crypto_bio);crypto_bio=NULL;
  BN_free(crypto_bn1);crypto_bn1=NULL;BN_free(crypto_bn2);crypto_bn2=NULL;
- while(keys) {key_entry *k=keys;keys=k->next;EVP_PKEY_free(k->key);free(k);} }
+ if(gx_sched->keep_native) return;
+ uint64_t domain=gx_domain();key_entry **at=&keys;
+ while(*at) {key_entry *k=*at;if(k->generation!=domain){at=&k->next;continue;}*at=k->next;EVP_PKEY_free(k->key);free(k);} }
+static void keys_release_domain(uint64_t domain) {
+ key_entry **at=&keys;
+ while(*at) {key_entry *k=*at;if(k->generation!=domain){at=&k->next;continue;}*at=k->next;EVP_PKEY_free(k->key);free(k);} }
 static gx_V own_key(EVP_PKEY *p,bool priv) {
  if(!p) gx_host_fault("OpenSSL key acquisition");
  if(next_key==INT64_MAX) {EVP_PKEY_free(p);gx_host_fault("key identity exhausted");}
  key_entry *k=calloc(1,sizeof(*k));if(!k){EVP_PKEY_free(p);gx_host_fault("key registry allocation");}
- k->id=++next_key;k->generation=gx_sched->generation;k->key=p;k->private_key=priv;k->next=keys;keys=k;gx_sched->native_cleanup=keys_cleanup;return gx_int((int64_t)k->id);
+ k->id=++next_key;k->generation=gx_domain();k->key=p;k->private_key=priv;k->next=keys;keys=k;gx_sched->native_cleanup=keys_cleanup;gx_native_domain_release=keys_release_domain;return gx_int((int64_t)k->id);
 }
 static key_entry *find_key(gx_V v) {
  if(v.t!=GX_INT) return NULL;
- for(key_entry *k=keys;k;k=k->next) if(k->id==(uint64_t)gx_i(v)&&k->generation==gx_sched->generation) return k;
+ for(key_entry *k=keys;k;k=k->next) if(k->id==(uint64_t)gx_i(v)&&k->generation==gx_domain()) return k;
  return NULL;
 }
 void gx_lib_crypto_close(gx_Task *t,gx_V v) {

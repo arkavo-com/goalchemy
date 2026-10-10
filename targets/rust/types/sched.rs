@@ -218,6 +218,9 @@ pub struct Sched {
     pub seq: i64,
     pub harness: bool,
     pub owner: u64, pub active: bool, pub retiring: bool,
+    /// Identity shared by the schedulers of one library instance; native keys
+    /// created by any of its calls remain usable by later calls.
+    pub domain: u64,
     pub thread: ThreadId, pub epoch: Option<Instant>,
     pub mailbox: Arc<HostMailbox>, pub pending: BTreeMap<u64, HostPending>, pub operation: u64,
     pub contexts: Vec<V>,
@@ -244,7 +247,7 @@ impl Sched {
             timers: Vec::new(),
             seq: 0,
             harness,
-            owner, active: true, retiring: false, thread: std::thread::current().id(), epoch: None,
+            owner, domain: owner, active: true, retiring: false, thread: std::thread::current().id(), epoch: None,
             mailbox: HostMailbox::new(owner), pending: BTreeMap::new(), operation: 0,
             contexts: Vec::new(), host_roots: BTreeMap::new(),
         }

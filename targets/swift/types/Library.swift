@@ -194,3 +194,250 @@ final class GLibraryRetention {
     GLibrary.lock.unlock()
   }
 }
+
+/// Saves, restores and zeroes generated source globals.
+struct GLibraryState {
+  let reset: () -> Void
+  let save: () -> [GValue]
+  let load: ([GValue]) -> Void
+}
+/// Persistent source state behind a family of handles; guarded by GLibrary.lock.
+final class GInstance {
+  let id = UUID()
+  var live = 0
+  var poisoned = false
+  var retired = false
+  var keys: [GCryptoKey] = []
+  var objects: [ObjectIdentifier: (GHandle, GWeakHandle)] = [:]
+  func retire() {
+    if retired { return }
+    retired = true
+    GLibrary.retained[id] = nil
+    for key in keys { key.close() }
+    keys = []
+    for (handle, _) in objects.values { handle.drop() }
+    objects = [:]
+  }
+}
+final class GWeakHandle {
+  weak var value: AnyObject?
+  init(_ value: AnyObject) { self.value = value }
+}
+/// The host's reference to one source object of an instance.
+public final class GHandle {
+  let instance: GInstance
+  let value: GValue
+  let name: String
+  private var root: UUID?
+  private let state = NSLock()
+  private var isClosed = false
+  var released = false
+  var active: CancellationToken?
+  init(_ instance: GInstance, _ value: GValue, _ name: String) {
+    self.instance = instance
+    self.value = value
+    self.name = name
+    root = GHeap.retainExternal(value)
+  }
+  var closed: Bool {
+    state.lock()
+    defer { state.unlock() }
+    return isClosed
+  }
+  /// Marks the handle closed; returns false when it already was.
+  func markClosed() -> Bool {
+    state.lock()
+    defer { state.unlock() }
+    if isClosed { return false }
+    isClosed = true
+    return true
+  }
+  func drop() {
+    if let r = root { GHeap.releaseExternal(r) }
+    root = nil
+  }
+  /// Requires GLibrary.lock.
+  func release() {
+    if released { return }
+    released = true
+    if let key = GLibrary.identity(value), let entry = instance.objects[key], entry.0 === self {
+      instance.objects[key] = nil
+    }
+    drop()
+    instance.live -= 1
+    if instance.live == 0 { instance.retire() }
+  }
+}
+/// Boundary warnings such as leaked handles and abandoned goroutines.
+public func setGoalchemyWarningHandler(_ handler: ((String) -> Void)?) {
+  GLibrary.lock.lock()
+  GLibrary.warn = handler
+  GLibrary.lock.unlock()
+}
+extension GLibrary {
+  static var warn: ((String) -> Void)?
+  static func warning(_ message: String) {
+    if let w = warn { w(message) } else { FileHandle.standardError.write(Data(("goalchemy: warning: " + message + "\n").utf8)) }
+  }
+  static func identity(_ value: GValue) -> ObjectIdentifier? {
+    if case .pointer(let cell) = value { return ObjectIdentifier(cell) }
+    return nil
+  }
+  /// Returns the host wrapper for a source pointer, reusing the live wrapper of
+  /// the same pointer so host identity follows source identity. Requires lock.
+  static func wrap<W: AnyObject>(_ instance: GInstance, _ value: GValue, _ name: String, _ make: (GHandle) -> W) -> W? {
+    guard let key = identity(value) else { return nil }
+    if let (handle, weak) = instance.objects[key], !handle.closed, let w = weak.value as? W { return w }
+    let handle = GHandle(instance, value, name)
+    let w = make(handle)
+    instance.objects[key] = (handle, GWeakHandle(w))
+    instance.live += 1
+    return w
+  }
+  /// Releases a handle whose wrapper was deinitialized without close.
+  static func finalize(_ handle: GHandle) {
+    if !handle.markClosed() { return }
+    lock.lock()
+    defer { lock.unlock() }
+    if handle.released { return }
+    warning(handle.name + " handle was not closed; releasing it without running Close")
+    handle.release()
+  }
+  /// Runs one call. handles lists handle arguments, receiver first; a call with
+  /// no live handle creates a fresh owner that becomes an instance when its
+  /// results include handles. A closing call releases closing afterwards.
+  static func submitHandles<T>(
+    _ args: [GValue], _ options: CallOptions, _ state: GLibraryState, _ handles: [GHandle?],
+    _ closing: GHandle?, _ initialize: @escaping () -> GFrame,
+    _ start: @escaping ([GValue], GValue, [GValue]) -> GFrame,
+    _ decode: @escaping ([GValue], GInstance) throws -> T
+  ) -> Operation<T> {
+    lock.lock()
+    let id = UUID()
+    retained[id] = args
+    lock.unlock()
+    let held = GLibraryRetention(id)
+    let me = handles.compactMap { $0 }.first.flatMap { $0 === closing ? nil : $0 }
+    return Operation(options.cancellation) {
+      _ = held
+      if let me = me, me.closed { throw GoalchemyFailure("closed", "handle is closed") }
+      lock.lock()
+      var instance: GInstance?
+      var fresh = true
+      var keep = false
+      defer {
+        retained[id] = nil
+        if let me = me, me.active === options.cancellation { me.active = nil }
+        if let c = closing { c.release() } else if keep, let i = instance, i.live == 0 { i.retire() }
+        GHeap.collect(retained.values.flatMap { $0 })
+        lock.unlock()
+      }
+      for h in handles.compactMap({ $0 }) {
+        if h.released || (h !== closing && h.closed) || h.instance.retired {
+          throw GoalchemyFailure("closed", "handle is closed")
+        }
+        if let i = instance, i !== h.instance {
+          throw GoalchemyFailure("instance_mismatch", "handles of different instances")
+        }
+        instance = h.instance
+      }
+      fresh = instance == nil
+      let inst = instance ?? GInstance()
+      instance = inst
+      keep = !fresh
+      if inst.poisoned {
+        if closing != nil { return try decode([.nilValue], inst) }
+        throw GoalchemyFailure("poisoned", "instance is poisoned")
+      }
+      if let me = me {
+        me.active = options.cancellation
+        if me.closed { options.cancellation.cancel() }
+      }
+      if fresh { state.reset() } else { state.load(retained[inst.id] ?? []) }
+      let owner = GOwner(host: true)
+      owner.callbacks = options.callbacks
+      var pendingKeys: [GCryptoKey] = []
+      owner.retainKeys = { pendingKeys.append($0) }
+      let elem =
+        GTypes.table.firstIndex { $0.kind == "struct" && $0.fields.isEmpty }
+        ?? GNative.addPrimitive("struct {}", "struct", 0, false)
+      let context = GContext(elem)
+      context.owner = owner
+      options.cancellation.install { owner.mailbox.publish { context.cancel() } }
+      defer { options.cancellation.install(nil) }
+      if options.cancellation.isCanceled { context.cancel() }
+      if let delay = options.timeoutNanoseconds {
+        if delay <= 0 {
+          context.cancel(true)
+        } else {
+          context.timer = owner.timer(delay, retained: [.opaque(context)]) { context.cancel(true) }
+        }
+      }
+      let objects = handles.map { $0.map { $0.value } ?? .nilValue }
+      let frame = GFrame(-1)
+      frame.roots = { args + objects + [.opaque(context)] }
+      frame.pc = fresh ? 0 : 1
+      frame.step = { frame, task in
+        if frame.pc == 0 {
+          frame.pc = 1
+          return .call(initialize())
+        }
+        if frame.pc == 1 {
+          frame.pc = 2
+          return .call(start(args, .opaque(context), objects))
+        }
+        return .complete(task.rv)
+      }
+      let finish = { (failed: Bool) in
+        keep = !fresh || inst.live > 0
+        if keep {
+          inst.keys += pendingKeys
+          if !failed {
+            retained[inst.id] = state.save()
+            if owner.abandoned > 0 {
+              warning("\(owner.abandoned) goroutine(s) still running when a handle call returned were abandoned")
+            }
+          }
+        } else {
+          for key in pendingKeys { key.close() }
+        }
+      }
+      do {
+        let rv = try owner.run(frame)
+        if !fresh && options.cancellation.isCanceled {
+          finish(false)
+          throw GoalchemyFailure("canceled", "call canceled")
+        }
+        let result = try decode(rv, inst)
+        finish(false)
+        return result
+      } catch let p as GPanic {
+        finish(true)
+        if !fresh { inst.poisoned = true }
+        throw GoalchemyFailure("panic", GPanicText(p))
+      } catch let e as GFault {
+        finish(true)
+        if !fresh { inst.poisoned = true }
+        throw GoalchemyFailure("host", e.message)
+      } catch let e as GFatal {
+        finish(true)
+        if !fresh { inst.poisoned = true }
+        throw GoalchemyFailure("runtime", e.message)
+      } catch {
+        finish(false)
+        throw error
+      }
+    }
+  }
+  /// Fails calls queued on handle, cancels its active call, runs the source
+  /// Close through start when the instance is healthy, then releases it.
+  static func close(
+    _ handle: GHandle, _ state: GLibraryState, _ initialize: @escaping () -> GFrame,
+    _ start: (([GValue], GValue, [GValue]) -> GFrame)?, _ decode: @escaping ([GValue], GInstance) throws -> Void
+  ) throws {
+    if !handle.markClosed() { return }
+    handle.active?.cancel()
+    let run = start ?? { _, _, _ in GFrame.sync { [.nilValue] } }
+    try submitHandles([], CallOptions(), state, [handle], handle, initialize, run, decode).wait()
+  }
+}
