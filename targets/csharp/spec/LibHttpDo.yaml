@@ -5,7 +5,7 @@ contract_version: 1.1.0
 contract_hash: 4cf1e993d08435a42604c5f9c9480f9fd2e1ca7c071895e7fd093da0927faf9e
 symbol: "R.libHttpDo"
 implementation: runtime/LibHttpDo.cs
-implementation_hash: ffa35fdc6a49c7e20994940ee76ae77881d93651e64a230c8c6fb8b7b9e0a326
+implementation_hash: 2661c0b670e9c391a4945ec7525684a190b9958bf9ba2f0a62a025c4ab426ad6
 summary: "http.Do: one bounded HTTP GET or POST exchange that keeps TLS verification and does not follow redirects."
 suspension: may
 determinism: nondeterministic

@@ -112,7 +112,7 @@ int gcn_ecdh(void *private,void *public,uint8_t *out,size_t *size) {
 uint32_t gcn_crc32(const uint8_t *bytes,size_t n) {uLong crc=crc32(0L,Z_NULL,0);while(n){uInt chunk=n>UINT_MAX ? UINT_MAX:(uInt)n;crc=crc32(crc,bytes,chunk);bytes+=chunk;n-=chunk;}return (uint32_t)crc;}
 
 struct gcn_header { char *name;char *value;size_t sequence; };
-struct gcn_http { atomic_int canceled;uint8_t *body;size_t length,limit;struct gcn_header *headers;size_t count,header_bytes;int status;const char *error;int auto_gzip,decoded,line_status,z_active,z_done;z_stream z;uint8_t *cert,*key,*roots;size_t cert_len,key_len,roots_len;int insecure; };
+struct gcn_http { atomic_int canceled;uint8_t *body;size_t length,limit;struct gcn_header *headers;size_t count,header_bytes;int status;const char *error;int auto_gzip,decoded,line_status,z_active,z_done;z_stream z;uint8_t *cert,*key,*roots;size_t cert_len,key_len,roots_len;int insecure;char *socket; };
 gcn_http *gcn_http_create(void){gcn_http *http=calloc(1,sizeof(*http));if(http)atomic_init(&http->canceled,0);return http;}
 void gcn_http_cancel(gcn_http *http){if(http)atomic_store(&http->canceled,1);}
 static int http_progress(void *data,curl_off_t a,curl_off_t b,curl_off_t c,curl_off_t d){(void)a;(void)b;(void)c;(void)d;return atomic_load(&((gcn_http *)data)->canceled);}
@@ -184,6 +184,7 @@ int gcn_http_tls(gcn_http *http,const uint8_t *cert,size_t cert_len,const uint8_
     }
     return 1;
 }
+int gcn_http_socket(gcn_http *http,const char *path){free(http->socket);http->socket=strdup(path);return http->socket!=NULL;}
 static CURLcode http_ssl_ctx(CURL *curl,void *ssl_ctx,void *opaque){
     (void)curl;gcn_http *http=opaque;BIO *bio=BIO_new_mem_buf(http->roots,(int)http->roots_len);if(!bio)return CURLE_OUT_OF_MEMORY;
     X509_STORE *store=SSL_CTX_get_cert_store((SSL_CTX *)ssl_ctx);X509 *cert;CURLcode code=CURLE_OK;
@@ -197,7 +198,8 @@ int gcn_http_run(gcn_http *http,const char *method,const char *url,const char *c
     curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,0L);curl_easy_setopt(curl,CURLOPT_MAXREDIRS,0L);curl_easy_setopt(curl,CURLOPT_TIMEOUT_MS,(long)timeout);
     curl_easy_setopt(curl,CURLOPT_SSL_VERIFYPEER,http->insecure ? 0L:1L);curl_easy_setopt(curl,CURLOPT_SSL_VERIFYHOST,http->insecure ? 0L:2L);
     if(http->cert){struct curl_blob cert={http->cert,http->cert_len,CURL_BLOB_COPY},key={http->key,http->key_len,CURL_BLOB_COPY};curl_easy_setopt(curl,CURLOPT_SSLCERT_BLOB,&cert);curl_easy_setopt(curl,CURLOPT_SSLCERTTYPE,"PEM");curl_easy_setopt(curl,CURLOPT_SSLKEY_BLOB,&key);curl_easy_setopt(curl,CURLOPT_SSLKEYTYPE,"PEM");}
-    if(http->roots){curl_easy_setopt(curl,CURLOPT_SSL_CTX_FUNCTION,http_ssl_ctx);curl_easy_setopt(curl,CURLOPT_SSL_CTX_DATA,http);}curl_easy_setopt(curl,CURLOPT_PROTOCOLS,CURLPROTO_HTTP|CURLPROTO_HTTPS);
+    if(http->roots){curl_easy_setopt(curl,CURLOPT_SSL_CTX_FUNCTION,http_ssl_ctx);curl_easy_setopt(curl,CURLOPT_SSL_CTX_DATA,http);}
+    if(http->socket){curl_easy_setopt(curl,CURLOPT_UNIX_SOCKET_PATH,http->socket);curl_easy_setopt(curl,CURLOPT_NOPROXY,"*");}curl_easy_setopt(curl,CURLOPT_PROTOCOLS,CURLPROTO_HTTP|CURLPROTO_HTTPS);
     curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,http_body);curl_easy_setopt(curl,CURLOPT_WRITEDATA,http);curl_easy_setopt(curl,CURLOPT_HEADERFUNCTION,http_header);curl_easy_setopt(curl,CURLOPT_HEADERDATA,http);
     curl_easy_setopt(curl,CURLOPT_XFERINFOFUNCTION,http_progress);curl_easy_setopt(curl,CURLOPT_XFERINFODATA,http);curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);
     http->auto_gzip=auto_gzip;curl_easy_setopt(curl,CURLOPT_HTTP_CONTENT_DECODING,0L);
@@ -218,4 +220,4 @@ size_t gcn_http_headers(gcn_http *http){return http->count;}
 const char *gcn_http_header_name(gcn_http *http,size_t index){return http->headers[index].name;}
 const char *gcn_http_header_value(gcn_http *http,size_t index){return http->headers[index].value;}
 const char *gcn_http_error(gcn_http *http){return http->error ? http->error:"http: transport failure";}
-void gcn_http_release(gcn_http *http){if(http){http_gzip_end(http);http_clear_headers(http);free(http->body);free(http->cert);if(http->key){OPENSSL_cleanse(http->key,http->key_len);free(http->key);}free(http->roots);free(http);}}
+void gcn_http_release(gcn_http *http){if(http){http_gzip_end(http);http_clear_headers(http);free(http->body);free(http->cert);if(http->key){OPENSSL_cleanse(http->key,http->key_len);free(http->key);}free(http->roots);free(http->socket);free(http);}}

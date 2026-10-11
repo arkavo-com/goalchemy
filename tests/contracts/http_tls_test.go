@@ -174,13 +174,14 @@ func main() {
 		"default error 0 true", "explicit-false error 0 true", "root-cas 200 anonymous", "insecure 200 anonymous",
 		"other-ca error 0 true", "mtls-none error 0 true", "mtls-stranger error 0 true", "mtls-pkcs8 200 client-pkcs8",
 		"mtls-pkcs1 200 client-pkcs1", "mtls-sec1 200 client-sec1", "mtls-insecure 200 client-pkcs8",
-	})
+	}, nil)
 }
 
 // runAcrossTargets compiles program with the cooperative gate for every
 // target (or GOALCHEMY_TEST_TARGETS) and compares output with native Go,
-// whose output must contain each of lines.
-func runAcrossTargets(t *testing.T, module, program string, lines []string) {
+// whose output must contain each of lines. expect, when set, adjusts the
+// native output a target must produce.
+func runAcrossTargets(t *testing.T, module, program string, lines []string, expect func(target string, want testutil.Observation) testutil.Observation) {
 	t.Helper()
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -218,6 +219,10 @@ func runAcrossTargets(t *testing.T, module, program string, lines []string) {
 			got, err := testutil.Runners[target](out)
 			if err != nil {
 				t.Fatal(err)
+			}
+			want := want
+			if expect != nil {
+				want = expect(target, want)
 			}
 			if g := testutil.Normalize(got); g != want {
 				t.Errorf("%s differs from Go\n=== go\n%s=== %s\n%s", target, want, target, g)

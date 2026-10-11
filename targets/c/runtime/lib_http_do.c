@@ -17,7 +17,7 @@ typedef struct http_work {
  int64_t timeout_ms;uint8_t *body,*header_data;size_t body_len,header_len;
  const char *error;uint64_t status;size_t response_start;bool automatic_gzip,decoded;
  z_stream z;bool z_active,z_done;
- char *client_cert,*client_key,*root_cas;size_t client_cert_len,client_key_len,root_cas_len;bool insecure;
+ char *client_cert,*client_key,*root_cas,*unix_socket;size_t client_cert_len,client_key_len,root_cas_len;bool insecure;
 } http_work;
 static pthread_once_t curl_once=PTHREAD_ONCE_INIT;
 static CURLcode curl_init_status;
@@ -96,16 +96,17 @@ static char *http_option_copy(gx_V v) {char *p=native_alloc((size_t)v.l+1);if(!p
 /* 0 valid, 1 invalid request, 2 invalid TLS option. Copies values into w. */
 static int http_options(http_work *w,gx_V options) {
  if(options.t!=GX_SLICE||options.l%2)return 1;if(!options.l)return 0;
- static const char *names[]={"client-cert","client-key","root-cas","insecure-skip-verify"};gx_V values[4];bool seen[4]={false,false,false,false};size_t total=0;
- for(uint32_t i=0;i<options.l;i+=2){gx_V n=gx_vals(options)[i],v=gx_vals(options)[i+1];if(n.t!=GX_STR||v.t!=GX_STR)return 1;total+=(size_t)n.l+v.l;if(total>(1u<<20))return 1;int k=-1;for(int j=0;j<4;j++)if(n.l==strlen(names[j])&&!memcmp(gx_sbytes(n),names[j],n.l))k=j;if(k<0||seen[k])return 1;seen[k]=true;values[k]=v;}
+ static const char *names[]={"client-cert","client-key","root-cas","insecure-skip-verify","unix-socket"};gx_V values[5];bool seen[5]={false,false,false,false,false};size_t total=0;
+ for(uint32_t i=0;i<options.l;i+=2){gx_V n=gx_vals(options)[i],v=gx_vals(options)[i+1];if(n.t!=GX_STR||v.t!=GX_STR)return 1;total+=(size_t)n.l+v.l;if(total>(1u<<20))return 1;int k=-1;for(int j=0;j<5;j++)if(n.l==strlen(names[j])&&!memcmp(gx_sbytes(n),names[j],n.l))k=j;if(k<0||seen[k])return 1;seen[k]=true;values[k]=v;}
  if(seen[0]!=seen[1])return 1;
+ if(seen[4]){gx_V v=values[4];if(!v.l||v.l>4096||memchr(gx_sbytes(v),0,v.l))return 1;w->unix_socket=http_option_copy(v);}
  if(seen[3]){gx_V v=values[3];bool yes=v.l==4&&!memcmp(gx_sbytes(v),"true",4),no=v.l==5&&!memcmp(gx_sbytes(v),"false",5);if(!yes&&!no)return 1;w->insecure=yes;}
  if(seen[2]){if(!values[2].l||!http_pem_certs((const char *)gx_sbytes(values[2]),values[2].l,NULL))return 2;w->root_cas=http_option_copy(values[2]);w->root_cas_len=values[2].l;}
  if(seen[0]){if(!values[0].l||!values[1].l||!http_pair_valid((const char *)gx_sbytes(values[0]),values[0].l,(const char *)gx_sbytes(values[1]),values[1].l))return 2;w->client_cert=http_option_copy(values[0]);w->client_cert_len=values[0].l;w->client_key=http_option_copy(values[1]);w->client_key_len=values[1].l;}
  return 0;
 }
 static void http_options_free(http_work *w) {
- free(w->client_cert);w->client_cert=NULL;if(w->client_key){OPENSSL_cleanse(w->client_key,w->client_key_len);free(w->client_key);w->client_key=NULL;}free(w->root_cas);w->root_cas=NULL;
+ free(w->client_cert);w->client_cert=NULL;if(w->client_key){OPENSSL_cleanse(w->client_key,w->client_key_len);free(w->client_key);w->client_key=NULL;}free(w->root_cas);w->root_cas=NULL;free(w->unix_socket);w->unix_socket=NULL;
 }
 static void *http_thread(void *arg) {
  http_work *w=arg;CURL *easy=NULL;CURLM *multi=NULL;CURLcode code=CURLE_OK;bool acquisition=false;
@@ -118,6 +119,7 @@ static void *http_thread(void *arg) {
  SET(CURLOPT_FOLLOWLOCATION,0L);SET(CURLOPT_SSL_VERIFYPEER,w->insecure?0L:1L);SET(CURLOPT_SSL_VERIFYHOST,w->insecure?0L:2L);SET(CURLOPT_NOSIGNAL,1L);
  if(w->client_cert){struct curl_blob cert={w->client_cert,w->client_cert_len,CURL_BLOB_COPY},key={w->client_key,w->client_key_len,CURL_BLOB_COPY};SET(CURLOPT_SSLCERT_BLOB,&cert);SET(CURLOPT_SSLCERTTYPE,"PEM");SET(CURLOPT_SSLKEY_BLOB,&key);SET(CURLOPT_SSLKEYTYPE,"PEM");}
  if(w->root_cas){SET(CURLOPT_SSL_CTX_FUNCTION,http_ssl_ctx);SET(CURLOPT_SSL_CTX_DATA,w);}
+ if(w->unix_socket){SET(CURLOPT_UNIX_SOCKET_PATH,w->unix_socket);SET(CURLOPT_NOPROXY,"*");}
  SET(CURLOPT_PROTOCOLS,CURLPROTO_HTTP|CURLPROTO_HTTPS);SET(CURLOPT_REDIR_PROTOCOLS,CURLPROTO_HTTP|CURLPROTO_HTTPS);
  SET(CURLOPT_TIMEOUT_MS,(long)w->timeout_ms);SET(CURLOPT_CONNECTTIMEOUT_MS,(long)w->timeout_ms);SET(CURLOPT_FORBID_REUSE,1L);
  SET(CURLOPT_WRITEFUNCTION,body_write);SET(CURLOPT_WRITEDATA,w);SET(CURLOPT_HEADERFUNCTION,header_write);SET(CURLOPT_HEADERDATA,w);

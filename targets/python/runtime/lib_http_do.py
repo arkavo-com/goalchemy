@@ -66,11 +66,11 @@ class Lease:
             conn=self.connection;self.connection=None
         if conn is not None:conn.close()
 
-OPTION_NAMES={b'client-cert',b'client-key',b'root-cas',b'insecure-skip-verify'}
+OPTION_NAMES={b'client-cert',b'client-key',b'root-cas',b'insecure-skip-verify',b'unix-socket'}
 class BadTLS(Exception): pass
 def tls_context(options):
-    """Returns the SSL context for transport options, or None for defaults."""
-    if not options:return None
+    """Returns the SSL context (None for defaults) and Unix socket path (None for TCP) of transport options."""
+    if not options:return None,None
     if len(options)%2:raise Reject('invalid')
     values={};total=0
     for i in range(0,len(options),2):
@@ -79,8 +79,9 @@ def tls_context(options):
         total+=len(name)+len(value)
         if total>1<<20 or name in values or name not in OPTION_NAMES:raise Reject('invalid')
         values[name]=value
-    skip=values.get(b'insecure-skip-verify')
-    if (b'client-cert' in values)!=(b'client-key' in values) or skip not in (None,b'true',b'false'):raise Reject('invalid')
+    skip=values.get(b'insecure-skip-verify');unix=values.get(b'unix-socket')
+    if (b'client-cert' in values)!=(b'client-key' in values) or skip not in (None,b'true',b'false') or unix is not None and (not unix or len(unix)>4096 or 0 in unix):raise Reject('invalid')
+    if not values.keys()-{b'unix-socket'}:return None,unix
     ctx=ssl.create_default_context()
     try:
         if b'root-cas' in values:ctx.load_verify_locations(cadata=values[b'root-cas'].decode('ascii'))
@@ -95,7 +96,19 @@ def tls_context(options):
             finally:shutil.rmtree(directory,ignore_errors=True)
     except (ssl.SSLError,ValueError,UnicodeError) as e:raise BadTLS() from e
     if skip==b'true':ctx.check_hostname=False;ctx.verify_mode=ssl.CERT_NONE
-    return ctx
+    return ctx,unix
+def unix_connector(conn,path):
+    """Connects conn to the Unix socket at path; HTTPS still verifies conn.host."""
+    def connect():
+        sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        try:
+            if conn.timeout is not None:sock.settimeout(conn.timeout)
+            sock.connect(path)
+            if isinstance(conn,http.client.HTTPSConnection):sock=conn._context.wrap_socket(sock,server_hostname=conn.host)
+        except BaseException:
+            sock.close();raise
+        conn.sock=sock
+    return connect
 
 def lib_http_do(t,context,method,raw,headers,input,max_bytes,timeout):
     http_do(t,context,method,raw,headers,input,max_bytes,timeout,[])
@@ -135,7 +148,8 @@ def http_do(t,context,method,raw,headers,input,max_bytes,timeout,options):
         path=urllib.parse.quote(u.path or '/',safe="/%:@!$&'()*+,;=-._~")
         if u.query:path+='?'+urllib.parse.quote(u.query,safe="/%?:@!$&'()*+,;=-._~")
         hostname=u.hostname.encode('idna').decode('ascii');port=u.port
-        tls=tls_context(options)
+        tls,unix=tls_context(options)
+        if unix is not None and not hasattr(socket,'AF_UNIX'):raise Reject('invalid')
     except BadTLS:
         if boundary is not None:boundary.detach()
         t.rv=[0,NIL,BYTE_NIL,std_errors_new(b'http: invalid TLS option')];return
@@ -157,6 +171,7 @@ def http_do(t,context,method,raw,headers,input,max_bytes,timeout,options):
             try:
                 conn=http.client.HTTPSConnection(hostname,port,timeout=timeout/1000,context=tls or ssl.create_default_context()) if u.scheme=='https' else http.client.HTTPConnection(hostname,port,timeout=timeout/1000)
                 conn.response_class=Response
+                if unix is not None:conn.connect=unix_connector(conn,unix)
                 with lease.lock:lease.connection=conn
             except BaseException as e:raise HostFault('HTTP acquisition') from e
             if lease.stopped.is_set():raise OSError('canceled')

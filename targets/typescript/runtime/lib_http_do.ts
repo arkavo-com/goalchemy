@@ -24,15 +24,15 @@ function fetchURL(raw:string):string{
  if(path.split('/').some(part=>{const dots=part.replace(/%2e/ig,'.');return dots==='.'||dots==='..';}))throw new DeclaredFailure('invalid');
  return parsed.href;
 }
-const optionNames=new Set(['client-cert','client-key','root-cas','insecure-skip-verify']);
+const optionNames=new Set(['client-cert','client-key','root-cas','insecure-skip-verify','unix-socket']);
 function tlsOptions(options:string[]):HttpTLS|null{
  if(options.length===0)return null;
  if(options.length%2)throw new DeclaredFailure('invalid');
  const values=new Map<string,string>();let total=0;
  for(let i=0;i<options.length;i+=2){const n=options[i],v=options[i+1];total+=n.length+v.length;if(total>1<<20||values.has(n)||!optionNames.has(n))throw new DeclaredFailure('invalid');values.set(n,v);}
- const skip=values.get('insecure-skip-verify');
- if(values.has('client-cert')!==values.has('client-key')||(skip!==undefined&&skip!=='true'&&skip!=='false'))throw new DeclaredFailure('invalid');
- return {cert:values.get('client-cert'),key:values.get('client-key'),ca:values.get('root-cas'),insecure:skip==='true'};
+ const skip=values.get('insecure-skip-verify'),socket=values.get('unix-socket');
+ if(values.has('client-cert')!==values.has('client-key')||(skip!==undefined&&skip!=='true'&&skip!=='false')||(socket!==undefined&&(socket===''||socket.length>4096||socket.includes('\0'))))throw new DeclaredFailure('invalid');
+ return {cert:values.get('client-cert'),key:values.get('client-key'),ca:values.get('root-cas'),insecure:skip==='true',socket};
 }
 export function libHttpDo(t:Task,ctx:Context|null,method:string,url:string,headers:Slice<string>,body:Slice<number>,max:bigint,timeout:bigint):void{
  httpDo(t,ctx,method,url,headers,body,max,timeout,[]);
@@ -48,7 +48,7 @@ export function httpDo(t:Task,ctx:Context|null,method:string,url:string,headers:
   payload=bytes(body);
   tls=tlsOptions(options);
  }catch(e){if(e instanceof DeclaredFailure||e instanceof TypeError){fail(t,'http: invalid request or limit');return;}throw e;}
- if(host===undefined&&tls!==null){fail(t,'http: TLS options are not supported in browsers');return;}
+ if(host===undefined&&tls!==null){fail(t,'http: transport options are not supported in browsers');return;}
  const controller=new AbortController(),owner=sched;let expired=false;
  const stop=()=>controller.abort();const unlink=onContextCancel(ctx,stop);
  const alarm=owner.host.alarm(Number(timeout),()=>{expired=true;stop();});

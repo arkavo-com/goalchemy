@@ -402,21 +402,23 @@ names and values:
 | `http.ClientCert` and `http.ClientKey` | PEM client certificate (chain) and unencrypted private key (PKCS#8, PKCS#1 or SEC1), offered when the server asks for one (mTLS). Both or neither. |
 | `http.RootCAs` | PEM certificates trusted in addition to the system roots |
 | `http.InsecureSkipVerify` | `"true"` disables server certificate and host name verification; `"false"` is the default |
+| `http.UnixSocket` | Path of a Unix domain socket to connect to instead of the URL's host (no proxy). The URL host still sets the `Host` header and, for `https`, the server name that is verified. |
 
 Server certificates are verified unless `InsecureSkipVerify` is `"true"`.
 Odd, unknown or repeated options fail as invalid requests; certificates or
 keys that do not parse fail with `http: invalid TLS option`.
+Windows named pipes and plaintext HTTP/2 (h2c) are not available.
 
-| Target | Transport |
-| --- | --- |
-| Go | `crypto/tls` in `net/http` |
-| TypeScript (Node) | `node:https` `cert`, `key` and `ca` (with `tls.rootCertificates`) |
-| TypeScript (browser) | Not supported: any option fails with `http: TLS options are not supported in browsers` |
-| Python | `ssl.SSLContext` (`load_cert_chain` reads the credentials from a private temporary directory) |
-| Java | `SSLContext` from in-memory key and trust stores in `java.net.http.HttpClient` |
-| C# | `SocketsHttpHandler.SslOptions` with a custom-root chain check |
-| Rust | reqwest with rustls: `Identity`, merged root certificates |
-| C and Swift | libcurl certificate blobs, roots added to the OpenSSL store |
+| Target | TLS options | `UnixSocket` |
+| --- | --- | --- |
+| Go | `crypto/tls` in `net/http` | `net.Dialer` on `unix` |
+| TypeScript (Node) | `node:https` `cert`, `key` and `ca` (with `tls.rootCertificates`) | `socketPath` |
+| TypeScript (browser) | Not supported: any option fails with `http: transport options are not supported in browsers` | Not supported |
+| Python | `ssl.SSLContext` (`load_cert_chain` reads the credentials from a private temporary directory) | `AF_UNIX` socket under `http.client` (POSIX) |
+| Java | `SSLContext` from in-memory key and trust stores in `java.net.http.HttpClient` | Not supported: `HttpClient` connects only over TCP, so the option fails with `http: unix sockets are not supported on this host` |
+| C# | `SocketsHttpHandler.SslOptions` with a custom-root chain check | `ConnectCallback` with `UnixDomainSocketEndPoint` |
+| Rust | reqwest with rustls: `Identity`, merged root certificates | `ClientBuilder::unix_socket` (Unix hosts) |
+| C and Swift | libcurl certificate blobs, roots added to the OpenSSL store | `CURLOPT_UNIX_SOCKET_PATH` |
 
 ## Behavior Go leaves open
 

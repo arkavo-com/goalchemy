@@ -66,7 +66,8 @@ public final class LibHttpDo {
         }
     }
     private static final String BAD_TLS="http: invalid TLS option";
-    private static final Set<String> OPTIONS=Set.of("client-cert","client-key","root-cas","insecure-skip-verify");
+    private static final Set<String> OPTIONS=Set.of("client-cert","client-key","root-cas","insecure-skip-verify","unix-socket");
+    static final String NO_UNIX="http: unix sockets are not supported on this host";
     private static Native.Reject badTls(){return new Native.Reject(BAD_TLS);}
     private static byte[] pemBlock(String text,String label)throws Native.Reject {
         String begin="-----BEGIN "+label+"-----",end="-----END "+label+"-----";int a=text.indexOf(begin);if(a<0)return null;int b=text.indexOf(end,a);if(b<0)throw badTls();
@@ -101,8 +102,10 @@ public final class LibHttpDo {
         if(options.length==0)return null;if(options.length%2!=0)throw new Native.Reject(INVALID);
         Map<String,String> values=new HashMap<>();long total=0;
         for(int i=0;i<options.length;i+=2){total+=options[i].length()+options[i+1].length();if(total>1<<20||!OPTIONS.contains(options[i])||values.put(options[i],options[i+1])!=null)throw new Native.Reject(INVALID);}
-        String skip=values.get("insecure-skip-verify");
-        if(values.containsKey("client-cert")!=values.containsKey("client-key")||skip!=null&&!skip.equals("true")&&!skip.equals("false"))throw new Native.Reject(INVALID);
+        String skip=values.get("insecure-skip-verify"),socket=values.get("unix-socket");
+        if(values.containsKey("client-cert")!=values.containsKey("client-key")||skip!=null&&!skip.equals("true")&&!skip.equals("false")||socket!=null&&(socket.isEmpty()||socket.length()>4096||socket.indexOf(0)>=0))throw new Native.Reject(INVALID);
+        // java.net.http.HttpClient connects only over TCP.
+        if(socket!=null)throw new Native.Reject(NO_UNIX);
         try{
             javax.net.ssl.KeyManager[] keys=null;javax.net.ssl.TrustManager[] trust=null;
             if(values.containsKey("client-cert")){
@@ -141,7 +144,7 @@ public final class LibHttpDo {
             automaticGzip=!encoded;if(automaticGzip)builder.header("Accept-Encoding","gzip");
             long nanos=Math.max(1,boundary.deadline-TaskSpawn.sched.now());builder.timeout(Duration.ofNanos(nanos));builder.method(method,HttpRequest.BodyPublishers.ofByteArray(body));request=builder.build();
             tls=sslContext(options);
-        }catch(Native.Reject|URISyntaxException|IllegalArgumentException e){boundary.close();task.rv=Native.failure(ZERO,e instanceof Native.Reject r&&BAD_TLS.equals(r.getMessage())?BAD_TLS:INVALID);return;}
+        }catch(Native.Reject|URISyntaxException|IllegalArgumentException e){boundary.close();task.rv=Native.failure(ZERO,e instanceof Native.Reject r&&(BAD_TLS.equals(r.getMessage())||NO_UNIX.equals(r.getMessage()))?r.getMessage():INVALID);return;}
         TaskSpawn.HostToken token=TaskSpawn.sched.registerHost(task,lease::stop,boundary::close,
             ()->boundary.error()==null?null:new Object[]{0L,Slice.NIL,Slice.BYTE_NIL,boundary.error()},
             values->{String error=(String)values[0];if(error!=null)return Native.failure(ZERO,error);return new Object[]{(Long)values[1],Native.strings((String[])values[2]),Native.slice((byte[])values[3]),null};});
