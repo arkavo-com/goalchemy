@@ -59,6 +59,40 @@ func (a *LibraryABI) HandleResults(f *Func) bool {
 	return false
 }
 
+// ioPackage holds the std/io interfaces a host may pass as stream arguments.
+const ioPackage = "github.com/eugenioenko/goalchemy/std/io"
+
+// HostIOPackage adapts host streams to the std/io interfaces.
+const HostIOPackage = "github.com/eugenioenko/goalchemy/std/io/hostio"
+
+var streamKinds = map[string]bool{"Reader": true, "Writer": true, "ReadCloser": true, "WriteCloser": true,
+	"ReadSeeker": true, "ReadSeekCloser": true, "WriteSeeker": true, "ReadWriter": true}
+
+// StreamKind returns the std/io interface name of a host stream parameter
+// type, or "" when t is not one.
+func StreamKind(t *Type) string {
+	if t.Kind == KNamed && t.Pkg == ioPackage && streamKinds[t.Obj] {
+		return t.Obj
+	}
+	return ""
+}
+
+// StreamReads reports whether a stream kind supports Read, and so on.
+func StreamReads(kind string) bool  { return strings.Contains(kind, "Read") }
+func StreamWrites(kind string) bool { return strings.Contains(kind, "Write") }
+func StreamSeeks(kind string) bool  { return strings.Contains(kind, "Seek") }
+func StreamCloses(kind string) bool { return strings.Contains(kind, "Close") }
+
+// StreamAdapter returns the hostio function that wraps a stream id as kind.
+func (p *Program) StreamAdapter(kind string) *Func {
+	for _, f := range p.Funcs {
+		if f.Pkg == HostIOPackage && f.Recv == nil && f.Name == "hostio."+kind {
+			return f
+		}
+	}
+	return nil
+}
+
 // MethodName returns the source method name of a handle method.
 func MethodName(f *Func) string { return f.Name[strings.LastIndex(f.Name, ".")+1:] }
 
@@ -99,7 +133,7 @@ func (p *Program) LibraryHandles(value func(*Type) bool) (*LibraryABI, error) {
 			return fmt.Errorf("variadic source parameters are unsupported")
 		}
 		for _, t := range params {
-			if !isContext(t) && !crosses(t) {
+			if !isContext(t) && !crosses(t) && (StreamKind(t) == "" || p.StreamAdapter(StreamKind(t)) == nil) {
 				return fmt.Errorf("unsupported parameter %s", t.Name)
 			}
 		}
@@ -119,7 +153,7 @@ func (p *Program) LibraryHandles(value func(*Type) bool) (*LibraryABI, error) {
 		}
 		ok := func(t *Type) bool { return value(t) || isHandleShape(t, roots) }
 		for _, t := range f.Sig.Params[1:] {
-			if !isContext(t) && !ok(t) {
+			if !isContext(t) && !ok(t) && (StreamKind(t) == "" || p.StreamAdapter(StreamKind(t)) == nil) {
 				return false
 			}
 		}
@@ -173,4 +207,26 @@ func isHandleShape(t *Type, roots map[string]bool) bool {
 	}
 	e := t.Elem
 	return e.Kind == KNamed && roots[e.Pkg] && token.IsExported(e.Obj) && e.U().Kind == KStruct
+}
+
+// StreamParam returns the std/io interface name of the first host stream
+// parameter of an export or exported root method, or "".
+func (p *Program) StreamParam() string {
+	roots := map[string]bool{}
+	for _, pkg := range p.Packages {
+		if pkg.Root {
+			roots[pkg.Path] = true
+		}
+	}
+	for _, f := range p.Funcs {
+		if !roots[f.Pkg] || !token.IsExported(MethodName(f)) {
+			continue
+		}
+		for _, t := range f.Sig.Params {
+			if k := StreamKind(t); k != "" {
+				return k
+			}
+		}
+	}
+	return ""
 }

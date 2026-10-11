@@ -219,11 +219,15 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 		if h := e.abi.Handle(t); h != nil {
 			return "*" + h.Name
 		}
+		if k := ir.StreamKind(t); k != "" {
+			return "io." + k
+		}
 		return e.typ(t)
 	}
 	ps := []string{"ctx context.Context"}
 	as := []string{}
 	handles := []string{}
+	streams := []string{}
 	if recv != nil {
 		handles = append(handles, "x.h")
 		as = append(as, "rt.Obj["+e.typ(recv.Ptr)+"](x.h)")
@@ -238,6 +242,11 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 		if h := e.abi.Handle(t); h != nil {
 			handles = append(handles, a+".handle()")
 			as = append(as, "rt.Obj["+e.typ(t)+"]("+a+".handle())")
+			continue
+		}
+		if k := ir.StreamKind(t); k != "" {
+			as = append(as, fmt.Sprintf("func() %s { if ids[%d] == 0 { return nil }; return %s(ids[%d]) }()", e.typ(t), len(streams), e.names.Symbol(e.p.StreamAdapter(k).Sym), len(streams)))
+			streams = append(streams, "rt.HostStream("+a+")")
 			continue
 		}
 		as = append(as, a)
@@ -255,10 +264,15 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 		e.p_("func %s(%s) (%s) {\n", name, strings.Join(ps, ", "), strings.Join(rs, ", "))
 	}
 	for i, t := range params {
-		if !sourceContext(t) && e.abi.Handle(t) == nil {
+		if !sourceContext(t) && e.abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 			e.p_("a%d = rt.Snapshot(a%d)\n", i, i)
 		}
 	}
+	streamList := "nil"
+	if len(streams) > 0 {
+		streamList = "[]rt.Callback{" + strings.Join(streams, ", ") + "}"
+	}
+	e.p_("ids := make([]int64, %d)\n_ = ids\n", len(streams))
 	e.p_("var registry Callbacks\nif len(callbacks)>1 { return %s }\nif len(callbacks)==1 { registry=callbacks[0] }\n", libraryErrorReturn(n, "&LibraryError{Kind: \"invalid_callbacks\"}"))
 	handleList := "nil"
 	if len(handles) > 0 {
@@ -275,7 +289,7 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 	if hasError {
 		e.p_("if rv[%d]!=nil { owned[%d]=rt.SnapshotError(rv[%d].(error)) }\n", n, n, n)
 	}
-	e.p_("return owned\n})\n")
+	e.p_("return owned\n}, %s, ids)\n", streamList)
 	e.p_("if runErr != nil { return %s }\n_ = rv\n", libraryErrorReturn(n, "runErr"))
 	for i := 0; i < n; i++ {
 		e.p_("r%d = rv[%d].(%s)\n", i, i, publicType(results[i]))

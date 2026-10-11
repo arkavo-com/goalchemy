@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"go/token"
+	"go/types"
 	"go/version"
 	"os"
 	"sort"
@@ -93,6 +94,26 @@ func Load(ctx context.Context, opts Options) (*Program, []diagnostics.Diagnostic
 			Remedy: "Provide a package pattern that matches Go source files."})
 		return prog, ds
 	}
+	// Library exports may take std/io streams from the host; their adapter is
+	// source, loaded with the roots so it shares their std/io types.
+	var hostIO *packages.Package
+	if needsHostIO(roots) {
+		all, err := packages.Load(cfg, append(append([]string{}, patterns...), HostIOPackage)...)
+		if err == nil {
+			var kept []*packages.Package
+			var extra []*packages.Package
+			for _, r := range all {
+				if r.PkgPath == HostIOPackage {
+					extra = append(extra, r)
+				} else {
+					kept = append(kept, r)
+				}
+			}
+			if len(kept) == len(roots) && len(extra) == 1 {
+				roots, hostIO = kept, extra[0]
+			}
+		}
+	}
 	prog.Roots = roots
 	external := opts.External
 	if external == nil {
@@ -126,6 +147,9 @@ func Load(ctx context.Context, opts Options) (*Program, []diagnostics.Diagnostic
 	for _, r := range roots {
 		visit(r)
 	}
+	if hostIO != nil {
+		visit(hostIO)
+	}
 	for _, p := range prog.Source {
 		ds = append(ds, packageErrors(p)...)
 		ds = append(ds, languageVersion(fset, p)...)
@@ -140,6 +164,50 @@ func Load(ctx context.Context, opts Options) (*Program, []diagnostics.Diagnostic
 	}
 	diagnostics.Sort(ds)
 	return prog, diagnostics.Dedup(ds)
+}
+
+// HostIOPackage adapts host streams passed as std/io export parameters.
+const HostIOPackage = "github.com/eugenioenko/goalchemy/std/io/hostio"
+
+const ioPackage = "github.com/eugenioenko/goalchemy/std/io"
+
+// needsHostIO reports whether an exported function or method of a library
+// root takes a std/io interface parameter.
+func needsHostIO(roots []*packages.Package) bool {
+	usesIO := func(sig *types.Signature) bool {
+		for i := 0; i < sig.Params().Len(); i++ {
+			if n, ok := sig.Params().At(i).Type().(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == ioPackage {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range roots {
+		if r.Name == "main" || r.Types == nil || r.Imports[ioPackage] == nil {
+			continue
+		}
+		scope := r.Types.Scope()
+		for _, name := range scope.Names() {
+			switch obj := scope.Lookup(name).(type) {
+			case *types.Func:
+				if obj.Exported() && usesIO(obj.Signature()) {
+					return true
+				}
+			case *types.TypeName:
+				if !obj.Exported() {
+					continue
+				}
+				if n, ok := obj.Type().(*types.Named); ok {
+					for i := 0; i < n.NumMethods(); i++ {
+						if m := n.Method(i); m.Exported() && usesIO(m.Signature()) {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func isSource(p *packages.Package) bool {
