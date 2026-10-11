@@ -7,13 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"testing"
 )
-
-// streamTargets are the targets that implement lib/http exchanges.
-const streamTargets = "go,typescript,python"
 
 const streamSize = 96 << 20
 
@@ -30,13 +26,10 @@ func streamPattern(n int) []byte {
 }
 
 // TestHTTPStreams sends and receives bodies larger than lib/http.MaxBytes
-// through std/http on every target that has exchanges: a request body from
+// through std/http on every target: a request body from
 // an io.Reader with a known and an unknown length, and a response body
 // relayed as the next request's body. The server checks the bytes.
 func TestHTTPStreams(t *testing.T) {
-	if os.Getenv("GOALCHEMY_TEST_TARGETS") == "" {
-		t.Setenv("GOALCHEMY_TEST_TARGETS", streamTargets)
-	}
 	data := streamPattern(streamSize)
 	sum := sha256.Sum256(data)
 	want := hex.EncodeToString(sum[:])
