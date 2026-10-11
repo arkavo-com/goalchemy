@@ -29,6 +29,7 @@ jobs:
           - {name: Language and corpus (C), suite: language, target: c}
           - {name: Language and corpus (Swift), suite: language, target: swift}
           - {name: Native contracts and browser, suite: contracts}
+          - {name: HTTP contracts all targets, suite: contracts, shard: 1}
           - {name: Integration 1 of 4, suite: integration, shard: 0}
           - {name: Integration 2 of 4, suite: integration, shard: 1}
           - {name: Integration 3 of 4, suite: integration, shard: 2}

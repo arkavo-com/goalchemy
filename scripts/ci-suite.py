@@ -113,7 +113,10 @@ def plan(suite, shard, target=None):
             commands.append(['go', 'test', '-v', '-timeout', '15m', './tests/language',
                              '-run', '^TestFeatureManifest$', '-count=1'])
     elif suite == 'contracts':
-        commands = [['go', 'test', '-short', '-v', '-timeout', '30m', *SPECIAL_PACKAGES[suite]]]
+        if shard not in (0, 1):
+            raise ValueError('contracts shard must be 0 or 1')
+        selection = ['-skip', '^TestHTTP'] if shard == 0 else ['-run', '^TestHTTP']
+        commands = [['go', 'test', '-short', '-v', '-timeout', '30m', *selection, *SPECIAL_PACKAGES[suite]]]
     elif suite == 'integration':
         selected = integration_shard(shard)
         pattern = '^(?:' + '|'.join(re.escape(name) for name in selected) + ')$'
