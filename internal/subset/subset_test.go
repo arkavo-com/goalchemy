@@ -73,7 +73,7 @@ func check(t *testing.T, name string) []string {
 }
 
 func TestFixtures(t *testing.T) {
-	for _, name := range []string{"accept", "reject_types", "reject_stmts", "reject_imports", "reject_generic", "reject_elem", "reject_json"} {
+	for _, name := range []string{"accept", "reject_types", "reject_stmts", "reject_imports", "reject_generic", "reject_elem", "reject_json", "library_globals", "executable_globals"} {
 		t.Run(name, func(t *testing.T) {
 			want := expectations(t, filepath.Join("testdata", name))
 			got := check(t, name)

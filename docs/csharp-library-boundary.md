@@ -28,7 +28,8 @@ results before executable root cleanup clears task.rv. Results and nested error
 fields are copied while the owner lives. Shutdown waits all native cleanup ACKs,
 then clears source globals, field-reference caches, callback registrations and
 native keys while the entry guard remains active. No source reference escapes
-the public value boundary.
+the public value boundary. Calls on [handles](library-handles.md) use their
+instance's globals instead. See [package variables in libraries](usage.md#package-variables-in-libraries).
 
 `Operation<T>.Completion` is a Task; `Cancel()` requests cancellation and a
 CancellationToken can be supplied in Options. Queued cancellation does no source

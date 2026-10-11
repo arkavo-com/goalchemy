@@ -38,6 +38,7 @@ hooks; nested values are copied recursively before queueing. Outputs and public
 structured source errors are copied while the source owner is live. Each call
 freshly initializes its globals; cleanup precedes reset and release. Retained
 fixed-global-array slices and errors remain valid across overlapping calls.
+Calls on [handles](library-handles.md) use their instance's globals instead. See [package variables in libraries](usage.md#package-variables-in-libraries).
 
 The optional final CallOptions has AbortSignal and a copied, scoped callback
 registry. Queued cancellation removes that reservation. Active cancellation

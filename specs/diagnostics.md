@@ -10,6 +10,7 @@ Goalchemy diagnostics have stable codes, severity, source location where availab
 | `GCI` | Intermediate representation | Lowering or IR verification failed. |
 | `GCE` | Emission | A target lacks a required operation, type representation, or runtime dependency. |
 | `GCT` | Conformance | A generated program or runtime operation differs from its contract. |
+| `GCW` | Warning | Code compiles and runs but likely does not do what it appears to; the build continues. |
 
 The initial checker reserves `GCL001`–`GCL004` and `GCS001`–`GCS010`. Later phases allocate codes from the remaining categories when their corresponding checks exist. A diagnostic code's meaning must not change silently between releases.
 

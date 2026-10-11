@@ -39,6 +39,7 @@ func runBuild(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		_ = diagnostics.Write(stderr, ds, *asJSON)
 		return 1
 	}
+	writeWarnings(stderr, ds, *asJSON)
 	for _, t := range cfg.TargetNames() {
 		out := cfg.OutDir(t)
 		if err := os.MkdirAll(out, 0o755); err != nil {
@@ -71,6 +72,7 @@ func runRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		_ = diagnostics.Write(stderr, ds, sf.json)
 		return 1
 	}
+	writeWarnings(stderr, ds, sf.json)
 	out, err := os.MkdirTemp("", "goalchemy-run-")
 	if err != nil {
 		fmt.Fprintln(stderr, err)

@@ -70,6 +70,7 @@ func Check(prog *frontend.Program, opts Options) []diagnostics.Diagnostic {
 			c.file(f)
 		}
 	}
+	c.out = append(c.out, libraryGlobals(prog)...)
 	diagnostics.Sort(c.out)
 	return diagnostics.Dedup(c.out)
 }

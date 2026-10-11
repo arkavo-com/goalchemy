@@ -109,12 +109,11 @@ package-variable dependency ordering and `init()` functions in its central
 initialization routine. Splitting generated code into files does not remove
 those effects.
 
-The SDK-capable library boundary creates fresh source state and runs package
-initialization once per operation. An expensive initializer or externally
-visible side effect therefore repeats across calls. This differs from a native
-Go process, which initializes its packages once at startup. Consult the target's
-library-boundary documentation for its lifecycle; the legacy sequential C
-scalar/string API uses an explicit `goalchemy_init()` call.
+In a library, package initialization runs once per call of a function without
+handles and once per handle instance, rather than once at process startup, so
+an expensive initializer or externally visible side effect repeats. See
+[package variables in libraries](#package-variables-in-libraries); the legacy
+sequential C scalar/string API uses an explicit `goalchemy_init()` call.
 
 ## Output
 
@@ -162,6 +161,45 @@ use maintained locked crates; see [Rust TDF3 delivery](../../sdk/docs/generated-
 Unsupported public value shapes on supported value-library targets fail with `GCE007`.
 Libraries can also return stateful [handles](library-handles.md): pointers
 to exported structs with methods.
+
+#### Package variables in libraries
+
+Package variables in a library do not live for the process, as they do in a Go
+program. Each call runs against one set of them:
+
+- A call of an exported function that neither receives nor returns a
+  [handle](library-handles.md) or a source stream starts from fresh package
+  variables, runs package initialization, and discards the variables when it
+  returns. Nothing it writes to a package variable is seen by a later call.
+- The call that creates a handle starts an instance with fresh package
+  variables. The instance keeps them: each later call on its handles loads
+  them, runs, and saves them, until the last handle is released. Instances
+  never share package variables.
+
+Calls are serialized across the whole library, so this is what makes package
+variables safe to use from several host threads without locks. State that must
+outlive a call, such as a cache or a connection, belongs in a handle: a struct
+returned by pointer from a constructor, or a package variable used by its
+methods.
+
+The compiler warns (`GCW001`) when a call of an export without handles writes a
+package variable after initialization: it assigns it, or writes through an
+index, field or pointer, or calls a pointer method on it. Reads, writes during
+package initialization, and writes from handle methods and constructors are not
+reported, nor are executables.
+
+```go
+var cache = map[string][]byte{}
+
+func Fetch(url string) []byte {
+	if v, ok := cache[url]; ok {
+		return v // never hit: each Fetch call starts with an empty cache
+	}
+	body := download(url)
+	cache[url] = body // warning GCW001
+	return body
+}
+```
 
 C aggregate or suspending exports emit `goalchemy.h`, `main.c`, `rt/` and
 `build.sh`, producing `libgoalchemy.a`. The owned `gxc_value` API recursively
