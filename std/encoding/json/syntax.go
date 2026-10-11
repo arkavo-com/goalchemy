@@ -45,6 +45,12 @@ func (f *fault) syntaxError(pos int) *SyntaxError {
 		return &SyntaxError{"exceeded max depth", int64(pos + 1)}
 	}
 	msg := strings.TrimSuffix("invalid "+f.label+" "+quoteWhat(f.what)+" "+f.where, " ")
+	return &SyntaxError{legacyMessage(msg), int64(pos + len(f.what))}
+}
+
+// legacyMessage rewords an encoding/json/jsontext error message the way
+// encoding/json reports it.
+func legacyMessage(msg string) string {
 	if i := strings.Index(msg, " (expecting"); i >= 0 && !strings.Contains(msg, " in literal") {
 		msg = msg[:i]
 	}
@@ -53,7 +59,7 @@ func (f *fault) syntaxError(pos int) *SyntaxError {
 		{"in number", "in numeric literal"}} {
 		msg = strings.ReplaceAll(msg, r[0], r[1])
 	}
-	return &SyntaxError{msg, int64(pos + len(f.what))}
+	return msg
 }
 
 func (f *fault) atStart() error {

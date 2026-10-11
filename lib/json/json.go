@@ -7,8 +7,10 @@
 package json
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 )
 
@@ -46,7 +48,110 @@ func MarshalIndent(v any, prefix, indent string) ([]byte, int, string, string, s
 // message, and the underlying error, so std/encoding/json can rebuild its
 // own error values. Errors returned by methods of v are passed through.
 func Unmarshal(data []byte, v any) (int, string, string, int64, string, string, string, error) {
-	err := json.Unmarshal(data, v)
+	return classifyUnmarshal(json.Unmarshal(data, v))
+}
+
+// MarshalStream returns the encoding of v that an Encoder with the given
+// HTML escaping writes, without the trailing newline.
+func MarshalStream(v any, escapeHTML bool) ([]byte, int, string, string, string, int64, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(escapeHTML)
+	if err := enc.Encode(v); err != nil {
+		return classify(nil, err)
+	}
+	return classify(bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil)
+}
+
+// UnmarshalStream decodes one complete JSON value read by a Decoder into v
+// with the Decoder's options, reporting failures as Unmarshal does. With
+// useNumber, numbers stored in interfaces are converted by number to the
+// caller's Number type.
+func UnmarshalStream(data []byte, v any, useNumber, disallowUnknown bool, number func(string) any) (int, string, string, int64, string, string, string, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if useNumber {
+		dec.UseNumber()
+	}
+	if disallowUnknown {
+		dec.DisallowUnknownFields()
+	}
+	err := dec.Decode(v)
+	if useNumber {
+		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && !rv.IsNil() {
+			convertNumbers(rv.Elem(), number, map[visit]bool{})
+		}
+	}
+	return classifyUnmarshal(err)
+}
+
+var numberType = reflect.TypeFor[json.Number]()
+
+type visit struct {
+	p uintptr
+	n int
+	t reflect.Type
+}
+
+func convertNumbers(v reflect.Value, number func(string) any, seen map[visit]bool) {
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return
+		}
+		e := v.Elem()
+		if e.Type() == numberType {
+			if v.CanSet() {
+				v.Set(reflect.ValueOf(number(e.String())))
+			}
+			return
+		}
+		c := reflect.New(e.Type()).Elem()
+		c.Set(e)
+		convertNumbers(c, number, seen)
+		if v.CanSet() {
+			v.Set(c)
+		}
+	case reflect.Pointer, reflect.Map, reflect.Slice:
+		if v.IsNil() || !v.CanInterface() {
+			return
+		}
+		key := visit{v.Pointer(), 0, v.Type()}
+		if v.Kind() == reflect.Slice {
+			key.n = v.Len()
+		}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		switch v.Kind() {
+		case reflect.Pointer:
+			convertNumbers(v.Elem(), number, seen)
+		case reflect.Slice:
+			for i := 0; i < v.Len(); i++ {
+				convertNumbers(v.Index(i), number, seen)
+			}
+		case reflect.Map:
+			for _, k := range v.MapKeys() {
+				c := reflect.New(v.Type().Elem()).Elem()
+				c.Set(v.MapIndex(k))
+				convertNumbers(c, number, seen)
+				v.SetMapIndex(k, c)
+			}
+		}
+	case reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			convertNumbers(v.Index(i), number, seen)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if f := v.Type().Field(i); f.IsExported() || f.Anonymous {
+				convertNumbers(v.Field(i), number, seen)
+			}
+		}
+	}
+}
+
+func classifyUnmarshal(err error) (int, string, string, int64, string, string, string, error) {
 	if err == nil {
 		return OK, "", "", 0, "", "", "", nil
 	}

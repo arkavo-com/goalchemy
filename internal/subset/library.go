@@ -43,6 +43,9 @@ func (c *checker) libraryCall(n *ast.CallExpr, fun ast.Expr) {
 	case isJSONMarshal(fn):
 		c.called[id] = true
 		c.jsonMarshal(n, fn)
+	case isJSONStream(fn):
+		c.called[id] = true
+		c.jsonStream(n, fn)
 	case fn.Pkg().Path() == fmtPackage && fn.Signature().Variadic() && !n.Ellipsis.IsValid():
 		params := fn.Signature().Params()
 		for _, a := range n.Args[min(params.Len()-1, len(n.Args)):] {
@@ -103,11 +106,40 @@ func (c *checker) deferredIntrinsic(call *ast.CallExpr, stmt string) {
 	if name, ok := catalog.JSONMarshal(c.info.Uses[id]); ok {
 		c.unsupported(call, "GCS006", stmt+" json."+name, "Call json."+name+" directly and use its results.")
 	}
+	if name, ok := catalog.JSONStream(c.info.Uses[id]); ok {
+		c.unsupported(call, "GCS006", stmt+" "+jsonStreamName(name), "Call "+jsonStreamName(name)+" directly and use its result.")
+	}
 }
 
 func isJSONMarshal(obj types.Object) bool {
 	_, ok := catalog.JSONMarshal(obj)
 	return ok
+}
+
+func isJSONStream(obj types.Object) bool {
+	_, ok := catalog.JSONStream(obj)
+	return ok
+}
+
+func jsonStreamName(method string) string {
+	if method == "Encode" {
+		return "json.Encoder.Encode"
+	}
+	return "json.Decoder.Decode"
+}
+
+// jsonStream checks Encoder.Encode operands as json.Marshal operands and
+// Decoder.Decode targets as json.Unmarshal targets.
+func (c *checker) jsonStream(n *ast.CallExpr, fn *types.Func) {
+	if c.pkg.PkgPath == catalog.JSONPackage {
+		return
+	}
+	name := jsonStreamName(fn.Name())
+	if fn.Name() == "Decode" {
+		c.jsonUnmarshal(n.Args[0], name)
+		return
+	}
+	c.jsonOperand(n.Args[0], name)
 }
 
 const jsonDynamicRemedy = "Pass the value to json.Marshal directly or through a field of its own type, or build dynamic JSON with jsonvalue.Value."
@@ -130,27 +162,31 @@ func (c *checker) jsonMarshal(n *ast.CallExpr, fn *types.Func) {
 		return
 	}
 	if fn.Name() == "Unmarshal" {
-		c.jsonUnmarshal(n.Args[1])
+		c.jsonUnmarshal(n.Args[1], name)
 		return
 	}
-	tv := c.info.Types[n.Args[0]]
+	c.jsonOperand(n.Args[0], name)
+}
+
+func (c *checker) jsonOperand(arg ast.Expr, name string) {
+	tv := c.info.Types[arg]
 	if tv.Type == nil || tv.IsNil() {
 		return
 	}
 	if !types.IsInterface(tv.Type) {
 		if p := jsontype.Check(tv.Type); p != nil {
-			c.report(n.Args[0], "GCS006", name+" operand", name+" cannot encode "+p.Path+": "+p.Msg,
+			c.report(arg, "GCS006", name+" operand", name+" cannot encode "+p.Path+": "+p.Msg,
 				"Give the field a supported type, implement json.Marshaler, or exclude it with a `json:\"-\"` tag.")
 			return
 		}
 	}
-	c.jsonLiteral(n.Args[0])
+	c.jsonLiteral(arg)
 }
 
 // jsonUnmarshal checks that an Unmarshal target decodes exactly as with
 // encoding/json: a pointer whose reachable types the compiler can describe,
 // or an interface whose visibly stored value std/encoding/json can decode.
-func (c *checker) jsonUnmarshal(target ast.Expr) {
+func (c *checker) jsonUnmarshal(target ast.Expr, name string) {
 	tv := c.info.Types[target]
 	if tv.Type == nil || tv.IsNil() {
 		return
@@ -159,9 +195,9 @@ func (c *checker) jsonUnmarshal(target ast.Expr) {
 		if call, ok := ast.Unparen(target).(*ast.CallExpr); ok {
 			if ft := c.info.Types[call.Fun]; ft.IsType() && len(call.Args) == 1 {
 				if at := c.info.TypeOf(call.Args[0]); at != nil && !types.IsInterface(at) && !jsontype.DynamicDecode(at) {
-					c.report(call.Args[0], "GCS006", "json.Unmarshal target in an interface",
-						"json.Unmarshal cannot decode into a "+typeName(at)+" stored in an interface",
-						"Pass the pointer to json.Unmarshal directly, without converting it to an interface.")
+					c.report(call.Args[0], "GCS006", name+" target in an interface",
+						name+" cannot decode into a "+typeName(at)+" stored in an interface",
+						"Pass the pointer to "+name+" directly, without converting it to an interface.")
 				}
 			}
 		}
@@ -169,13 +205,13 @@ func (c *checker) jsonUnmarshal(target ast.Expr) {
 	}
 	p, ok := tv.Type.Underlying().(*types.Pointer)
 	if !ok {
-		c.report(target, "GCS006", "json.Unmarshal target",
-			"json.Unmarshal target of static type "+typeName(tv.Type)+" is not a pointer",
+		c.report(target, "GCS006", name+" target",
+			name+" target of static type "+typeName(tv.Type)+" is not a pointer",
 			"Pass a pointer, such as &value.")
 		return
 	}
 	if prob := jsontype.CheckDecode(p.Elem()); prob != nil {
-		c.report(target, "GCS006", "json.Unmarshal target", "json.Unmarshal cannot decode "+prob.Path+": "+prob.Msg,
+		c.report(target, "GCS006", name+" target", name+" cannot decode "+prob.Path+": "+prob.Msg,
 			"Give the field a supported type, implement json.Unmarshaler, or exclude it with a `json:\"-\"` tag.")
 	}
 }

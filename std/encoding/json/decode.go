@@ -119,27 +119,39 @@ func (n *Number) UnmarshalJSON(data []byte) error {
 }
 
 type decodeState struct {
-	data []byte
-	off  int
-	err  error
-	path []string
-	root string
+	data            []byte
+	off             int
+	err             error
+	path            []string
+	root            string
+	useNumber       bool
+	disallowUnknown bool
+	checked         bool
 }
 
 func unmarshalTyped(data []byte, p any, t *typeInfo, isNil bool, root string) error {
+	return (&decodeState{data: data, root: root}).typed(p, t, isNil)
+}
+
+func (d *decodeState) typed(p any, t *typeInfo, isNil bool) error {
 	if isNil {
 		return &InvalidUnmarshalError{"*" + t.name}
 	}
-	if err := checkDecodeInput(data); err != nil {
-		return err
+	if !d.checked {
+		if err := checkDecodeInput(d.data); err != nil {
+			return err
+		}
 	}
-	d := &decodeState{data: data, root: root}
 	d.skipSpace()
 	d.value(p, t, false)
 	return d.err
 }
 
 func unmarshalAny(data []byte, v any) error {
+	return (&decodeState{data: data}).dynamic(v)
+}
+
+func (d *decodeState) dynamic(v any) error {
 	if v == nil {
 		return &InvalidUnmarshalError{}
 	}
@@ -153,8 +165,10 @@ func unmarshalAny(data []byte, v any) error {
 	if !decodableDynamic(v) {
 		return &UnsupportedTypeError{name}
 	}
-	if err := checkDecodeInput(data); err != nil {
-		return err
+	if !d.checked {
+		if err := checkDecodeInput(d.data); err != nil {
+			return err
+		}
 	}
 	root := name[1:]
 	if strings.ContainsAny(root, "[]{}() *") {
@@ -162,7 +176,7 @@ func unmarshalAny(data []byte, v any) error {
 	} else if i := strings.LastIndexByte(root, '.'); i >= 0 {
 		root = root[i+1:]
 	}
-	d := &decodeState{data: data, root: root}
+	d.root = root
 	d.skipSpace()
 	d.dynamicPointer(v)
 	return d.err
@@ -672,6 +686,9 @@ func (d *decodeState) object(p any, t *typeInfo) {
 		}
 		if fi < 0 {
 			d.skip()
+			if d.disallowUnknown {
+				d.save(errors.New("json: unknown field " + strconv.Quote(name)))
+			}
 		} else {
 			f := t.fields[fi]
 			fp := f.addr(p)
@@ -937,6 +954,9 @@ func (d *decodeState) anyValue() any {
 	}
 	start, end := d.skip()
 	s := string(d.data[start:end])
+	if d.useNumber {
+		return Number(s)
+	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		d.save(d.typeError("number "+s, "float64", end, nil))
