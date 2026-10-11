@@ -39,7 +39,6 @@ func (e *emitter) library() (string, error) {
 	e.use("std.context.err")
 	var b strings.Builder
 	b.WriteString("export { LibraryError } from './rt/runtime/library.ts';\nexport type { CallOptions, Callback, Settlement } from './rt/runtime/library.ts';\nexport { setLogHandler } from './rt/types/log.ts';\nexport type { LogRecord, LogHandler } from './rt/types/log.ts';\n")
-	b.WriteString("export { SourceStream } from './rt/runtime/library.ts';\nexport type { SourceReader, SourceWriter, SourceSeeker, SourceCloser } from './rt/runtime/library.ts';\n")
 	abi, err := e.p.LibraryHandles(func(t *ir.Type) bool { return libraryValue(t, map[*ir.Type]bool{}) })
 	if err != nil {
 		return "", err
@@ -49,8 +48,13 @@ func (e *emitter) library() (string, error) {
 		roots[f.Pkg] = true
 	}
 	names := map[*ir.Type]string{}
-	used := map[string]bool{"LibraryError": true, "CallOptions": true, "Callback": true, "LogRecord": true, "LogHandler": true,
-		"SourceStream": true, "SourceReader": true, "SourceWriter": true, "SourceSeeker": true, "SourceCloser": true}
+	used := map[string]bool{"LibraryError": true, "CallOptions": true, "Callback": true, "LogRecord": true, "LogHandler": true}
+	if libraryStreams(e.p, abi) {
+		b.WriteString("export { SourceStream } from './rt/runtime/library.ts';\nexport type { SourceReader, SourceWriter, SourceSeeker, SourceCloser } from './rt/runtime/library.ts';\n")
+		for _, n := range []string{"SourceStream", "SourceReader", "SourceWriter", "SourceSeeker", "SourceCloser"} {
+			used[n] = true
+		}
+	}
 	handleElems := map[*ir.Type]bool{}
 	for _, h := range abi.Handles {
 		if used[h.Name] {
@@ -484,5 +488,16 @@ func streamType(ops ir.StreamOps) string {
 	if ops.Seek {
 		parts = append(parts, "rt.SourceSeeker")
 	}
-	return strings.Join(append(parts, "rt.SourceCloser"), " & ")
+	return strings.Join(append(parts, "rt.SourceCloser", "AsyncDisposable"), " & ")
+}
+
+// libraryStreams reports whether a library returns std/io streams or has
+// handles usable as streams.
+func libraryStreams(p *ir.Program, abi *ir.LibraryABI) bool {
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			return true
+		}
+	}
+	return p.StreamResult() != ""
 }

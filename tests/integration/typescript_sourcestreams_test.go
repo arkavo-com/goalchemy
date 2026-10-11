@@ -74,20 +74,23 @@ async function kind(p: Promise<unknown>): Promise<string> {
   await r.close();
 }
 {
-  await using r = (await g.Pattern(5000n))!;
+  const r = (await g.Pattern(5000n))!;
   assert(equal(await all(Readable.from(r)), pattern(5000)), 'Node Readable.from');
+  await r[Symbol.asyncDispose]();
 }
 {
-  await using rs = (await g.Text('hello, world'))!;
+  const rs = (await g.Text('hello, world'))!;
   assert(await rs.seek(7n) === 7n, 'seek');
   assert(text(await rs.read()) === 'world', 'read after seek');
   assert(await rs.read() === null, 'EOF');
   assert(await rs.seek(-5n, 2) === 7n, 'seek from end');
+  await rs.close();
 }
 {
-  await using f = (await g.Failing(10n))!;
+  const f = (await g.Failing(10n))!;
   assert((await f.read())?.length === 10, 'data before the error');
   assert(await kind(f.read()) === 'source', 'source error');
+  await f.close();
 }
 assert(await g.Nil() === null, 'nil reader');
 
@@ -103,7 +106,7 @@ assert(await g.Nil() === null, 'nil reader');
 
 // A returned writer and handle views.
 {
-  await using sink = (await g.NewSink(true))!;
+  const sink = (await g.NewSink(true))!;
   const w = (await sink.Writer())!;
   const data = pattern(5 << 20);
   await new ReadableStream<Uint8Array>({ start(c) { c.enqueue(data.subarray(0, 7)); c.enqueue(data.subarray(7)); c.close(); } }).pipeTo(w.writable());
@@ -111,9 +114,11 @@ assert(await g.Nil() === null, 'nil reader');
   assert(await kind(w.write(new Uint8Array([1]))) === 'closed', 'write after close');
   assert(await sink.io().write(new TextEncoder().encode('tail')) === 4, 'handle view write');
   assert(await sink.Count() === BigInt(data.length + 4), 'count');
-  await using contents = (await sink.Contents())!;
+  const contents = (await sink.Contents())!;
   const back = await all(contents);
   assert(equal(back.subarray(0, data.length), data) && text(back.subarray(data.length)) === 'tail', 'contents');
+  await contents.close();
+  await sink.close();
 }
 {
   const doc = (await g.Open(new TextEncoder().encode('persistent document')))!;
@@ -129,10 +134,11 @@ assert(await g.Nil() === null, 'nil reader');
 // Concurrent reads on one stream are serialized.
 {
   const n = 1 << 20;
-  await using r = (await g.Pattern(BigInt(n)))!;
+  const r = (await g.Pattern(BigInt(n)))!;
   let total = 0;
   await Promise.all(Array.from({ length: 8 }, async () => { for (;;) { const c = await r.read(4096); if (c === null) return; total += c.length; } }));
   assert(total === n, 'concurrent reads ' + total);
+  await r.close();
 }
 
 // Throughput: host → handle → host with bounded memory.
@@ -148,7 +154,7 @@ assert(await g.Nil() === null, 'nil reader');
       at += n;
     }
   }
-  await using r = (await g.Through(Readable.from(source())))!;
+  const r = (await g.Through(Readable.from(source())))!;
   let h = 2166136261, n = 0, peak = 0;
   const start = performance.now();
   for await (const c of r) {
@@ -158,6 +164,7 @@ assert(await g.Nil() === null, 'nil reader');
     if (before >> 24 !== n >> 24) peak = Math.max(peak, process.memoryUsage().rss);
   }
   const seconds = (performance.now() - start) / 1000;
+  await r.close();
   assert(n === size, 'throughput size ' + n);
   let want = 2166136261;
   for (let i = 0; i < size; i++) want = Math.imul(want ^ (i % 251), 16777619) >>> 0;

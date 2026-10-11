@@ -248,8 +248,9 @@ export interface SourceWriter {
 /** A seekable source stream; whence is 0 (start), 1 (current) or 2 (end). */
 export interface SourceSeeker { seek(offset:bigint,whence?:number):Promise<bigint>; }
 /** Every source stream is a handle: close runs the source Close, if any,
- * and releases it. */
-export interface SourceCloser extends AsyncDisposable { close():Promise<void>; }
+ * and releases it. Streams also implement Symbol.asyncDispose where the
+ * host defines it. */
+export interface SourceCloser { close():Promise<void>; }
 
 const CHUNK=64<<10;
 /** The host view of a source std/io reader or writer. */
@@ -277,7 +278,6 @@ export class SourceStream implements SourceReader,SourceWriter,SourceSeeker,Sour
   return this.#ops.seek(this.#h,offset,whence);
  }
  close():Promise<void>{return this.#ops.close(this.#h);}
- [Symbol.asyncDispose]():Promise<void>{return this.close();}
  async *[Symbol.asyncIterator]():AsyncGenerator<Uint8Array>{
   for(;;){const chunk=await this.read(CHUNK);if(chunk===null)return;if(chunk.length>0)yield chunk;}
  }
@@ -288,6 +288,7 @@ export class SourceStream implements SourceReader,SourceWriter,SourceSeeker,Sour
   return new WritableStream<Uint8Array>({write:async chunk=>{await this.write(chunk);},close:()=>this.close()});
  }
 }
+{const dispose=(Symbol as unknown as {asyncDispose?:symbol}).asyncDispose;if(dispose)Object.defineProperty(SourceStream.prototype,dispose,{value(this:SourceStream){return this.close();},writable:true,configurable:true});}
 
 /** Source float boundary accepts numeric IEEE values, including NaN and infinities. */
 export function boundaryFloat(v:unknown,bits:number):number {

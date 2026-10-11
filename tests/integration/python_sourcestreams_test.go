@@ -33,7 +33,7 @@ func TestGeneratedPythonSourceStreams(t *testing.T) {
 	t.Logf("%s", output)
 }
 
-const pythonSourceStreamsConsumer = `import io, os, resource, shutil, sys, threading, time, zlib
+const pythonSourceStreamsConsumer = `import io, os, shutil, sys, threading, time, zlib
 sys.path.insert(0, sys.argv[1])
 import sourcestreams as g
 rt = g.main.rt
@@ -45,6 +45,9 @@ def kind(fn):
         return ''
     except rt.LibraryFailure as e:
         return e.kind
+
+def rss():
+    with open('/proc/self/status') as f: return int(f.read().split('VmRSS:')[1].split()[0]) >> 10
 
 def pattern(n, start=0): return bytes((start + i) % 251 for i in range(n))
 big = pattern(3 << 20)
@@ -142,10 +145,12 @@ size = mib << 20
 start = time.time()
 with get(g.Through(Source(size))) as r:
     count = crc = 0
+    base = peak = rss()
     while True:
         c = r.read(1 << 20)
         if not c: break
         crc = zlib.crc32(c, crc)
+        if (count >> 24) != ((count + len(c)) >> 24): peak = max(peak, rss())
         count += len(c)
 elapsed = time.time() - start
 want = 0
@@ -156,8 +161,7 @@ while True:
     if not k: break
     want = zlib.crc32(memoryview(buf)[:k], want)
 assert count == size and crc == want, 'throughput copy %d' % count
-peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss >> 10
-assert peak < 1024, 'peak rss %d MiB' % peak
-print('throughput: %d MiB in %.1fs (%.1f MiB/s), peak rss %d MiB' % (mib, elapsed, mib / elapsed, peak))
+assert peak - base < 256, 'rss grew from %d to %d MiB' % (base, peak)
+print('throughput: %d MiB in %.1fs (%.1f MiB/s), rss %d MiB at start, peak %d MiB' % (mib, elapsed, mib / elapsed, base, peak))
 print('PASS source streams')
 `
