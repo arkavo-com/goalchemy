@@ -1,0 +1,57 @@
+{
+  "id": "lib.http.exchange_response",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "http.Exchange.Response: end the request body and wait for the response status and headers.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/http.(Exchange).Response",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "exchange",
+        "type": "*http.Exchange"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "status",
+        "type": "int"
+      },
+      {
+        "name": "headers",
+        "type": "[]string"
+      },
+      {
+        "name": "err",
+        "type": "error"
+      }
+    ]
+  },
+  "depends_on": [
+    {
+      "id": "core.task.spawn",
+      "version": "1.0.0"
+    }
+  ],
+  "suspension": "may",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "A nil *http.Exchange is invalid except for Close.",
+    "nil": "Nil byte slices are empty. A nil context returns an error; methods on a nil *http.Exchange return an invalid error and Close accepts nil.",
+    "bounds": "Response headers<=64KiB.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "Input bytes and header slices are not mutated.",
+    "aliasing": "Exchanges are aliased opaque handles; outputs are independently owned.",
+    "allocation": "Native buffers are host-managed. One Write or Read moves at most 1MiB, so request and response bodies are never held whole.",
+    "errors": "A known content length not written in full returns \"http: invalid exchange operation\"; after Close \"http: exchange closed\"; transport failures return zero status, nil headers and an error.",
+    "panics": "No deliberate panic on invalid input. Host allocation failures remain host failures.",
+    "observations": "Response headers are sorted and canonicalized as for Do. Calling Response again returns the same result."
+  },
+  "notes": "Native acceptance tests in lib/http. Exchanges are released by Close and when their runtime retires.",
+  "cases": [],
+  "native_tests": [
+    "lib/http/exchange_test.go"
+  ]
+}

@@ -7,10 +7,10 @@ function fail(t:Task,message:string):void{t.rv=[0n,NIL,BYTE_NIL,errorBox(message
 // Fetch forbids these request fields in browsers. Reject them in both targets
 // before submission instead of allowing native fetch to silently discard them.
 const forbidden=new Set(['accept-charset','access-control-request-headers','access-control-request-method','connection','content-length','cookie','cookie2','date','dnt','expect','host','keep-alive','origin','referer','set-cookie','te','trailer','transfer-encoding','upgrade','via','proxy-authorization','proxy-connection']);
-function forbiddenHeader(name:string,value:string):boolean{
+export function forbiddenHeader(name:string,value:string):boolean{
  const n=name.toLowerCase();return forbidden.has(n)||n.startsWith('proxy-')||n.startsWith('sec-')||(['x-http-method','x-http-method-override','x-method-override'].includes(n)&&value.split(',').some(v=>['CONNECT','TRACE','TRACK'].includes(v.trim().toUpperCase())));
 }
-function fetchURL(raw:string):string{
+export function fetchURL(raw:string):string{
  const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(binaryInput(raw,8192));
  if(!/^https?:\/\//i.test(text)||/[\x00-\x20\x7f\\#]/.test(text)||/%(?![0-9a-f]{2})/i.test(text))throw new DeclaredFailure('invalid');
  const authority=text.split('://')[1].split(/[/?]/)[0];
@@ -25,7 +25,7 @@ function fetchURL(raw:string):string{
  return parsed.href;
 }
 const optionNames=new Set(['client-cert','client-key','root-cas','insecure-skip-verify','unix-socket']);
-function tlsOptions(options:string[]):HttpTLS|null{
+export function tlsOptions(options:string[]):HttpTLS|null{
  if(options.length===0)return null;
  if(options.length%2)throw new DeclaredFailure('invalid');
  const values=new Map<string,string>();let total=0;

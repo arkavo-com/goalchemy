@@ -1,0 +1,77 @@
+{
+  "id": "lib.http.open",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "http.Open: start a streamed HTTP exchange whose request body is written and response body read in chunks.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/http.Open",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "ctx",
+        "type": "context.Context"
+      },
+      {
+        "name": "method",
+        "type": "string"
+      },
+      {
+        "name": "url",
+        "type": "string"
+      },
+      {
+        "name": "headers",
+        "type": "[]string"
+      },
+      {
+        "name": "content_length",
+        "type": "int64"
+      },
+      {
+        "name": "timeout_millis",
+        "type": "int64"
+      },
+      {
+        "name": "options",
+        "type": "[]string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "exchange",
+        "type": "*http.Exchange"
+      },
+      {
+        "name": "err",
+        "type": "error"
+      }
+    ]
+  },
+  "depends_on": [
+    {
+      "id": "core.task.spawn",
+      "version": "1.0.0"
+    }
+  ],
+  "suspension": "may",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "A nil *http.Exchange is invalid except for Close.",
+    "nil": "Nil byte slices are empty. A nil context returns an error; methods on a nil *http.Exchange return an invalid error and Close accepts nil.",
+    "bounds": "GET/POST only; contentLength is -1 (unknown, sent chunked) or the exact request body length, 0 for GET. URL<=8192 bytes, header bytes<=64KiB with the header rules of Do, timeoutMillis=1..86400000, options as for DoWith.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "Input bytes and header slices are not mutated.",
+    "aliasing": "Exchanges are aliased opaque handles; outputs are independently owned.",
+    "allocation": "Native buffers are host-managed. One Write or Read moves at most 1MiB, so request and response bodies are never held whole.",
+    "errors": "Invalid input returns a nil exchange and \"http: invalid request or limit\"; TLS options that do not parse return \"http: invalid TLS option\"; unsupported options fail as for DoWith. Connection failures surface from Write or Response.",
+    "panics": "No deliberate panic on invalid input. Host allocation failures remain host failures.",
+    "observations": "The request starts without waiting for the connection. timeoutMillis bounds the whole exchange, including reading the response body, and cancellation of ctx ends it; later operations then return the context error. Redirects are not followed and compression is neither requested nor decoded: the body is returned as received."
+  },
+  "notes": "Native acceptance tests in lib/http. Exchanges are released by Close and when their runtime retires.",
+  "cases": [],
+  "native_tests": [
+    "lib/http/exchange_test.go"
+  ]
+}

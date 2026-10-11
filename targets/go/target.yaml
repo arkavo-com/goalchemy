@@ -146,6 +146,11 @@ functions:
   - {id: lib.os.write_file, contract_version: 1.0.0, symbol: rt.LibOsWriteFile, implementation: runtime/lib_os_write_file.go}
   - {id: lib.http.do, contract_version: 1.1.0, symbol: rt.LibHTTPDo, implementation: runtime/lib_http_do.go, requires: [std.context.err], harness: "await: rt.LibHTTPDo(t, {0}, {1}, {2}, {3}, {4}, {5}, {6})"}
   - {id: lib.http.do_with, contract_version: 1.1.0, symbol: rt.LibHTTPDoWith, implementation: runtime/lib_http_do_with.go, requires: [lib.http.do], harness: "await: rt.LibHTTPDoWith(t, {0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})"}
+  - {id: lib.http.open, contract_version: 1.0.0, symbol: rt.LibHTTPOpen, implementation: runtime/lib_http_open.go, requires: [lib.http.exchange_close, std.context.err]}
+  - {id: lib.http.exchange_write, contract_version: 1.0.0, symbol: rt.LibHTTPExchangeWrite, implementation: runtime/lib_http_exchange_write.go, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_response, contract_version: 1.0.0, symbol: rt.LibHTTPExchangeResponse, implementation: runtime/lib_http_exchange_response.go, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_read, contract_version: 1.0.0, symbol: rt.LibHTTPExchangeRead, implementation: runtime/lib_http_exchange_read.go, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_close, contract_version: 1.0.0, symbol: rt.LibHTTPExchangeClose, implementation: runtime/lib_http_exchange_close.go, requires: [core.task.spawn]}
   - {id: lib.crypto.hmac_sha256_verify, contract_version: 1.0.0, symbol: rt.LibCryptoHMACSHA256Verify, implementation: runtime/lib_crypto_hmac_sha256_verify.go, requires: [lib.crypto.close]}
 
   - {id: lib.callback.request, contract_version: 1.0.0, symbol: "rt.LibCallbackRequest", implementation: runtime/lib_callback_request.go, requires: [std.context.err], harness: "unsupported"}

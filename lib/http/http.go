@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -71,32 +72,12 @@ func DoWith(ctx context.Context, method, rawURL string, headers []string, body [
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMillis)*time.Millisecond)
 	defer cancel()
-	req, err := stdhttp.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
+	req, err := newRequest(ctx, method, u, headers, bytes.NewReader(body))
 	if err != nil {
-		return 0, nil, nil, invalid
+		return 0, nil, nil, err
 	}
-	total := 0
-	for i := 0; i < len(headers); i += 2 {
-		name, value := headers[i], headers[i+1]
-		total += len(name) + len(value) + 4
-		if total > MaxHeaderBytes || !token(name) || badValue(value) || forbidden(name) {
-			return 0, nil, nil, invalid
-		}
-		req.Header.Add(name, value)
-	}
-	// Dedicated transport avoids unbounded global pooled resources and host
-	// default-client mutations; proxies follow the standard trusted host config.
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	proxy, dial := stdhttp.ProxyFromEnvironment, dialer.DialContext
-	if socket != "" {
-		proxy = nil
-		dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", socket)
-		}
-	}
-	tr := &stdhttp.Transport{Proxy: proxy, DialContext: dial, TLSHandshakeTimeout: 10 * time.Second, TLSClientConfig: config, DisableKeepAlives: true, MaxResponseHeaderBytes: MaxHeaderBytes}
+	client, tr := newClient(config, socket, false)
 	defer tr.CloseIdleConnections()
-	client := &stdhttp.Client{Transport: tr, CheckRedirect: func(*stdhttp.Request, []*stdhttp.Request) error { return stdhttp.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, nil, err
@@ -109,6 +90,43 @@ func DoWith(ctx context.Context, method, rawURL string, headers []string, body [
 	if len(out) > maxResponseBytes {
 		return 0, nil, nil, tooLarge
 	}
+	return resp.StatusCode, responseHeaders(resp), out, nil
+}
+
+func newRequest(ctx context.Context, method string, u *url.URL, headers []string, body io.Reader) (*stdhttp.Request, error) {
+	req, err := stdhttp.NewRequestWithContext(ctx, method, u.String(), body)
+	if err != nil {
+		return nil, invalid
+	}
+	total := 0
+	for i := 0; i < len(headers); i += 2 {
+		name, value := headers[i], headers[i+1]
+		total += len(name) + len(value) + 4
+		if total > MaxHeaderBytes || !token(name) || badValue(value) || forbidden(name) {
+			return nil, invalid
+		}
+		req.Header.Add(name, value)
+	}
+	return req, nil
+}
+
+// newClient returns a dedicated transport, which avoids unbounded global
+// pooled resources and host default-client mutations; proxies follow the
+// standard trusted host config.
+func newClient(config *tls.Config, socket string, raw bool) (*stdhttp.Client, *stdhttp.Transport) {
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	proxy, dial := stdhttp.ProxyFromEnvironment, dialer.DialContext
+	if socket != "" {
+		proxy = nil
+		dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socket)
+		}
+	}
+	tr := &stdhttp.Transport{Proxy: proxy, DialContext: dial, TLSHandshakeTimeout: 10 * time.Second, TLSClientConfig: config, DisableKeepAlives: true, MaxResponseHeaderBytes: MaxHeaderBytes, DisableCompression: raw}
+	return &stdhttp.Client{Transport: tr, CheckRedirect: func(*stdhttp.Request, []*stdhttp.Request) error { return stdhttp.ErrUseLastResponse }}, tr
+}
+
+func responseHeaders(resp *stdhttp.Response) []string {
 	names := make([]string, 0, len(resp.Header))
 	for name := range resp.Header {
 		names = append(names, name)
@@ -120,7 +138,7 @@ func DoWith(ctx context.Context, method, rawURL string, headers []string, body [
 			result = append(result, name, value)
 		}
 	}
-	return resp.StatusCode, result, out, nil
+	return result
 }
 
 // MaxSocketPath bounds the UnixSocket option.
@@ -198,4 +216,195 @@ func badValue(s string) bool {
 		}
 	}
 	return false
+}
+
+// MaxChunk bounds the bytes of one Exchange Write or Read (1MiB).
+const MaxChunk = 1 << 20
+
+// MaxExchangeMillis bounds the timeout of an Exchange (24 hours).
+const MaxExchangeMillis = 24 * 60 * 60 * 1000
+
+var errClosed = errors.New("http: exchange closed")
+var errState = errors.New("http: invalid exchange operation")
+
+// Exchange is one HTTP exchange whose request body is written and whose
+// response body is read in chunks, so neither is held in memory whole.
+type Exchange struct {
+	mu        sync.Mutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	pipe      *io.PipeWriter
+	length    int64
+	written   int64
+	done      chan struct{}
+	resp      *stdhttp.Response
+	err       error
+	tr        *stdhttp.Transport
+	responded bool
+	closed    bool
+}
+
+// Open starts a GET or POST exchange. contentLength is the exact request
+// body length, or -1 for an unknown length sent chunked; GET takes 0.
+// timeoutMillis (1..MaxExchangeMillis) bounds the whole exchange, including
+// reading the response body, and ctx cancellation ends it. Options are those
+// of DoWith. Exchanges neither request nor decode compression: response
+// bytes are returned as received. Close releases the exchange.
+func Open(ctx context.Context, method, rawURL string, headers []string, contentLength int64, timeoutMillis int64, options []string) (*Exchange, error) {
+	if ctx == nil || (method != "GET" && method != "POST") || contentLength < -1 || (method == "GET" && contentLength != 0) || timeoutMillis < 1 || timeoutMillis > MaxExchangeMillis || len(headers)%2 != 0 || len(rawURL) > 8192 {
+		return nil, invalid
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" {
+		return nil, invalid
+	}
+	config, socket, err := transportOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMillis)*time.Millisecond)
+	e := &Exchange{ctx: ctx, cancel: cancel, length: contentLength, done: make(chan struct{})}
+	var body io.Reader
+	if contentLength != 0 {
+		r, w := io.Pipe()
+		body, e.pipe = r, w
+	}
+	req, err := newRequest(ctx, method, u, headers, body)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	req.ContentLength = contentLength
+	var client *stdhttp.Client
+	client, e.tr = newClient(config, socket, true)
+	go func() {
+		defer close(e.done)
+		e.resp, e.err = client.Do(req)
+	}()
+	return e, nil
+}
+
+func (e *Exchange) failure(err error) error {
+	if e.ctx.Err() != nil {
+		return e.ctx.Err()
+	}
+	return err
+}
+
+// Write sends up to MaxChunk bytes of the request body. It blocks until the
+// transport takes them.
+func (e *Exchange) Write(p []byte) error {
+	if e == nil || len(p) > MaxChunk {
+		return invalid
+	}
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return errClosed
+	}
+	if e.responded || e.pipe == nil && len(p) != 0 || e.length >= 0 && int64(len(p)) > e.length-e.written {
+		e.mu.Unlock()
+		return errState
+	}
+	e.written += int64(len(p))
+	e.mu.Unlock()
+	if len(p) == 0 {
+		return nil
+	}
+	if _, err := e.pipe.Write(p); err != nil {
+		return e.failure(err)
+	}
+	return nil
+}
+
+// Response ends the request body and waits for the response status and
+// headers, which are sorted and canonicalized as for Do. A known request
+// length must have been written in full.
+func (e *Exchange) Response() (int, []string, error) {
+	if e == nil {
+		return 0, nil, invalid
+	}
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return 0, nil, errClosed
+	}
+	first := !e.responded
+	e.responded = true
+	short := e.length >= 0 && e.written != e.length
+	e.mu.Unlock()
+	if first && e.pipe != nil {
+		if short {
+			e.pipe.CloseWithError(errState)
+			e.cancel()
+		} else {
+			e.pipe.Close()
+		}
+	}
+	if short {
+		return 0, nil, errState
+	}
+	<-e.done
+	if e.err != nil {
+		return 0, nil, e.failure(e.err)
+	}
+	return e.resp.StatusCode, responseHeaders(e.resp), nil
+}
+
+// Read returns up to max (1..MaxChunk) bytes of the response body after
+// Response. eof reports the end of the body; data is then empty.
+func (e *Exchange) Read(max int) ([]byte, bool, error) {
+	if e == nil || max < 1 || max > MaxChunk {
+		return nil, false, invalid
+	}
+	e.mu.Lock()
+	closed, responded := e.closed, e.responded
+	e.mu.Unlock()
+	if closed {
+		return nil, false, errClosed
+	}
+	if !responded {
+		return nil, false, errState
+	}
+	<-e.done
+	if e.err != nil {
+		return nil, false, e.failure(e.err)
+	}
+	p := make([]byte, max)
+	for {
+		n, err := e.resp.Body.Read(p)
+		if n > 0 {
+			return p[:n], false, nil
+		}
+		if err == io.EOF {
+			return nil, true, nil
+		}
+		if err != nil {
+			return nil, false, e.failure(err)
+		}
+	}
+}
+
+// Close ends the exchange and releases its connection. It accepts nil and
+// is idempotent.
+func (e *Exchange) Close() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return
+	}
+	e.closed = true
+	e.mu.Unlock()
+	e.cancel()
+	if e.pipe != nil {
+		e.pipe.CloseWithError(errClosed)
+	}
+	<-e.done
+	if e.resp != nil {
+		e.resp.Body.Close()
+	}
+	e.tr.CloseIdleConnections()
 }

@@ -81,6 +81,8 @@ class Scheduler:
         self.active = True
         self.tasks = set()
         self.contexts = set()
+        # Native resources, such as HTTP exchanges, released on retirement.
+        self.resources = set()
         self.operations = {}
         self.next_op = 0
         self.mailbox = Mailbox()
@@ -235,6 +237,12 @@ class Scheduler:
         errors = []
         self.active = False
         self.library_poll = None
+        for release in list(self.resources):
+            try:
+                release()
+            except BaseException as e:
+                errors.append(e)
+        self.resources.clear()
         for op in list(self.operations.values()):
             try:
                 op.cancel()

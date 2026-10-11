@@ -116,6 +116,8 @@ export class Scheduler {
   readonly mail = new Mailbox();
   readonly operations = new Map<number, HostOperation>();
   readonly tasks = new Set<Task>();
+  /** Native resources, such as HTTP exchanges, released when the scheduler shuts down. */
+  readonly resources = new Set<() => void>();
   readonly disposers = new Set<() => void>();
   /** Native resources owned by source values; a library instance keeps them
    * past the call that created them. */
@@ -233,6 +235,10 @@ export class Scheduler {
     this.closed = true;
     this.mail.retiring = true;
     let failure: unknown;
+    for (const release of [...this.resources]) {
+      try { release(); } catch (e) { failure ??= e; }
+    }
+    this.resources.clear();
     for (const op of this.operations.values()) {
       try { op.cancel(); } catch (e) { failure ??= e; }
     }

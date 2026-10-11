@@ -1,0 +1,44 @@
+{
+  "id": "lib.http.exchange_close",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "http.Exchange.Close: end the exchange and release its connection.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/http.(Exchange).Close",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "exchange",
+        "type": "*http.Exchange"
+      }
+    ],
+    "outputs": []
+  },
+  "depends_on": [
+    {
+      "id": "core.task.spawn",
+      "version": "1.0.0"
+    }
+  ],
+  "suspension": "may",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "A nil *http.Exchange is invalid except for Close.",
+    "nil": "Nil byte slices are empty. A nil context returns an error; methods on a nil *http.Exchange return an invalid error and Close accepts nil.",
+    "bounds": "Not applicable.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "Input bytes and header slices are not mutated.",
+    "aliasing": "Exchanges are aliased opaque handles; outputs are independently owned.",
+    "allocation": "Native buffers are host-managed. One Write or Read moves at most 1MiB, so request and response bodies are never held whole.",
+    "errors": "Close has no error result.",
+    "panics": "No deliberate panic on invalid input. Host allocation failures remain host failures.",
+    "observations": "Close accepts nil and is idempotent; operations blocked on the exchange fail."
+  },
+  "notes": "Native acceptance tests in lib/http. Exchanges are released by Close and when their runtime retires.",
+  "cases": [],
+  "native_tests": [
+    "lib/http/exchange_test.go"
+  ]
+}
