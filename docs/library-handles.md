@@ -91,14 +91,18 @@ TypeScript `setLibraryWarn` in `rt/runtime/library.js`, Python
 Exported functions and handle methods can take `std/io` interfaces as
 parameters: `io.Reader`, `io.Writer`, `io.ReadCloser`, `io.WriteCloser`,
 `io.ReadSeeker`, `io.ReadSeekCloser`, `io.WriteSeeker` and `io.ReadWriter`.
-The host passes its native stream; Go, TypeScript and Python support this
-today, and other targets reject such exports with `GCE007`.
+The host passes its native stream.
 
 | Target | Host passes |
 |---|---|
 | Go | any value implementing the matching standard `io` interface |
 | TypeScript | an object with `read(size)` (null at end), `write(data)`, `seek(offset, whence)` and `close()` as needed; Node `Readable`/`Writable`, web `ReadableStream`/`WritableStream`, `AsyncIterable<Uint8Array>`, `Blob` (seekable) or `Uint8Array` (seekable) |
 | Python | a file-like object (`readinto` or `read`, `write`, `seek`, `close`) or `bytes` |
+| Java | `InputStream`, `OutputStream`, a `ReadableByteChannel`/`WritableByteChannel` (seekable when a `SeekableByteChannel`) or `byte[]` (seekable); the parameter type is `Object` |
+| C# | a `System.IO.Stream` (its `CanRead`/`CanWrite`/`CanSeek` must match) or `byte[]` (seekable); the parameter type is `object` |
+| Rust | `Stream::reader`, `writer`, `read_seeker`, `write_seeker` or `bytes`, with `with_close` for a Close action |
+| C | a `gxc_stream` of callbacks in a `GXC_STREAM` value; error kind 10 is `reentrant` |
+| Swift | `GoalchemyStream` with `read`, `write`, `seek` and `close` closures, or built from bytes, an `InputStream` or an `OutputStream` |
 
 - Each Read, Write, Seek and Close is a host operation through the callback
   mailbox: it suspends the calling source task, and reads and writes copy
@@ -110,8 +114,8 @@ today, and other targets reject such exports with `GCE007`.
   until it retires, so a handle can keep a reader.
 - A host stream method that calls back into the library fails that call with
   kind `reentrant` instead of deadlocking. Go detects this per goroutine,
-  Python per thread and TypeScript through `AsyncLocalStorage` in Node; the
-  portable browser entry cannot detect it.
+  TypeScript through `AsyncLocalStorage` in Node (the portable browser entry
+  cannot detect it) and the other targets per thread.
 - Stream operations use a background context: canceling a call does not
   interrupt a host read already in progress.
 

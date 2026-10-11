@@ -244,7 +244,7 @@ func (e *emitter) library() (string, error) {
 			params = params[1:]
 		}
 		for _, t := range params {
-			if !sourceContext(t) && abi.Handle(t) == nil {
+			if !sourceContext(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				convert(t)
 			}
 		}
@@ -339,7 +339,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		result = "(" + strings.Join(ts, ", ") + ")"
 	}
 	params := f.Sig.Params
-	var ps, inputs, args, hs []string
+	var ps, inputs, args, hs, streams, adapters, zeros []string
 	if recv != nil {
 		params = params[1:]
 		hs = append(hs, "handle")
@@ -349,6 +349,15 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	for i, t := range params {
 		if sourceContext(t) {
 			args = append(args, "context")
+			continue
+		}
+		if k := ir.StreamKind(t); k != "" {
+			ps = append(ps, fmt.Sprintf("_ a%d: GoalchemyStream?", i))
+			n := len(streams)
+			streams = append(streams, fmt.Sprintf("try GLibrary.stream(a%d, %q)", i, k))
+			adapters = append(adapters, fmt.Sprintf("ids.values[%d] == 0 ? nil : { %s([.integer(UInt64(bitPattern: ids.values[%d]), 64, true)], []) }", n, e.names.Symbol(e.p.StreamAdapter(k).Sym), n))
+			zeros = append(zeros, fmt.Sprintf("GTypes.zero(%d)", t.ID))
+			args = append(args, fmt.Sprintf("streams[%d]", n))
 			continue
 		}
 		ps = append(ps, fmt.Sprintf("_ a%d: %s", i, ptyp(t)))
@@ -367,7 +376,12 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		indent, prefix = "    ", "public func"
 	}
 	fmt.Fprintf(b, "%s%s %s(%s) -> Operation<%s> {\n%s    do {\n%s        let args = try GLibrary.prepare {\n%s            _ = gTypeRegistration\n%s            return [%s]\n%s        }\n", indent, prefix, swiftPublic(name), strings.Join(ps, ", "), result, indent, indent, indent, indent, strings.Join(inputs, ", "), indent)
-	fmt.Fprintf(b, "%s        return GLibrary.submitHandles(args, options, gLibraryState, [%s], nil, %s, { args, context, objects in %s([%s], []) }, { rv, instance in\n", indent, strings.Join(hs, ", "), initFrame, e.names.Symbol(f.Sym), strings.Join(args, ", "))
+	call := fmt.Sprintf("%s([%s], [])", e.names.Symbol(f.Sym), strings.Join(args, ", "))
+	if len(streams) > 0 {
+		call = fmt.Sprintf("GLibrary.streamFrame([%s], [%s]) { streams in %s }", strings.Join(adapters, ", "), strings.Join(zeros, ", "), call)
+	}
+	fmt.Fprintf(b, "%s        let ids = GStreamIDs(%d)\n%s        let streams: [CallbackProvider?] = [%s]\n", indent, len(streams), indent, strings.Join(streams, ", "))
+	fmt.Fprintf(b, "%s        return GLibrary.submitHandles(args, options, gLibraryState, [%s], nil, streams, ids, %s, { args, context, objects in %s }, { rv, instance in\n", indent, strings.Join(hs, ", "), initFrame, call)
 	if hasErr {
 		fmt.Fprintf(b, "%s            if let error = try gSourceError(rv[%d]) { throw error }\n", indent, n)
 	}

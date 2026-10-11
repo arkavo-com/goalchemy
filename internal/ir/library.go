@@ -208,25 +208,3 @@ func isHandleShape(t *Type, roots map[string]bool) bool {
 	e := t.Elem
 	return e.Kind == KNamed && roots[e.Pkg] && token.IsExported(e.Obj) && e.U().Kind == KStruct
 }
-
-// StreamParam returns the std/io interface name of the first host stream
-// parameter of an export or exported root method, or "".
-func (p *Program) StreamParam() string {
-	roots := map[string]bool{}
-	for _, pkg := range p.Packages {
-		if pkg.Root {
-			roots[pkg.Path] = true
-		}
-	}
-	for _, f := range p.Funcs {
-		if !roots[f.Pkg] || !token.IsExported(MethodName(f)) {
-			continue
-		}
-		for _, t := range f.Sig.Params {
-			if k := StreamKind(t); k != "" {
-				return k
-			}
-		}
-	}
-	return ""
-}

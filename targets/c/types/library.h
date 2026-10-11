@@ -5,7 +5,22 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdatomic.h>
-typedef enum { GXC_NIL, GXC_BOOL, GXC_INT, GXC_BYTES, GXC_LIST, GXC_RECORD, GXC_FLOAT, GXC_HANDLE } gxc_kind;
+typedef enum { GXC_NIL, GXC_BOOL, GXC_INT, GXC_BYTES, GXC_LIST, GXC_RECORD, GXC_FLOAT, GXC_HANDLE, GXC_STREAM } gxc_kind;
+/* A host stream passed for a std/io parameter. Each function runs on a
+ * native worker while the source call waits; set the ones the parameter
+ * needs. read returns the bytes read, 0 at end of stream; write returns the
+ * bytes written; seek (whence 0 start, 1 current, 2 end) returns the new
+ * position; close returns 0. On failure they return -1 and write a NUL
+ * terminated message of at most 255 bytes to message. The struct is copied;
+ * state must stay valid while the call runs, or until the instance retires
+ * when a handle keeps the stream. */
+typedef struct gxc_stream {
+    void *state;
+    int64_t (*read)(void *state, uint8_t *buffer, size_t length, char *message);
+    int64_t (*write)(void *state, const uint8_t *data, size_t length, char *message);
+    int64_t (*seek)(void *state, int64_t offset, int whence, char *message);
+    int (*close)(void *state, char *message);
+} gxc_stream;
 /* An opaque handle to a source object owned by a library instance. */
 typedef struct gxc_handle gxc_handle;
 typedef struct gxc_value {
@@ -18,6 +33,8 @@ typedef struct gxc_value {
     char **names;
     /* GXC_HANDLE only: borrowed by values; released by gxc_handle_free. */
     gxc_handle *handle;
+    /* GXC_STREAM only: borrowed for the duration of the call. */
+    const gxc_stream *stream;
 } gxc_value;
 typedef struct gxc_error { int kind; gxc_value message, fields; } gxc_error;
 /* Callback executes on a native worker outside source/runtime locks. Return 0
@@ -27,6 +44,7 @@ typedef int (*gxc_provider)(void *state, const uint8_t *name, size_t name_length
     const uint8_t *payload, size_t payload_length, const atomic_bool *canceled,
     gxc_value *response);
 extern _Thread_local bool gxc_callback_thread;
+extern _Thread_local bool gxc_stream_thread;
 typedef struct gxc_options {
     const atomic_bool *canceled;
     int64_t timeout_nanoseconds; /* 0: no call deadline, positive: owner-relative */
@@ -39,7 +57,7 @@ int goalchemy_invoke(const char *name, const gxc_value *arguments, size_t count,
     const gxc_options *options, gxc_value *result, gxc_error *error);
 /* Error kinds: 1 source, 2 panic, 3 host fault, 4 fatal, 5 invalid argument,
  * 6 canceled, 7 closed handle, 8 poisoned instance, 9 handles of different
- * instances. Handle methods are invoked as "Type.Method" with the receiver
+ * instances, 10 a host stream function called back into the library. Handle methods are invoked as "Type.Method" with the receiver
  * as the first argument. Returning the same source pointer again returns the
  * same live gxc_handle. */
 /* Fails calls queued on h, cancels its active call, runs the source Close if

@@ -77,6 +77,9 @@ public final class Operation<T> {
   }
   public func cancel() { cancellation.cancel() }
   public func wait() throws -> T {
+    if Thread.current.threadDictionary["goalchemy.stream"] != nil {
+      throw GoalchemyFailure("reentrant", "host stream called back into the library")
+    }
     if Thread.current.threadDictionary["goalchemy.provider"] != nil {
       throw GoalchemyFailure("host", "reentrant source call from callback provider")
     }
@@ -121,6 +124,9 @@ enum GLibrary {
   static let lock = NSRecursiveLock()
   static var retained: [UUID: [GValue]] = [:]
   static func prepare(_ convert: () throws -> [GValue]) throws -> [GValue] {
+    if Thread.current.threadDictionary["goalchemy.stream"] != nil {
+      throw GoalchemyFailure("reentrant", "host stream called back into the library")
+    }
     if Thread.current.threadDictionary["goalchemy.provider"] != nil {
       throw GoalchemyFailure("host", "reentrant source call from callback provider")
     }
@@ -208,11 +214,14 @@ final class GInstance {
   var poisoned = false
   var retired = false
   var keys: [GCryptoKey] = []
+  var streams: [String: CallbackProvider] = [:]
+  var nextStream: Int64 = 0
   var objects: [ObjectIdentifier: (GHandle, GWeakHandle)] = [:]
   func retire() {
     if retired { return }
     retired = true
     GLibrary.retained[id] = nil
+    streams = [:]
     for key in keys { key.close() }
     keys = []
     for (handle, _) in objects.values { handle.drop() }
@@ -308,7 +317,8 @@ extension GLibrary {
   /// results include handles. A closing call releases closing afterwards.
   static func submitHandles<T>(
     _ args: [GValue], _ options: CallOptions, _ state: GLibraryState, _ handles: [GHandle?],
-    _ closing: GHandle?, _ initialize: @escaping () -> GFrame,
+    _ closing: GHandle?, _ streams: [CallbackProvider?], _ ids: GStreamIDs,
+    _ initialize: @escaping () -> GFrame,
     _ start: @escaping ([GValue], GValue, [GValue]) -> GFrame,
     _ decode: @escaping ([GValue], GInstance) throws -> T
   ) -> Operation<T> {
@@ -355,7 +365,13 @@ extension GLibrary {
       }
       if fresh { state.reset() } else { state.load(retained[inst.id] ?? []) }
       let owner = GOwner(host: true)
-      owner.callbacks = options.callbacks
+      for (i, stream) in streams.enumerated() {
+        guard let stream = stream else { continue }
+        inst.nextStream += 1
+        ids.values[i] = inst.nextStream
+        inst.streams["goalchemy.stream.\(inst.nextStream)"] = stream
+      }
+      owner.callbacks = options.callbacks.merging(inst.streams) { _, stream in stream }
       var pendingKeys: [GCryptoKey] = []
       owner.retainKeys = { pendingKeys.append($0) }
       let elem =
@@ -438,6 +454,160 @@ extension GLibrary {
     if !handle.markClosed() { return }
     handle.active?.cancel()
     let run = start ?? { _, _, _ in GFrame.sync { [.nilValue] } }
-    try submitHandles([], CallOptions(), state, [handle], handle, initialize, run, decode).wait()
+    try submitHandles([], CallOptions(), state, [handle], handle, [], GStreamIDs(0), initialize, run, decode).wait()
+  }
+}
+
+/// Stream ids assigned when a call registers its host streams.
+final class GStreamIDs {
+  var values: [Int64]
+  init(_ count: Int) { values = Array(repeating: 0, count: count) }
+}
+/// A host stream passed for a std/io parameter. Set the operations the
+/// parameter needs; read returns an empty array at end of stream.
+public struct GoalchemyStream {
+  public var read: ((Int) throws -> [UInt8])?
+  public var write: (([UInt8]) throws -> Int)?
+  public var seek: ((Int64, Int) throws -> Int64)?
+  public var close: (() throws -> Void)?
+  public init(
+    read: ((Int) throws -> [UInt8])? = nil, write: (([UInt8]) throws -> Int)? = nil,
+    seek: ((Int64, Int) throws -> Int64)? = nil, close: (() throws -> Void)? = nil
+  ) {
+    self.read = read
+    self.write = write
+    self.seek = seek
+    self.close = close
+  }
+  /// A seekable reader over a copy of bytes.
+  public init(bytes: [UInt8]) {
+    final class Cursor { var position = 0 }
+    let cursor = Cursor()
+    self.init(
+      read: { n in
+        let end = min(bytes.count, cursor.position + n)
+        defer { cursor.position = max(cursor.position, end) }
+        return cursor.position >= end ? [] : Array(bytes[cursor.position..<end])
+      },
+      seek: { offset, whence in
+        let base = whence == 0 ? 0 : whence == 1 ? Int64(cursor.position) : Int64(bytes.count)
+        if base + offset < 0 { throw GoalchemyFailure("source", "seek: negative position") }
+        cursor.position = Int(base + offset)
+        return base + offset
+      })
+  }
+  /// A reader over a Foundation InputStream; close closes it.
+  public init(input: InputStream) {
+    if input.streamStatus == .notOpen { input.open() }
+    self.init(
+      read: { n in
+        var buffer = [UInt8](repeating: 0, count: n)
+        let k = input.read(&buffer, maxLength: n)
+        if k < 0 { throw input.streamError ?? GoalchemyFailure("source", "read failed") }
+        return Array(buffer[0..<k])
+      }, close: { input.close() })
+  }
+  /// A writer over a Foundation OutputStream; close closes it.
+  public init(output: OutputStream) {
+    if output.streamStatus == .notOpen { output.open() }
+    self.init(
+      write: { data in
+        var written = 0
+        while written < data.count {
+          let k = data[written...].withUnsafeBufferPointer { output.write($0.baseAddress!, maxLength: $0.count) }
+          if k <= 0 { throw output.streamError ?? GoalchemyFailure("source", "write failed") }
+          written += k
+        }
+        return written
+      }, close: { output.close() })
+  }
+}
+extension GLibrary {
+  private static func streamInt(_ b: [UInt8], _ at: Int) -> Int64 {
+    var v: UInt64 = 0
+    for i in 0..<8 { v = v << 8 | UInt64(b[at + i]) }
+    return Int64(bitPattern: v)
+  }
+  private static func streamReply(_ v: Int64) -> [UInt8] {
+    var out: [UInt8] = [0]
+    var x = UInt64(bitPattern: v)
+    var bytes = [UInt8](repeating: 0, count: 8)
+    for i in stride(from: 7, through: 0, by: -1) { bytes[i] = UInt8(x & 255); x >>= 8 }
+    out += bytes
+    return out
+  }
+  private static func serve(_ s: GoalchemyStream, _ req: [UInt8]) throws -> [UInt8] {
+    struct Malformed: Error, CustomStringConvertible { var description: String { "hostio: malformed stream request" } }
+    switch req.first {
+    case UInt8(ascii: "r") where req.count == 9:
+      let n = Int(streamInt(req, 1))
+      guard n >= 0, n < 128 << 10, let read = s.read else { throw Malformed() }
+      let data = try read(n)
+      if data.count > n { throw Malformed() }
+      return [n > 0 && data.isEmpty ? 1 : 0] + data
+    case UInt8(ascii: "w"):
+      guard let write = s.write else { throw Malformed() }
+      return streamReply(Int64(try write(Array(req[1...]))))
+    case UInt8(ascii: "s") where req.count == 10:
+      guard let seek = s.seek else { throw Malformed() }
+      return streamReply(try seek(streamInt(req, 1), Int(req[9])))
+    case UInt8(ascii: "c"):
+      try s.close?()
+      return [0]
+    default: throw Malformed()
+    }
+  }
+  /// Adapts a host stream to the provider serving one std/io parameter;
+  /// reads and writes copy their buffers and end of stream becomes io.EOF.
+  static func stream(_ s: GoalchemyStream?, _ kind: String) throws -> CallbackProvider? {
+    guard let s = s else { return nil }
+    if (kind.contains("Read") && s.read == nil) || (kind.contains("Write") && s.write == nil)
+      || (kind.contains("Seek") && s.seek == nil)
+    {
+      throw GoalchemyFailure("invalid_argument", "stream does not support \(kind)")
+    }
+    return { request, settle in
+      Thread.current.threadDictionary["goalchemy.stream"] = true
+      defer { Thread.current.threadDictionary.removeObject(forKey: "goalchemy.stream") }
+      do {
+        settle(.success(try serve(s, request.bytes)))
+      } catch {
+        let message: String
+        if let f = error as? GoalchemyFailure { message = f.message } else { message = String(describing: error) }
+        settle(.success([2] + Array(message.utf8)))
+      }
+      return nil
+    }
+  }
+}
+extension GLibrary {
+  /// Runs each stream adapter (nil keeps its zero value), then the call
+  /// built from the adapted values; completes with the call's results.
+  static func streamFrame(_ adapters: [(() -> GFrame)?], _ zeros: [GValue], _ call: @escaping ([GValue]) -> GFrame) -> GFrame {
+    var values = zeros
+    var next = 0
+    var waiting = -1
+    let frame = GFrame(-1)
+    frame.roots = { values }
+    frame.step = { frame, task in
+      if waiting >= 0 {
+        values[waiting] = task.rv.first ?? zeros[waiting]
+        waiting = -1
+      }
+      while next < adapters.count {
+        let i = next
+        next += 1
+        if let adapt = adapters[i] {
+          waiting = i
+          return .call(adapt())
+        }
+      }
+      if frame.pc == 0 {
+        frame.pc = 1
+        return .call(call(values))
+      }
+      return .complete(task.rv)
+    }
+    return frame
   }
 }

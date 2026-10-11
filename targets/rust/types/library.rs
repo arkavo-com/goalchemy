@@ -21,6 +21,8 @@ pub enum ErrorKind {
     Poisoned,
     /// Handles from different instances were passed to one call.
     InstanceMismatch,
+    /// A host stream method called back into the library.
+    Reentrant,
 }
 #[derive(Clone, Debug)]
 pub struct LibraryError {
@@ -142,7 +144,7 @@ impl<T: Send + 'static> Operation<T> {
         options: CallOptions,
         body: impl FnOnce(CallOptions) -> Result<T, LibraryError> + Send + 'static,
     ) -> Self {
-        Self::submit_handles(options, vec![], None, move |options, _inst, _fresh| body(options))
+        Self::submit_handles(options, vec![], None, vec![], Default::default(), move |options, _inst, _fresh| body(options))
     }
     fn submit_raw(
         options: CallOptions,
@@ -374,6 +376,8 @@ struct InstanceState {
     poisoned: bool,
     retired: bool,
     next: u64,
+    streams: std::collections::BTreeMap<String, Provider>,
+    next_stream: i64,
 }
 /// Persistent source state behind a family of handles. Its source heap,
 /// globals and native keys live on one owner thread, which runs every call on
@@ -489,6 +493,7 @@ fn library_release(inst: &Arc<Instance>, id: u64) -> bool {
     state.live -= 1;
     if state.live == 0 {
         state.retired = true;
+        state.streams.clear();
         drop(state);
         LIBRARY_ROOTS.with(|r| r.borrow_mut().clear());
         LIBRARY_OBJECTS.with(|o| o.borrow_mut().clear());
@@ -610,12 +615,19 @@ impl<T: Send + 'static> Operation<T> {
     /// live handle creates a fresh owner, which becomes an instance when its
     /// results include handles. A closing call runs body on the closing
     /// handle's instance and then releases that handle.
+    /// streams serve host std/io arguments; each is registered on the
+    /// instance under a fresh id, written to ids before body runs.
     pub fn submit_handles(
         options: CallOptions,
         handles: Vec<Option<Arc<Handle>>>,
         closing: Option<Arc<Handle>>,
+        streams: Vec<Option<Provider>>,
+        ids: Arc<Mutex<Vec<i64>>>,
         body: impl FnOnce(CallOptions, Arc<Instance>, bool) -> Result<T, LibraryError> + Send + 'static,
     ) -> Self {
+        if STREAM_THREAD.with(|s| s.get()) {
+            return Self::settled(Err(LibraryError::new(ErrorKind::Reentrant, "host stream called back into the library")));
+        }
         let first = handles.iter().flatten().next().cloned();
         let me = match (&first, &closing) {
             (Some(f), Some(c)) if Arc::ptr_eq(f, c) => None,
@@ -685,6 +697,22 @@ impl<T: Send + 'static> Operation<T> {
                     cancellation.cancel();
                 }
             }
+            let mut options = options;
+            {
+                let mut state = inst.state();
+                let mut ids = ids.lock().unwrap_or_else(|e| e.into_inner());
+                for (i, stream) in streams.into_iter().enumerate() {
+                    if let Some(provider) = stream {
+                        state.next_stream += 1;
+                        ids[i] = state.next_stream;
+                        let name = format!("goalchemy.stream.{}", state.next_stream);
+                        state.streams.insert(name, provider);
+                    }
+                }
+                for (name, provider) in state.streams.iter() {
+                    options.providers.insert(name.clone(), provider.clone());
+                }
+            }
             let owner = inst.clone();
             let closing_id = closing.as_ref().map(|c| c.id);
             let result = inst.run(move || {
@@ -709,7 +737,7 @@ impl<T: Send + 'static> Operation<T> {
             result.and_then(|r| r)
         })
     }
-    fn settled(result: Result<T, LibraryError>) -> Self {
+    pub fn settled(result: Result<T, LibraryError>) -> Self {
         let state = Arc::new(OperationState {
             completion: Mutex::new(Completion { result: Some(result), waker: None }),
             wake: Condvar::new(),
@@ -727,10 +755,132 @@ pub fn library_close(h: &Arc<Handle>, body: impl FnOnce(CallOptions, Arc<Instanc
     if let Some(active) = h.active.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         active.cancel();
     }
-    Operation::submit_handles(CallOptions::default(), vec![Some(h.clone())], Some(h.clone()), move |options, inst, fresh| {
+    Operation::submit_handles(CallOptions::default(), vec![Some(h.clone())], Some(h.clone()), vec![], Default::default(), move |options, inst, fresh| {
         if inst.state().poisoned {
             return Ok(());
         }
         body(options, inst, fresh)
     })
+}
+
+thread_local! {static STREAM_THREAD: std::cell::Cell<bool> = std::cell::Cell::new(false);}
+type StreamFn<A, R> = Box<dyn FnMut(A) -> std::io::Result<R> + Send>;
+/// A host stream passed for a std/io parameter. Build one from a Read,
+/// Write or Read + Seek value, or from bytes; add a Close action with
+/// with_close (dropping the stream also closes Rust values).
+pub struct Stream {
+    read: Option<StreamFn<usize, Vec<u8>>>,
+    write: Option<StreamFn<Vec<u8>, usize>>,
+    seek: Option<StreamFn<std::io::SeekFrom, u64>>,
+    close: Option<Box<dyn FnMut() -> std::io::Result<()> + Send>>,
+}
+fn read_into<R: std::io::Read>(r: &mut R, n: usize) -> std::io::Result<Vec<u8>> {
+    let mut buf = vec![0; n];
+    let k = r.read(&mut buf)?;
+    buf.truncate(k);
+    Ok(buf)
+}
+impl Stream {
+    pub fn reader(mut r: impl std::io::Read + Send + 'static) -> Self {
+        Self { read: Some(Box::new(move |n| read_into(&mut r, n))), write: None, seek: None, close: None }
+    }
+    pub fn writer(mut w: impl std::io::Write + Send + 'static) -> Self {
+        Self { read: None, write: Some(Box::new(move |d: Vec<u8>| { w.write_all(&d)?; w.flush()?; Ok(d.len()) })), seek: None, close: None }
+    }
+    pub fn read_seeker(r: impl std::io::Read + std::io::Seek + Send + 'static) -> Self {
+        let shared = Arc::new(Mutex::new(r));
+        let (a, b) = (shared.clone(), shared);
+        Self {
+            read: Some(Box::new(move |n| read_into(&mut *a.lock().unwrap_or_else(|e| e.into_inner()), n))),
+            write: None,
+            seek: Some(Box::new(move |pos| b.lock().unwrap_or_else(|e| e.into_inner()).seek(pos))),
+            close: None,
+        }
+    }
+    pub fn write_seeker(w: impl std::io::Write + std::io::Seek + Send + 'static) -> Self {
+        let shared = Arc::new(Mutex::new(w));
+        let (a, b) = (shared.clone(), shared);
+        Self {
+            read: None,
+            write: Some(Box::new(move |d: Vec<u8>| { let mut w = a.lock().unwrap_or_else(|e| e.into_inner()); w.write_all(&d)?; w.flush()?; Ok(d.len()) })),
+            seek: Some(Box::new(move |pos| b.lock().unwrap_or_else(|e| e.into_inner()).seek(pos))),
+            close: None,
+        }
+    }
+    /// A seekable reader over a copy of bytes.
+    pub fn bytes(data: impl Into<Vec<u8>>) -> Self {
+        Self::read_seeker(std::io::Cursor::new(data.into()))
+    }
+    pub fn with_close(mut self, close: impl FnMut() -> std::io::Result<()> + Send + 'static) -> Self {
+        self.close = Some(Box::new(close));
+        self
+    }
+}
+fn stream_int(b: &[u8], at: usize) -> i64 {
+    let mut v = [0u8; 8];
+    v.copy_from_slice(&b[at..at + 8]);
+    i64::from_be_bytes(v)
+}
+fn stream_reply(v: i64) -> Vec<u8> {
+    let mut out = vec![0u8];
+    out.extend_from_slice(&v.to_be_bytes());
+    out
+}
+fn serve_stream(s: &mut Stream, req: &[u8]) -> std::io::Result<Vec<u8>> {
+    let bad = || std::io::Error::new(std::io::ErrorKind::InvalidInput, "hostio: malformed stream request");
+    match req.first() {
+        Some(b'r') if req.len() == 9 => {
+            let n = stream_int(req, 1);
+            if !(0..128 << 10).contains(&n) {
+                return Err(bad());
+            }
+            let data = (s.read.as_mut().ok_or_else(bad)?)(n as usize)?;
+            if data.len() > n as usize {
+                return Err(bad());
+            }
+            let mut out = vec![if n > 0 && data.is_empty() { 1 } else { 0 }];
+            out.extend_from_slice(&data);
+            Ok(out)
+        }
+        Some(b'w') => Ok(stream_reply((s.write.as_mut().ok_or_else(bad)?)(req[1..].to_vec())? as i64)),
+        Some(b's') if req.len() == 10 => {
+            let off = stream_int(req, 1);
+            let pos = match req[9] {
+                0 if off >= 0 => std::io::SeekFrom::Start(off as u64),
+                1 => std::io::SeekFrom::Current(off),
+                2 => std::io::SeekFrom::End(off),
+                _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Seek: invalid position")),
+            };
+            Ok(stream_reply((s.seek.as_mut().ok_or_else(bad)?)(pos)? as i64))
+        }
+        Some(b'c') => {
+            if let Some(close) = s.close.as_mut() {
+                close()?;
+            }
+            Ok(vec![0])
+        }
+        _ => Err(bad()),
+    }
+}
+/// Adapts a host stream to the provider serving one std/io parameter; reads
+/// and writes copy their buffers and end of stream becomes io.EOF.
+pub fn library_stream(stream: Option<Stream>, kind: &str) -> Result<Option<Provider>, LibraryError> {
+    let Some(stream) = stream else { return Ok(None) };
+    if (kind.contains("Read") && stream.read.is_none())
+        || (kind.contains("Write") && stream.write.is_none())
+        || (kind.contains("Seek") && stream.seek.is_none())
+    {
+        return Err(LibraryError::new(ErrorKind::InvalidArgument, format!("stream does not support {kind}")));
+    }
+    let stream = Arc::new(Mutex::new(stream));
+    Ok(Some(Arc::new(move |request: ProviderRequest| {
+        STREAM_THREAD.with(|s| s.set(true));
+        let result = serve_stream(&mut stream.lock().unwrap_or_else(|e| e.into_inner()), &request.payload);
+        STREAM_THREAD.with(|s| s.set(false));
+        Ok(result.unwrap_or_else(|e| {
+            let mut out = vec![2u8];
+            out.extend_from_slice(e.to_string().as_bytes());
+            out
+        }))
+    })))
 }

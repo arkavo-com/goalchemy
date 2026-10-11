@@ -277,7 +277,7 @@ func (e *emitter) library() (string, error) {
 			params = params[1:]
 		}
 		for _, t := range params {
-			if !sourceContext(t) && abi.Handle(t) == nil {
+			if !sourceContext(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				convert(t)
 			}
 		}
@@ -432,7 +432,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		b.WriteString(") {}\n")
 	}
 	params := f.Sig.Params
-	var ps, as, hs, pre []string
+	var ps, as, hs, pre, streams []string
 	if recv != nil {
 		params = params[1:]
 		hs = append(hs, "h")
@@ -444,6 +444,13 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 			continue
 		}
 		a := fmt.Sprintf("a%d", i)
+		if k := ir.StreamKind(t); k != "" {
+			ps = append(ps, "Object "+a)
+			pre = append(pre, fmt.Sprintf("final Callback.Provider s%d=Library.stream(a%d,%q);\n", i, i, k))
+			as = append(as, fmt.Sprintf("(ids[%d]==0?null:%s(ids[%d]))", len(streams), e.symbol(e.p.StreamAdapter(k).Sym), len(streams)))
+			streams = append(streams, fmt.Sprintf("s%d", i))
+			continue
+		}
 		ps = append(ps, typ(t)+" "+a)
 		if h := abi.Handle(t); h != nil {
 			pre = append(pre, fmt.Sprintf("final Library.Handle h%d=handle%s(a%d);\n", i, h.Name, i))
@@ -459,7 +466,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	for _, p := range pre {
 		b.WriteString(p)
 	}
-	fmt.Fprintf(b, "final Library.Handle[] hs=new Library.Handle[]{%s};\n", strings.Join(hs, ","))
+	fmt.Fprintf(b, "final Library.Handle[] hs=new Library.Handle[]{%s};\nfinal long[] ids=new long[%d];\n", strings.Join(hs, ","), len(streams))
 	fmt.Fprintf(b, "return Library.submit(options,libraryState,hs,%s,(inst,rv) -> {\n", frame(f, as))
 	if hasErr {
 		fmt.Fprintf(b, "Library.Failure err=sourceFailure((Box)rv[%d]);if(err!=null)throw err;\n", n)
@@ -484,6 +491,6 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	} else {
 		b.WriteString("return null;\n")
 	}
-	b.WriteString("},null);\n} catch(Library.Failure e) { return Library.failed(e); }\n" + indent + "}\n")
+	fmt.Fprintf(b, "},null,new Callback.Provider[]{%s},ids);\n} catch(Library.Failure e) { return Library.failed(e); }\n%s}\n", strings.Join(streams, ","), indent)
 	return nil
 }
