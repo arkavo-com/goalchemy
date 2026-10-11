@@ -34,6 +34,7 @@ const (
 	ClientKey          = "client-key"
 	RootCAs            = "root-cas"
 	InsecureSkipVerify = "insecure-skip-verify"
+	UnixSocket         = "unix-socket"
 )
 
 var invalid = errors.New("http: invalid request or limit")
@@ -52,8 +53,10 @@ func Do(ctx context.Context, method, rawURL string, headers []string, body []byt
 // DoWith is Do with transport options as alternating names and values:
 // ClientCert and ClientKey (both or neither) present a client certificate,
 // RootCAs trusts more certificate authorities in addition to the system's,
-// and InsecureSkipVerify "true" disables server certificate verification.
-// Each name appears at most once. Options apply to https URLs.
+// InsecureSkipVerify "true" disables server certificate verification, and
+// UnixSocket connects to the Unix domain socket at its path instead of the
+// URL's host, which still names the Host header and TLS server. Each name
+// appears at most once. TLS options apply to https URLs.
 func DoWith(ctx context.Context, method, rawURL string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64, options []string) (int, []string, []byte, error) {
 	if ctx == nil || (method != "GET" && method != "POST") || len(body) > MaxBytes || (method == "GET" && len(body) != 0) || maxResponseBytes < 0 || maxResponseBytes > MaxBytes || timeoutMillis < 1 || timeoutMillis > 300000 || len(headers)%2 != 0 || len(rawURL) > 8192 {
 		return 0, nil, nil, invalid
@@ -62,7 +65,7 @@ func DoWith(ctx context.Context, method, rawURL string, headers []string, body [
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" {
 		return 0, nil, nil, invalid
 	}
-	config, err := tlsConfig(options)
+	config, socket, err := transportOptions(options)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -83,7 +86,15 @@ func DoWith(ctx context.Context, method, rawURL string, headers []string, body [
 	}
 	// Dedicated transport avoids unbounded global pooled resources and host
 	// default-client mutations; proxies follow the standard trusted host config.
-	tr := &stdhttp.Transport{Proxy: stdhttp.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 10 * time.Second, TLSClientConfig: config, DisableKeepAlives: true, MaxResponseHeaderBytes: MaxHeaderBytes}
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	proxy, dial := stdhttp.ProxyFromEnvironment, dialer.DialContext
+	if socket != "" {
+		proxy = nil
+		dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socket)
+		}
+	}
+	tr := &stdhttp.Transport{Proxy: proxy, DialContext: dial, TLSHandshakeTimeout: 10 * time.Second, TLSClientConfig: config, DisableKeepAlives: true, MaxResponseHeaderBytes: MaxHeaderBytes}
 	defer tr.CloseIdleConnections()
 	client := &stdhttp.Client{Transport: tr, CheckRedirect: func(*stdhttp.Request, []*stdhttp.Request) error { return stdhttp.ErrUseLastResponse }}
 	resp, err := client.Do(req)
@@ -111,12 +122,16 @@ func DoWith(ctx context.Context, method, rawURL string, headers []string, body [
 	}
 	return resp.StatusCode, result, out, nil
 }
-func tlsConfig(options []string) (*tls.Config, error) {
+
+// MaxSocketPath bounds the UnixSocket option.
+const MaxSocketPath = 4096
+
+func transportOptions(options []string) (*tls.Config, string, error) {
 	if len(options) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 	if len(options)%2 != 0 {
-		return nil, invalid
+		return nil, "", invalid
 	}
 	values := map[string]string{}
 	total := 0
@@ -124,22 +139,23 @@ func tlsConfig(options []string) (*tls.Config, error) {
 		name, value := options[i], options[i+1]
 		total += len(name) + len(value)
 		_, seen := values[name]
-		if total > MaxOptionBytes || seen || (name != ClientCert && name != ClientKey && name != RootCAs && name != InsecureSkipVerify) {
-			return nil, invalid
+		if total > MaxOptionBytes || seen || (name != ClientCert && name != ClientKey && name != RootCAs && name != InsecureSkipVerify && name != UnixSocket) {
+			return nil, "", invalid
 		}
 		values[name] = value
 	}
 	cert, hasCert := values[ClientCert]
 	key, hasKey := values[ClientKey]
 	skip, hasSkip := values[InsecureSkipVerify]
-	if hasCert != hasKey || hasSkip && skip != "true" && skip != "false" {
-		return nil, invalid
+	socket, hasSocket := values[UnixSocket]
+	if hasCert != hasKey || hasSkip && skip != "true" && skip != "false" || hasSocket && (socket == "" || len(socket) > MaxSocketPath || strings.IndexByte(socket, 0) >= 0) {
+		return nil, "", invalid
 	}
 	config := &tls.Config{InsecureSkipVerify: skip == "true"}
 	if hasCert {
 		pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
 		if err != nil {
-			return nil, badTLS
+			return nil, "", badTLS
 		}
 		config.Certificates = []tls.Certificate{pair}
 	}
@@ -149,11 +165,11 @@ func tlsConfig(options []string) (*tls.Config, error) {
 			pool = x509.NewCertPool()
 		}
 		if !pool.AppendCertsFromPEM([]byte(roots)) {
-			return nil, badTLS
+			return nil, "", badTLS
 		}
 		config.RootCAs = pool
 	}
-	return config, nil
+	return config, socket, nil
 }
 
 func token(s string) bool {

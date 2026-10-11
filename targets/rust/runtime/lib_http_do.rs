@@ -55,6 +55,7 @@ pub struct HttpTls {
     identity: Option<reqwest::Identity>,
     roots: Vec<reqwest::Certificate>,
     insecure: bool,
+    socket: Option<Vec<u8>>,
 }
 
 /// Parses DoWith options. Err(false) is an invalid request and Err(true) a
@@ -70,7 +71,7 @@ pub fn http_tls(options: &[Vec<u8>]) -> Result<Option<HttpTls>, bool> {
     let mut total = 0usize;
     for p in options.chunks(2) {
         total = total.saturating_add(p[0].len() + p[1].len());
-        let known = [&b"client-cert"[..], b"client-key", b"root-cas", b"insecure-skip-verify"].contains(&p[0].as_slice());
+        let known = [&b"client-cert"[..], b"client-key", b"root-cas", b"insecure-skip-verify", b"unix-socket"].contains(&p[0].as_slice());
         if total > 1 << 20 || !known || values.iter().any(|(n, _)| *n == p[0].as_slice()) {
             return Err(false);
         }
@@ -78,7 +79,12 @@ pub fn http_tls(options: &[Vec<u8>]) -> Result<Option<HttpTls>, bool> {
     }
     let get = |name: &[u8]| values.iter().find(|(n, _)| *n == name).map(|(_, v)| *v);
     let skip = get(b"insecure-skip-verify");
-    if get(b"client-cert").is_some() != get(b"client-key").is_some() || skip.is_some_and(|v| v != b"true" && v != b"false") {
+    let socket = get(b"unix-socket");
+    if get(b"client-cert").is_some() != get(b"client-key").is_some()
+        || skip.is_some_and(|v| v != b"true" && v != b"false")
+        || socket.is_some_and(|v| v.is_empty() || v.len() > 4096 || v.contains(&0))
+        || socket.is_some() && cfg!(not(unix))
+    {
         return Err(false);
     }
     let identity = match (get(b"client-cert"), get(b"client-key")) {
@@ -100,7 +106,12 @@ pub fn http_tls(options: &[Vec<u8>]) -> Result<Option<HttpTls>, bool> {
         }
         None => Vec::new(),
     };
-    Ok(Some(HttpTls { identity, roots, insecure: skip == Some(&b"true"[..]) }))
+    Ok(Some(HttpTls {
+        identity,
+        roots,
+        insecure: skip == Some(&b"true"[..]),
+        socket: socket.map(|v| v.to_vec()),
+    }))
 }
 
 pub fn lib_http_do(
@@ -271,7 +282,9 @@ pub fn http_do(
         let result=runtime.block_on(async move{
  let mut builder=reqwest::Client::builder().http1_only().http1_max_headers(1024).redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never()).pool_max_idle_per_host(0).timeout(Duration::from_nanos(remaining as u64));
  let configured=tls.is_some();
- if let Some(tls)=tls{if let Some(identity)=tls.identity{builder=builder.identity(identity)}if !tls.roots.is_empty(){builder=builder.tls_certs_merge(tls.roots)}builder=builder.tls_danger_accept_invalid_certs(tls.insecure)}
+ if let Some(tls)=tls{if let Some(identity)=tls.identity{builder=builder.identity(identity)}if !tls.roots.is_empty(){builder=builder.tls_certs_merge(tls.roots)}builder=builder.tls_danger_accept_invalid_certs(tls.insecure);
+ #[cfg(unix)]
+ if let Some(socket)=tls.socket{use std::os::unix::ffi::OsStringExt;builder=builder.unix_socket(std::path::PathBuf::from(std::ffi::OsString::from_vec(socket)))}}
  let client=match builder.build(){Ok(client)=>client,Err(_) if configured=>return Err("http: invalid TLS option"),Err(e)=>host_fault(&format!("HTTP client acquisition: {e}"))};
  let work=async move{
  let mut request=client.request(if method=="GET"{reqwest::Method::GET}else{reqwest::Method::POST},url);for (n,v) in pairs{request=request.header(n,v)}

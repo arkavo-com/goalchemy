@@ -24,7 +24,8 @@ installHttpHost({
     const secure = request.url.startsWith("https:");
     const options: Record<string, unknown> = { method: request.method, headers, agent: false, maxHeaderSize: 81920, signal: request.signal };
     if (request.tls !== null) {
-      const { cert, key, ca, insecure } = request.tls;
+      const { cert, key, ca, insecure, socket } = request.tls;
+      if (socket !== undefined) options.socketPath = new TextDecoder().decode(Uint8Array.from(socket, c => c.charCodeAt(0)));
       try {
         const extra = ca === undefined ? undefined : [...rootCertificates, ca];
         createSecureContext({ cert, key, ca: extra });

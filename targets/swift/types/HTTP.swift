@@ -16,6 +16,7 @@ struct GHTTPTLS {
   var key: [UInt8]?
   var roots: [UInt8]?
   var insecure = false
+  var socket: [UInt8]?
 }
 struct GHTTPOutput {
   let status: Int64
@@ -80,7 +81,7 @@ enum GHTTP {
       let name = String(decoding: options[i], as: UTF8.self)
       total += options[i].count + options[i + 1].count
       if total > 1 << 20 || values[name] != nil
-        || !["client-cert", "client-key", "root-cas", "insecure-skip-verify"].contains(name)
+        || !["client-cert", "client-key", "root-cas", "insecure-skip-verify", "unix-socket"].contains(name)
         || Array(name.utf8) != options[i]
       {
         throw GReject("http: invalid request or limit")
@@ -88,14 +89,16 @@ enum GHTTP {
       values[name] = options[i + 1]
     }
     let skip = values["insecure-skip-verify"]
+    let socket = values["unix-socket"]
     if (values["client-cert"] == nil) != (values["client-key"] == nil)
       || (skip != nil && skip! != Array("true".utf8) && skip! != Array("false".utf8))
+      || (socket != nil && (socket!.isEmpty || socket!.count > 4096 || socket!.contains(0)))
     {
       throw GReject("http: invalid request or limit")
     }
     return GHTTPTLS(
       cert: values["client-cert"], key: values["client-key"], roots: values["root-cas"],
-      insecure: skip == Array("true".utf8))
+      insecure: skip == Array("true".utf8), socket: socket)
   }
   static func start(_ args: [GValue], _ task: GTask) throws -> GAction {
     let owner = task.owner
@@ -120,6 +123,15 @@ enum GHTTP {
               tls.roots == nil ? nil : (r.baseAddress ?? UnsafePointer(bitPattern: 1)), r.count,
               tls.insecure ? 1 : 0)
           }
+        }
+      }
+      if status == 1, let socket = tls.socket {
+        let stored = (socket + [0]).withUnsafeBufferPointer { p in
+          p.baseAddress!.withMemoryRebound(to: CChar.self, capacity: p.count) { gcn_http_socket(native, $0) }
+        }
+        if stored != 1 {
+          gcn_http_release(native)
+          throw GFault("HTTP allocation failure")
         }
       }
       if status != 1 {

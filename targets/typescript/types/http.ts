@@ -9,12 +9,14 @@ export interface HttpExchange {
   signal: AbortSignal;
   tls: HttpTLS | null;
 }
-// Transport options of lib/http.DoWith; ca adds to the system roots.
+// Transport options of lib/http.DoWith; ca adds to the system roots and
+// socket is a Unix domain socket path that replaces the URL host connection.
 export interface HttpTLS {
   cert?: string;
   key?: string;
   ca?: string;
   insecure: boolean;
+  socket?: string;
 }
 export type HttpOutcome = { status: number; headers: string[]; body: Uint8Array } | { error: string };
 export interface HttpHost {

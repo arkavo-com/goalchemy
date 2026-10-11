@@ -43,10 +43,10 @@ public static partial class R
         internal void Cleanup(){System.Threading.Tasks.Task[] tasks;lock(this){sealedCleanup=true;tasks=stoppers.ToArray();}Exception failure=null;foreach(var task in tasks)try{task.GetAwaiter().GetResult();}catch(Exception e){failure=e;}try{cancel.Dispose();}catch(Exception e){failure=e;}lock(this){stoppers.Clear();failure=fault??failure;}if(failure!=null)throw new HostFault("HTTP cancellation cleanup: "+failure);}
     }
     const string HTTP_BAD_TLS="http: invalid TLS option";
-    static readonly HashSet<string> HTTP_OPTIONS=new(StringComparer.Ordinal){"client-cert","client-key","root-cas","insecure-skip-verify"};
+    static readonly HashSet<string> HTTP_OPTIONS=new(StringComparer.Ordinal){"client-cert","client-key","root-cas","insecure-skip-verify","unix-socket"};
     sealed class HttpTls
     {
-        internal System.Net.Security.SslStreamCertificateContext client;internal System.Security.Cryptography.X509Certificates.X509Certificate2Collection roots;internal bool insecure;
+        internal System.Net.Security.SslStreamCertificateContext client;internal System.Security.Cryptography.X509Certificates.X509Certificate2Collection roots;internal bool insecure;internal string socket;
         internal bool Validate(System.Security.Cryptography.X509Certificates.X509Certificate certificate,System.Security.Cryptography.X509Certificates.X509Chain chain,System.Net.Security.SslPolicyErrors errors)
         {
             if(insecure||errors==System.Net.Security.SslPolicyErrors.None)return true;
@@ -67,9 +67,9 @@ public static partial class R
         if(options.Length==0)return null;if(options.Length%2!=0)throw new Native.Reject(invalid);
         var values=new Dictionary<string,string>(StringComparer.Ordinal);long total=0;
         for(int i=0;i<options.Length;i+=2){total+=options[i].Length+options[i+1].Length;if(total>1<<20||!HTTP_OPTIONS.Contains(options[i])||!values.TryAdd(options[i],options[i+1]))throw new Native.Reject(invalid);}
-        values.TryGetValue("insecure-skip-verify",out var skip);
-        if(values.ContainsKey("client-cert")!=values.ContainsKey("client-key")||skip!=null&&skip!="true"&&skip!="false")throw new Native.Reject(invalid);
-        var tls=new HttpTls{insecure=skip=="true"};
+        values.TryGetValue("insecure-skip-verify",out var skip);values.TryGetValue("unix-socket",out var socket);
+        if(values.ContainsKey("client-cert")!=values.ContainsKey("client-key")||skip!=null&&skip!="true"&&skip!="false"||socket!=null&&(socket.Length==0||socket.Length>4096||socket.Contains('\0')))throw new Native.Reject(invalid);
+        var tls=new HttpTls{insecure=skip=="true",socket=socket==null?null:System.Text.Encoding.UTF8.GetString(System.Text.Encoding.Latin1.GetBytes(socket))};
         try
         {
             if(values.TryGetValue("root-cas",out var roots))tls.roots=httpCertificates(roots);
@@ -132,6 +132,7 @@ public static partial class R
             {
                 handler=new SocketsHttpHandler{AllowAutoRedirect=false,AutomaticDecompression=System.Net.DecompressionMethods.None,MaxResponseHeadersLength=64,RequestHeaderEncodingSelector=(name,message)=>System.Text.Encoding.Latin1,ResponseHeaderEncodingSelector=(name,message)=>System.Text.Encoding.Latin1};
                 if(tls!=null){handler.SslOptions.ClientCertificateContext=tls.client;handler.SslOptions.RemoteCertificateValidationCallback=(sender,certificate,chain,errors)=>tls.Validate(certificate,chain,errors);}
+                if(tls?.socket!=null){string path=tls.socket;handler.UseProxy=false;handler.ConnectCallback=async(context,cancel)=>{var socket=new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix,System.Net.Sockets.SocketType.Stream,System.Net.Sockets.ProtocolType.Unspecified);try{await socket.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(path),cancel);return new System.Net.Sockets.NetworkStream(socket,true);}catch{socket.Dispose();throw;}};}
                 client=new HttpClient(handler,false){Timeout=System.Threading.Timeout.InfiniteTimeSpan};response=client.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,lease.cancel.Token).GetAwaiter().GetResult();
                 var raw=response.Content.ReadAsStreamAsync(lease.cancel.Token).GetAwaiter().GetResult();bodies.Add(raw);Stream body=httpBodyWrapper(raw)??throw new HostFault("null HTTP body wrapper");if(!bodies.Contains(body))bodies.Add(body);
                 int code=(int)response.StatusCode;bool bodyless=code==204||code==304||code>=100&&code<200||response.Content.Headers.ContentLength==0;

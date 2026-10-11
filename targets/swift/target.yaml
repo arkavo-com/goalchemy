@@ -789,7 +789,7 @@ functions:
   - std.context.err
   harness: 'native: GNative.lib_http_do({args}, {types})'
 - id: lib.http.do_with
-  contract_version: 1.0.0
+  contract_version: 1.1.0
   symbol: GNative.lib_http_do_with
   implementation: runtime/lib_http_do_with.swift
   requires:
