@@ -136,9 +136,11 @@ The host receives a native stream. A handle type whose pointer has
 | Go | a value of the standard `io` interface type; it also has `Close` (and `WriteTo` when it reads) | `h.IO()`, an `io` interface with `Close` |
 | TypeScript | `SourceStream`, typed as `SourceReader`, `SourceWriter`, `SourceSeeker` and `SourceCloser` as the kind allows: `read(size)` (null at end), `write(data)`, `seek(offset, whence)`, `stream()` (a web `ReadableStream`), `writable()` (a web `WritableStream`), `for await`, `close()` and `await using` | `h.io()`, `h.stream()`, `h.writable()` and `for await (const chunk of h)` |
 | Python | `rt.SourceStream`, an unbuffered binary file (`io.RawIOBase`): `read`, `readinto`, `readall`, `write`, `seek`, `tell`, `close` and `with` | `h.as_file()` |
-
-Java, C#, Rust, C and Swift reject exports returning `std/io` interfaces with
-`GCE007` for now.
+| Java | `Library.SourceStream` (`AutoCloseable`): `asInputStream()`, `asOutputStream()`, blocking `read`/`write`/`seek`, and `readAsync`/`writeAsync`/`seekAsync`/`closeAsync` returning `Library.Operation` | `h.io()`, `h.asInputStream()`, `h.asOutputStream()` |
+| C# | `Library.SourceStream`, a `System.IO.Stream` (`CanRead`/`CanWrite`/`CanSeek` follow the kind, `ReadAsync`/`WriteAsync`, `Dispose`/`DisposeAsync`, `CloseAsync()`) | `h.AsStream()` |
+| Rust | `SourceStream` (cloneable): `std::io::Read`, `Write` and `Seek`, `read_chunk(n)` and `close()` returning `Operation` | `h.io()` |
+| C | a `gxc_handle` of type `"io.Reader"`, `"io.ReadCloser"` and so on: `gxc_stream_read`, `gxc_stream_write`, `gxc_stream_seek`, `gxc_handle_close` and `gxc_handle_free` | the same functions on the handle |
+| Swift | `GoalchemySourceStream`: `read(_:)` (nil at end), `read(into:)`, `write(_:)`, `seek(_:_:)`, `close()`, `for try await chunk in stream` (`Data` chunks); `deinit` releases | `h.io()` |
 
 - A returned stream is a handle of the call's instance, with the same rules:
   calls on it are serialized with the instance's other calls, a nil interface
@@ -153,14 +155,25 @@ Java, C#, Rust, C and Swift reject exports returning `std/io` interfaces with
   read returns at most 1 MiB, and writes are split into 1 MiB calls. A read
   returns data, end of stream or an error: source `io.EOF` becomes the host's
   end of stream, and other source errors fail with kind `source`.
-- Operations a kind does not have fail with kind `unsupported` (TypeScript
-  types and Python `readable()`/`writable()`/`seekable()` reflect the kind).
+- Operations a kind does not have fail with kind `unsupported` (Rust
+  `ErrorKind::Unsupported` or `io::ErrorKind::Unsupported`, C kind 11, C#
+  `NotSupportedException`). TypeScript types, Python
+  `readable()`/`writable()`/`seekable()`, Java `canRead()`, C# `CanRead` and
+  so on reflect the kind.
+- Java `InputStream`/`OutputStream` and C# `Stream` operations report
+  failures as `IOException` whose cause is the library failure, and closing
+  them closes the handle. Rust `Read`/`Write`/`Seek` errors wrap the
+  `LibraryError`.
 - In TypeScript, ending or canceling `stream()` does not close the handle;
   closing `writable()` does. Use `Readable.from(stream)` or
   `Readable.fromWeb(stream.stream())` for a Node `Readable`.
-- Python streams are synchronous: each operation blocks until its call
-  completes. Wrap them in `io.BufferedReader` or `io.BufferedWriter` for
-  buffering.
+- Python, Rust, C and Swift stream operations, and the Java and C#
+  `InputStream`/`OutputStream`/`Stream` methods, block until their call
+  completes. Wrap Python streams in `io.BufferedReader` or
+  `io.BufferedWriter` for buffering.
+- A Swift view does not own its handle: its `deinit` does not release the
+  handle. A Rust view holds a clone of the handle, so the handle is released
+  when the last clone, view or not, is dropped.
 
 Copying 256 MiB host → source → host (a host stream passed to an export that
 returns it as an `io.ReadCloser`) runs with bounded memory; the integration

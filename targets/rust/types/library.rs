@@ -23,6 +23,8 @@ pub enum ErrorKind {
     InstanceMismatch,
     /// A host stream method called back into the library.
     Reentrant,
+    /// The source stream does not have the operation.
+    Unsupported,
 }
 #[derive(Clone, Debug)]
 pub struct LibraryError {
@@ -883,4 +885,99 @@ pub fn library_stream(stream: Option<Stream>, kind: &str) -> Result<Option<Provi
             out
         }))
     })))
+}
+
+/// Source std/io operations behind a host stream view; each one is a
+/// library call on the handle. read completes with the data and whether the
+/// source reached io.EOF.
+pub struct StreamOps {
+    pub read: Option<fn(&Arc<Handle>, i64) -> Operation<(Vec<u8>, bool)>>,
+    pub write: Option<fn(&Arc<Handle>, Vec<u8>) -> Operation<i64>>,
+    pub seek: Option<fn(&Arc<Handle>, i64, i64) -> Operation<i64>>,
+    pub close: fn(&Arc<Handle>) -> Operation<()>,
+}
+/// The host view of a source std/io reader or writer: std::io::Read, Write
+/// and Seek as the source allows. Each operation blocks on a library call
+/// on the handle; failures are io errors wrapping a LibraryError, and an
+/// operation the source lacks fails with io::ErrorKind::Unsupported. close
+/// runs the source Close, if any; dropping the last clone releases the
+/// handle without it.
+#[derive(Clone)]
+pub struct SourceStream {
+    h: Arc<Handle>,
+    ops: &'static StreamOps,
+}
+impl std::fmt::Debug for SourceStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SourceStream")
+    }
+}
+fn stream_error(e: LibraryError) -> std::io::Error {
+    std::io::Error::other(e)
+}
+fn unsupported() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Unsupported, "unsupported")
+}
+impl SourceStream {
+    pub fn new(h: Arc<Handle>, ops: &'static StreamOps) -> Self {
+        Self { h, ops }
+    }
+    pub fn can_read(&self) -> bool {
+        self.ops.read.is_some()
+    }
+    pub fn can_write(&self) -> bool {
+        self.ops.write.is_some()
+    }
+    pub fn can_seek(&self) -> bool {
+        self.ops.seek.is_some()
+    }
+    /// Reads up to n bytes; None at end of stream.
+    pub fn read_chunk(&self, n: usize) -> Result<Option<Vec<u8>>, LibraryError> {
+        let read = self.ops.read.ok_or_else(|| LibraryError::new(ErrorKind::Unsupported, "unsupported"))?;
+        if n == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        let (data, eof) = read(&self.h, n.min(1 << 20) as i64).wait()?;
+        Ok(if data.is_empty() && eof { None } else { Some(data) })
+    }
+    /// Runs the source Close, if any, and releases the handle.
+    pub fn close(&self) -> Operation<()> {
+        (self.ops.close)(&self.h)
+    }
+}
+impl std::io::Read for SourceStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.ops.read.is_none() {
+            return Err(unsupported());
+        }
+        match self.read_chunk(buf.len()).map_err(stream_error)? {
+            None => Ok(0),
+            Some(data) => {
+                buf[..data.len()].copy_from_slice(&data);
+                Ok(data.len())
+            }
+        }
+    }
+}
+impl std::io::Write for SourceStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let write = self.ops.write.ok_or_else(unsupported)?;
+        let n = buf.len().min(1 << 20);
+        let k = write(&self.h, buf[..n].to_vec()).wait().map_err(stream_error)?;
+        Ok(k as usize)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl std::io::Seek for SourceStream {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        let seek = self.ops.seek.ok_or_else(unsupported)?;
+        let (off, whence) = match pos {
+            std::io::SeekFrom::Start(o) => (o as i64, 0),
+            std::io::SeekFrom::Current(o) => (o, 1),
+            std::io::SeekFrom::End(o) => (o, 2),
+        };
+        seek(&self.h, off, whence).wait().map(|p| p as u64).map_err(stream_error)
+    }
 }

@@ -249,10 +249,21 @@ func (e *emitter) library() (string, error) {
 			}
 		}
 		for i, t := range f.Sig.Results {
-			if (i == len(f.Sig.Results)-1 && sourceError(t)) || abi.Handle(t) != nil {
+			if (i == len(f.Sig.Results)-1 && sourceError(t)) || abi.Handle(t) != nil || ir.StreamKind(t) != "" {
 				continue
 			}
 			convert(t)
+		}
+	}
+	if e.p.HostIOFunc("ReadView") != nil {
+		for _, name := range []string{"ReadView", "WriteView", "SeekView"} {
+			f := e.p.HostIOFunc(name)
+			for _, t := range f.Sig.Params[1:] {
+				convert(t)
+			}
+			for _, t := range f.Sig.Results[:len(f.Sig.Results)-1] {
+				convert(t)
+			}
 		}
 	}
 	var errorTypes []*ir.Type
@@ -287,6 +298,58 @@ func (e *emitter) library() (string, error) {
 	}
 	b.WriteString("}\nprivate let gLibraryState = GLibraryState(reset: gLibraryReset, save: gLibrarySave, load: gLibraryLoad)\n")
 	initFrame := "{ " + e.names.Symbol(e.p.Init.Sym) + "([], []) }"
+	streamOps := func(name string, ops ir.StreamOps, obj string, closeStart string) {
+		op := func(fn string, params []string, out string) string {
+			f := e.p.HostIOFunc(fn)
+			var inputs, args []string
+			args = append(args, obj)
+			for i, p := range params {
+				inputs = append(inputs, fmt.Sprintf("try gInput%d(%s)", f.Sig.Params[i+1].U().ID, p))
+				args = append(args, fmt.Sprintf("args[%d]", i))
+			}
+			last := len(f.Sig.Results) - 1
+			return fmt.Sprintf("{ handle, %s in\n        let args = try GLibrary.prepare { [%s] }\n        return try GLibrary.submitHandles(args, CallOptions(), gLibraryState, [handle], nil, [], GStreamIDs(0), %s, { args, context, objects in %s([%s], []) }, { rv, _ in\n            if let error = try gSourceError(rv[%d]) { throw error }\n            return %s\n        }).wait()\n    }",
+				strings.Join(params, ", "), strings.Join(inputs, ", "), initFrame, e.names.Symbol(f.Sym), strings.Join(args, ", "), last, out)
+		}
+		res := func(fn string, i int) string {
+			return fmt.Sprintf("try gOutput%d(rv[%d])", e.p.HostIOFunc(fn).Sig.Results[i].U().ID, i)
+		}
+		read, write, seek := "nil", "nil", "nil"
+		if ops.Read {
+			read = op("ReadView", []string{"n"}, "("+res("ReadView", 0)+" ?? [], "+res("ReadView", 1)+")")
+		}
+		if ops.Write {
+			write = op("WriteView", []string{"d"}, "Int64("+res("WriteView", 0)+")")
+		}
+		if ops.Seek {
+			seek = op("SeekView", []string{"off", "wh"}, "Int64("+res("SeekView", 0)+")")
+		}
+		fmt.Fprintf(&b, "private let %s = GStreamOps(\n    read: %s,\n    write: %s,\n    seek: %s,\n    close: { handle in try GLibrary.close(handle, gLibraryState, %s, %s, { rv, _ in if let error = try gSourceError(rv[0]) { throw error } }) })\n",
+			name, read, write, seek, initFrame, closeStart)
+	}
+	unwrap := "{ if case .pointer(let cell) = objects[0] { return cell.value }; return .nilValue }()"
+	kinds := map[string]bool{}
+	for _, f := range funcs {
+		for _, t := range f.Sig.Results {
+			if k := ir.StreamKind(t); k != "" && !kinds[k] {
+				kinds[k] = true
+				start := "nil"
+				if ir.StreamCloses(k) {
+					start = fmt.Sprintf("{ args, context, objects in %s([%s], []) }", e.names.Symbol(e.p.HostIOFunc("CloseView").Sym), unwrap)
+				}
+				streamOps("gStreamOps"+k, ir.KindOps(k), unwrap, start)
+			}
+		}
+	}
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			start := "nil"
+			if h.Close != nil {
+				start = fmt.Sprintf("{ args, context, objects in %s([objects[0]], []) }", e.names.Symbol(h.Close.Sym))
+			}
+			streamOps("gStreamOps"+h.Name, h.Stream, fmt.Sprintf(".interface(GInterface(%d, objects[0]))", h.Ptr.ID), start)
+		}
+	}
 	for _, h := range abi.Handles {
 		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close() when\n/// done; deinit releases it without running Close.\npublic final class %s {\n    let handle: GHandle\n    init(_ handle: GHandle) { self.handle = handle }\n    deinit { GLibrary.finalize(handle) }\n", h.Name, swiftPublic(h.Name))
 		start := "nil"
@@ -294,6 +357,9 @@ func (e *emitter) library() (string, error) {
 			start = fmt.Sprintf("{ args, context, objects in %s([objects[0]], []) }", e.names.Symbol(h.Close.Sym))
 		}
 		fmt.Fprintf(&b, "    /// Runs the source Close, if any, and releases the handle. Queued calls\n    /// fail and an active call is canceled first.\n    public func close() throws {\n        try GLibrary.close(handle, gLibraryState, %s, %s, { rv, _ in if let error = try gSourceError(rv[0]) { throw error } })\n    }\n", initFrame, start)
+		if h.Stream.Any() {
+			fmt.Fprintf(&b, "    /// The handle as a stream; each operation is a call on the handle and\n    /// closing the stream closes the handle.\n    public func io() -> GoalchemySourceStream { GoalchemySourceStream(handle, gStreamOps%s, owned: false) }\n", h.Name)
+		}
 		for _, f := range h.Methods {
 			if err := e.libraryWrapper(&b, abi, ir.MethodName(f), h, f, typ, initFrame, used, reserved); err != nil {
 				return "", err
@@ -319,6 +385,9 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		if h := abi.Handle(t); h != nil {
 			// Qualified: inside a handle class a method may shadow the type name.
 			return "GoalchemyGenerated." + swiftPublic(h.Name) + "?"
+		}
+		if ir.StreamKind(t) != "" {
+			return "GoalchemySourceStream?"
 		}
 		return typ(t)
 	}
@@ -388,6 +457,9 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	out := func(i int) string {
 		if h := abi.Handle(results[i]); h != nil {
 			return fmt.Sprintf("GLibrary.wrap(instance, rv[%d], %q, GoalchemyGenerated.%s.init)", i, h.Name, swiftPublic(h.Name))
+		}
+		if k := ir.StreamKind(results[i]); k != "" {
+			return fmt.Sprintf("{ if case .nilValue = rv[%d] { return nil }; return GLibrary.wrap(instance, .pointer(GCell(rv[%d])), \"io.%s\", { GoalchemySourceStream($0, gStreamOps%s) }) }()", i, i, k, k)
 		}
 		return fmt.Sprintf("try gOutput%d(rv[%d])", results[i].U().ID, i)
 	}

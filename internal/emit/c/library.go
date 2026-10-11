@@ -246,6 +246,10 @@ static void gxc_poll(void) {
 		f     *ir.Func
 		recv  *ir.Handle
 		close bool
+		// self names the receiver type of a stream entry, whose first
+		// parameter is the handle's object, boxed as box when set.
+		self string
+		box  *ir.Type
 	}
 	var entries []entry
 	for _, f := range e.p.Exports {
@@ -264,8 +268,49 @@ static void gxc_poll(void) {
 			entries = append(entries, entry{name: "", f: h.Close, recv: h, close: true})
 		}
 	}
+	type streamType struct {
+		name string
+		ops  ir.StreamOps
+		box  *ir.Type
+	}
+	var streamTypes []streamType
+	kindClose := map[string]int{}
+	seenKinds := map[string]bool{}
+	var funcs []*ir.Func
+	funcs = append(funcs, e.p.Exports...)
+	for _, h := range abi.Handles {
+		funcs = append(funcs, h.Methods...)
+	}
+	for _, f := range funcs {
+		for _, t := range f.Sig.Results {
+			if k := ir.StreamKind(t); k != "" && !seenKinds[k] {
+				seenKinds[k] = true
+				streamTypes = append(streamTypes, streamType{name: "io." + k, ops: ir.KindOps(k)})
+				kindClose["io."+k] = -1
+				if ir.StreamCloses(k) {
+					kindClose["io."+k] = len(entries)
+					entries = append(entries, entry{f: e.p.HostIOFunc("CloseView"), close: true, self: "io." + k})
+				}
+			}
+		}
+	}
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			streamTypes = append(streamTypes, streamType{name: h.Name, ops: h.Stream, box: h.Ptr})
+		}
+	}
+	for _, st := range streamTypes {
+		for _, op := range []struct {
+			on     bool
+			fn, id string
+		}{{st.ops.Read, "ReadView", "read"}, {st.ops.Write, "WriteView", "write"}, {st.ops.Seek, "SeekView", "seek"}} {
+			if op.on {
+				entries = append(entries, entry{name: st.name + ":" + op.id, f: e.p.HostIOFunc(op.fn), self: st.name, box: st.box})
+			}
+		}
+	}
 	params := func(en entry) []*ir.Type {
-		if en.recv != nil {
+		if en.recv != nil || en.self != "" {
 			return en.f.Sig.Params[1:]
 		}
 		return en.f.Sig.Params
@@ -313,6 +358,12 @@ static void gxc_poll(void) {
 		if en.recv != nil {
 			as = append(as, "gxc_obj(&gxc_args[0])")
 			index++
+		} else if en.box != nil {
+			as = append(as, fmt.Sprintf("gx_boxv(%s,gxc_obj(&gxc_args[0]))", e.td(en.box)))
+			index++
+		} else if en.self != "" {
+			as = append(as, "gxc_obj(&gxc_args[0])")
+			index++
 		}
 		for _, t := range params(en) {
 			if cContext(t) {
@@ -346,6 +397,9 @@ static void gxc_poll(void) {
 		res := func(i int) string {
 			if h := abi.Handle(f.Sig.Results[i]); h != nil {
 				return fmt.Sprintf("gxc_wrap(gx_rv(t,%d),%q,%d)", i, h.Name, closeEntry[h])
+			}
+			if k := ir.StreamKind(f.Sig.Results[i]); k != "" {
+				return fmt.Sprintf("gxc_wrap(gx_rv(t,%d),\"io.%s\",%d)", i, k, kindClose["io."+k])
 			}
 			return fmt.Sprintf("gxc_out_%s(gx_rv(t,%d))", e.names.Type(f.Sig.Results[i].U(), ""), i)
 		}
@@ -411,6 +465,9 @@ int goalchemy_invoke(const char *name,const gxc_value *args,size_t count,const g
 		if en.recv != nil {
 			n++
 			types = append(types, fmt.Sprintf("types[0]=%q;", en.recv.Name))
+		} else if en.self != "" {
+			n++
+			types = append(types, fmt.Sprintf("types[0]=%q;", en.self))
 		}
 		for _, t := range params(en) {
 			if cContext(t) {
@@ -427,9 +484,18 @@ int goalchemy_invoke(const char *name,const gxc_value *args,size_t count,const g
 		r := "NULL"
 		if en.recv != nil {
 			r = fmt.Sprintf("%q", en.recv.Name)
+		} else if en.self != "" {
+			r = fmt.Sprintf("%q", en.self)
 		}
 		fmt.Fprintf(out, " if(!strcmp(name,%q)) {which=%d;expected=%d;recv=%s;%s}\n", en.name, k, n, r, strings.Join(types, ""))
 	}
+	var opNames []string
+	for _, en := range entries {
+		if en.self != "" && !en.close {
+			opNames = append(opNames, fmt.Sprintf("%q,", en.name))
+		}
+	}
+	fmt.Fprintf(out, " (void)0;\n#define GXC_STREAM_OPS %s\n", strings.Join(opNames, ""))
 	out.WriteString(` if(which<0 || count!=expected) return error->kind=5;
  gxc_handle *self=NULL;
  for(size_t i=0;i<count;i++) if(types[i]) {
@@ -496,6 +562,59 @@ int gxc_handle_close(gxc_handle *h,gxc_error *error){
  pthread_mutex_unlock(&gxc_serial);
  if(rc&&!error->kind)error->kind=rc;
  return error->kind;
+}
+static bool gxc_stream_has(const char *type,const char *op){
+ char name[160];snprintf(name,sizeof name,"%s:%s",type,op);
+ static const char *const ops[]={GXC_STREAM_OPS NULL};
+ for(size_t i=0;ops[i];i++)if(!strcmp(ops[i],name))return true;
+ return false;
+}
+static int gxc_stream_call(gxc_handle *h,const char *op,gxc_value *args,size_t count,gxc_value *result,gxc_error *error){
+ memset(result,0,sizeof(*result));memset(error,0,sizeof(*error));
+ if(!h)return error->kind=5;
+ if(!gxc_stream_has(h->type,op))return error->kind=11;
+ char name[160];snprintf(name,sizeof name,"%s:%s",h->type,op);
+ args[0]=(gxc_value){.kind=GXC_HANDLE,.handle=h};
+ return goalchemy_invoke(name,args,count,NULL,result,error);
+}
+int gxc_stream_read(gxc_handle *h,uint8_t *buffer,size_t length,size_t *count,gxc_error *error){
+ gxc_error ignored;if(!error)error=&ignored;
+ if(count)*count=0;
+ if(length==0){memset(error,0,sizeof(*error));return 0;}
+ if(!buffer)return error->kind=5;
+ gxc_value args[2]={{0},{.kind=GXC_INT,.integer=(int64_t)(length<(1u<<20)?length:(1u<<20))}},result;
+ int rc=gxc_stream_call(h,"read",args,2,&result,error);
+ if(rc)return rc;
+ const gxc_value *data=result.kind==GXC_LIST&&result.length==2?&result.items[0]:NULL;
+ size_t n=data&&data->kind==GXC_BYTES?data->length:0;
+ if(n>length){gxc_value_free(&result);return error->kind=3;}
+ if(n)memcpy(buffer,data->bytes,n);
+ if(count)*count=n;
+ gxc_value_free(&result);return 0;
+}
+int gxc_stream_write(gxc_handle *h,const uint8_t *data,size_t length,size_t *count,gxc_error *error){
+ gxc_error ignored;if(!error)error=&ignored;
+ if(count)*count=0;
+ if(length&&!data){memset(error,0,sizeof(*error));return error->kind=5;}
+ size_t done=0;
+ do{
+  size_t n=length-done<(1u<<20)?length-done:(1u<<20);
+  gxc_value args[2]={{0},{.kind=GXC_BYTES,.bytes=(uint8_t *)data+done,.length=n}},result;
+  int rc=gxc_stream_call(h,"write",args,2,&result,error);
+  if(rc)return rc;
+  done+=(size_t)result.integer;gxc_value_free(&result);
+  if(count)*count=done;
+ }while(done<length);
+ return 0;
+}
+int gxc_stream_seek(gxc_handle *h,int64_t offset,int whence,int64_t *position,gxc_error *error){
+ gxc_error ignored;if(!error)error=&ignored;
+ if(whence<0||whence>2){memset(error,0,sizeof(*error));return error->kind=5;}
+ gxc_value args[3]={{0},{.kind=GXC_INT,.integer=offset},{.kind=GXC_INT,.integer=whence}},result;
+ int rc=gxc_stream_call(h,"seek",args,3,&result,error);
+ if(rc)return rc;
+ if(position)*position=result.integer;
+ gxc_value_free(&result);return 0;
 }
 void gxc_handle_free(gxc_handle *h){
  if(!h)return;

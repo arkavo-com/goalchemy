@@ -282,10 +282,21 @@ func (e *emitter) library() (string, error) {
 			}
 		}
 		for i, t := range f.Sig.Results {
-			if (i == len(f.Sig.Results)-1 && sourceError(t)) || abi.Handle(t) != nil {
+			if (i == len(f.Sig.Results)-1 && sourceError(t)) || abi.Handle(t) != nil || ir.StreamKind(t) != "" {
 				continue
 			}
 			convert(t)
+		}
+	}
+	if e.p.HostIOFunc("ReadView") != nil {
+		for _, name := range []string{"ReadView", "WriteView", "SeekView"} {
+			f := e.p.HostIOFunc(name)
+			for _, t := range f.Sig.Params[1:] {
+				convert(t)
+			}
+			for _, t := range f.Sig.Results[:len(f.Sig.Results)-1] {
+				convert(t)
+			}
 		}
 	}
 	for _, t := range e.p.Types.All {
@@ -357,7 +368,63 @@ func (e *emitter) library() (string, error) {
 		if h := abi.Handle(t); h != nil {
 			return h.Name
 		}
+		if ir.StreamKind(t) != "" {
+			return "Library.SourceStream"
+		}
 		return typ(t)
+	}
+	streamOps := func(name string, ops ir.StreamOps, obj func(*ir.Type) string, closeRun string) {
+		op := func(fn string, params []string, out string) string {
+			f := e.p.HostIOFunc(fn)
+			as := []string{obj(f.Sig.Params[0])}
+			for i, p := range params {
+				as = append(as, fmt.Sprintf("%s(%s)", e.names.Type(f.Sig.Params[i+1].U(), "input$"), p))
+			}
+			last := len(f.Sig.Results) - 1
+			return fmt.Sprintf("(%s)->{final Library.Handle[] hs=new Library.Handle[]{h};return Library.submit(null,libraryState,hs,%s,(inst,rv)->{Library.Failure err=sourceFailure((Box)rv[%d]);if(err!=null)throw err;return %s;},null);}",
+				strings.Join(append([]string{"h"}, params...), ","), frame(f, as), last, out)
+		}
+		res := func(fn string, i int) string {
+			t := e.p.HostIOFunc(fn).Sig.Results[i]
+			return fmt.Sprintf("%s(%s)", e.names.Type(t.U(), "output$"), e.cast(t, fmt.Sprintf("rv[%d]", i)))
+		}
+		read, write, seek := "null", "null", "null"
+		if ops.Read {
+			read = op("ReadView", []string{"n"}, "new Object[]{"+res("ReadView", 0)+","+res("ReadView", 1)+"}")
+		}
+		if ops.Write {
+			write = op("WriteView", []string{"d"}, res("WriteView", 0))
+		}
+		if ops.Seek {
+			seek = op("SeekView", []string{"off", "wh"}, res("SeekView", 0))
+		}
+		fmt.Fprintf(&b, " private static final Library.StreamOps %s=new Library.StreamOps(%s,%s,%s,h->{final Library.Handle h0=h;return Library.close(h0,libraryState,%s,Generated::sourceFailure);});\n", name, read, write, seek, closeRun)
+	}
+	kinds := map[string]bool{}
+	for _, f := range funcs {
+		for _, t := range f.Sig.Results {
+			if k := ir.StreamKind(t); k != "" && !kinds[k] {
+				kinds[k] = true
+				run := "null"
+				if ir.StreamCloses(k) {
+					cv := e.p.HostIOFunc("CloseView")
+					run = frame(cv, []string{"Library.<" + e.jt(cv.Sig.Params[0]) + ">obj(h0)"})
+				}
+				streamOps("streamOps"+k, ir.KindOps(k), func(t *ir.Type) string { return "Library.<" + e.jt(t) + ">obj(hs[0])" }, run)
+			}
+		}
+	}
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			run := "null"
+			if h.Close != nil {
+				run = frame(h.Close, []string{"Library.<" + e.jt(h.Ptr) + ">obj(h0)"})
+			}
+			hp := h.Ptr
+			streamOps("streamOps"+h.Name, h.Stream, func(*ir.Type) string {
+				return "Box.box(" + e.td(hp) + ",Library.<" + e.jt(hp) + ">obj(hs[0]))"
+			}, run)
+		}
 	}
 	for _, h := range abi.Handles {
 		fmt.Fprintf(&b, " /** Handle to a source *%s owned by a library instance. Close it when\n  * done; a collected handle is released without running Close. */\n public static final class %s implements AutoCloseable {\n  final Library.Handle h;\n  %s(Library.Handle h){this.h=h;}\n", h.Name, h.Name, h.Name)
@@ -367,6 +434,15 @@ func (e *emitter) library() (string, error) {
 		}
 		fmt.Fprintf(&b, "  /** Runs the source Close, if any, and releases the handle. Queued calls\n   * fail and an active call is canceled first. */\n  public Library.Operation<Void> closeAsync(){final Library.Handle h0=h;return Library.close(h0,libraryState,%s,Generated::sourceFailure);}\n", run)
 		b.WriteString("  /** Blocks until closeAsync completes, rethrowing its failure. */\n  @Override public void close(){try{closeAsync().completion().toCompletableFuture().join();}catch(java.util.concurrent.CompletionException e){if(e.getCause() instanceof Library.Failure f)throw f;throw e;}}\n")
+		if h.Stream.Any() {
+			fmt.Fprintf(&b, "  /** The handle as a stream; each operation is a call on the handle and\n   * closing the stream closes the handle. */\n  public Library.SourceStream io(){return new Library.SourceStream(h,streamOps%s);}\n", h.Name)
+			if h.Stream.Read {
+				b.WriteString("  /** An InputStream over the handle's Read; closing it closes the handle. */\n  public java.io.InputStream asInputStream(){return io().asInputStream();}\n")
+			}
+			if h.Stream.Write {
+				b.WriteString("  /** An OutputStream into the handle's Write; closing it closes the handle. */\n  public java.io.OutputStream asOutputStream(){return io().asOutputStream();}\n")
+			}
+		}
 		for _, f := range h.Methods {
 			if err := e.libraryWrapper(&b, abi, ir.MethodName(f), h, f, ptyp, frame, used, reserved); err != nil {
 				return "", err
@@ -474,6 +550,9 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	out := func(i int) string {
 		if h := abi.Handle(results[i]); h != nil {
 			return fmt.Sprintf("wrap%s(inst,rv[%d])", h.Name, i)
+		}
+		if k := ir.StreamKind(results[i]); k != "" {
+			return fmt.Sprintf("Library.wrap(inst,rv[%d],\"io.%s\",h->new Library.SourceStream(h,streamOps%s))", i, k, k)
 		}
 		return fmt.Sprintf("%s(%s)", e.names.Type(results[i].U(), "output$"), e.cast(results[i], fmt.Sprintf("rv[%d]", i)))
 	}

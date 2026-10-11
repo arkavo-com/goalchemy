@@ -362,4 +362,93 @@ public final class Library {
         if(bits<64) {long lo=signed?-(1L<<(bits-1)):0,hi=(1L<<(signed?bits-1:bits))-1;if(value<lo||value>hi)throw invalid();}
         return value;
     }
+    /** Source std/io operations behind a host stream view; each one is a
+     * library call on the handle. read completes with {byte[] data, Boolean eof}. */
+    public static final class StreamOps {
+        public interface Read{Operation<Object[]> apply(Handle h,long n);}
+        public interface Write{Operation<Long> apply(Handle h,byte[] data);}
+        public interface Seek{Operation<Long> apply(Handle h,long offset,long whence);}
+        final Read read;final Write write;final Seek seek;final Function<Handle,Operation<Void>> close;
+        public StreamOps(Read read,Write write,Seek seek,Function<Handle,Operation<Void>> close){this.read=read;this.write=write;this.seek=seek;this.close=close;}
+    }
+    static <T> T await(Operation<T> op){
+        try{return op.completion().toCompletableFuture().join();}
+        catch(java.util.concurrent.CompletionException e){if(e.getCause() instanceof Failure f)throw f;throw e;}
+    }
+    /** The host view of a source std/io reader or writer. Operations block
+     * until their library call completes and fail with Library.Failure; an
+     * operation the source lacks fails with kind "unsupported". close runs
+     * the source Close, if any, and releases the handle. */
+    public static final class SourceStream implements AutoCloseable {
+        final Handle h;final StreamOps ops;
+        public SourceStream(Handle h,StreamOps ops){this.h=h;this.ops=ops;}
+        public boolean canRead(){return ops.read!=null;}
+        public boolean canWrite(){return ops.write!=null;}
+        public boolean canSeek(){return ops.seek!=null;}
+        /** Reads up to n bytes; completes with null at end of stream. */
+        public Operation<byte[]> readAsync(int n){
+            if(ops.read==null)return failed(new Failure("unsupported"));
+            if(n<0)return failed(invalid());
+            Operation<byte[]> out=new Operation<>();
+            if(n==0){out.result.complete(new byte[0]);return out;}
+            ops.read.apply(h,n).completion().whenComplete((rv,e)->{
+                if(e!=null){out.result.completeExceptionally(e instanceof java.util.concurrent.CompletionException c&&c.getCause()!=null?c.getCause():e);return;}
+                byte[] data=(byte[])rv[0];if(data==null)data=new byte[0];
+                out.result.complete(data.length==0&&(Boolean)rv[1]?null:data);
+            });
+            return out;
+        }
+        public Operation<Long> writeAsync(byte[] data){
+            if(ops.write==null)return failed(new Failure("unsupported"));
+            if(data==null)return failed(invalid());
+            return ops.write.apply(h,data.clone());
+        }
+        public Operation<Long> seekAsync(long offset,int whence){
+            if(ops.seek==null)return failed(new Failure("unsupported"));
+            if(whence<0||whence>2)return failed(invalid());
+            return ops.seek.apply(h,offset,whence);
+        }
+        public Operation<Void> closeAsync(){return ops.close.apply(h);}
+        /** Reads into b; returns the count, or -1 at end of stream. */
+        public int read(byte[] b,int off,int len){
+            java.util.Objects.checkFromIndexSize(off,len,b.length);
+            if(len==0)return 0;
+            byte[] data=await(readAsync(Math.min(len,1<<20)));
+            if(data==null)return -1;
+            System.arraycopy(data,0,b,off,data.length);return data.length;
+        }
+        public void write(byte[] b,int off,int len){
+            java.util.Objects.checkFromIndexSize(off,len,b.length);
+            int done=0;
+            do{int n=Math.min(len-done,1<<20);done+=(int)(long)await(writeAsync(java.util.Arrays.copyOfRange(b,off+done,off+done+n)));}while(done<len);
+        }
+        /** Seeks; whence is 0 (start), 1 (current) or 2 (end). */
+        public long seek(long offset,int whence){return await(seekAsync(offset,whence));}
+        @Override public void close(){await(closeAsync());}
+        /** An InputStream over the reader; its close closes the handle.
+         * Failures surface as IOException with the Library.Failure as cause. */
+        public java.io.InputStream asInputStream(){
+            if(!canRead())throw new Failure("unsupported");
+            return new java.io.InputStream(){
+                public int read()throws java.io.IOException{byte[] one=new byte[1];int n=read(one,0,1);return n<0?-1:one[0]&0xff;}
+                public int read(byte[] b,int off,int len)throws java.io.IOException{try{return SourceStream.this.read(b,off,len);}catch(Failure f){throw new java.io.IOException(f.getMessage(),f);}}
+                public long skip(long n)throws java.io.IOException{
+                    if(n<=0)return 0;
+                    if(canSeek()){try{long at=seek(0,1),end=seek(0,2),to=Math.min(end,at+n);seek(to,0);return to-at;}catch(Failure f){throw new java.io.IOException(f.getMessage(),f);}}
+                    return super.skip(n);
+                }
+                public void close()throws java.io.IOException{try{SourceStream.this.close();}catch(Failure f){throw new java.io.IOException(f.getMessage(),f);}}
+            };
+        }
+        /** An OutputStream into the writer; its close closes the handle.
+         * Failures surface as IOException with the Library.Failure as cause. */
+        public java.io.OutputStream asOutputStream(){
+            if(!canWrite())throw new Failure("unsupported");
+            return new java.io.OutputStream(){
+                public void write(int b)throws java.io.IOException{write(new byte[]{(byte)b},0,1);}
+                public void write(byte[] b,int off,int len)throws java.io.IOException{try{SourceStream.this.write(b,off,len);}catch(Failure f){throw new java.io.IOException(f.getMessage(),f);}}
+                public void close()throws java.io.IOException{try{SourceStream.this.close();}catch(Failure f){throw new java.io.IOException(f.getMessage(),f);}}
+            };
+        }
+    }
 }
