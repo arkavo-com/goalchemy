@@ -114,6 +114,107 @@ pub fn http_tls(options: &[Vec<u8>]) -> Result<Option<HttpTls>, bool> {
     }))
 }
 
+/// Checks a URL and alternating header slice as Do does.
+pub fn http_url_headers(
+    url: &V,
+    headers: &V,
+) -> Result<(reqwest::Url, Vec<(reqwest::header::HeaderName, reqwest::header::HeaderValue)>), String> {
+    let raw = url.bytes();
+    if raw.len() > 8192 || raw.iter().any(|c| *c <= 32 || *c == 127 || *c == b'\\') {
+        return Err("invalid".into());
+    };
+    let raw = std::str::from_utf8(&raw).map_err(|_| "invalid")?;
+    if raw.contains('\u{feff}') {
+        return Err("invalid".into());
+    };
+    let url = reqwest::Url::parse(raw).map_err(|_| "invalid")?;
+    if !["http", "https"].contains(&url.scheme())
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || url.port() == Some(0)
+    {
+        return Err("invalid".into());
+    }
+    let (h, o, n, _, _) = slice_parts(&headers);
+    if n % 2 != 0 || n > 32768 {
+        return Err("invalid".into());
+    };
+    let mut flat = Vec::new();
+    let mut bounded = 0usize;
+    for i in 0..n as usize {
+        let value = slot(h, o as usize + i).bytes();
+        bounded = bounded.checked_add(value.len() + 2).ok_or("invalid")?;
+        if bounded > 65536 {
+        return Err("invalid".into());
+        };
+        flat.push(value.to_vec())
+    }
+    let mut total = 0usize;
+    let mut pairs = Vec::new();
+    for p in flat.chunks(2) {
+        total = total
+        .checked_add(p[0].len() + p[1].len() + 4)
+        .ok_or("invalid")?;
+        if total > 65536 || p[1].iter().any(|c| *c == 127 || *c < 32 && *c != 9) {
+        return Err("invalid".into());
+        };
+        let name = reqwest::header::HeaderName::from_bytes(&p[0]).map_err(|_| "invalid")?;
+        if [
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "proxy-authorization",
+        "proxy-connection",
+        "upgrade",
+        "trailer",
+        "te",
+        ]
+        .contains(&name.as_str())
+        {
+        return Err("invalid".into());
+        };
+        let value = reqwest::header::HeaderValue::from_bytes(&p[1]).map_err(|_| "invalid")?;
+        pairs.push((name, value))
+    }
+    Ok((url, pairs))
+}
+
+/// A dedicated client with DoWith transport options; Err when they do not build.
+pub fn http_client(tls: Option<HttpTls>, timeout: Option<Duration>) -> Result<reqwest::Client, ()> {
+    let mut builder = reqwest::Client::builder()
+        .http1_only()
+        .http1_max_headers(1024)
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .pool_max_idle_per_host(0);
+    if let Some(timeout) = timeout {
+        builder = builder.timeout(timeout);
+    }
+    let configured = tls.is_some();
+    if let Some(tls) = tls {
+        if let Some(identity) = tls.identity {
+            builder = builder.identity(identity)
+        }
+        if !tls.roots.is_empty() {
+            builder = builder.tls_certs_merge(tls.roots)
+        }
+        builder = builder.tls_danger_accept_invalid_certs(tls.insecure);
+        #[cfg(unix)]
+        if let Some(socket) = tls.socket {
+            use std::os::unix::ffi::OsStringExt;
+            builder = builder.unix_socket(std::path::PathBuf::from(std::ffi::OsString::from_vec(socket)))
+        }
+    }
+    match builder.build() {
+        Ok(client) => Ok(client),
+        Err(_) if configured => Err(()),
+        Err(e) => host_fault(&format!("HTTP client acquisition: {e}")),
+    }
+}
+
 pub fn lib_http_do(
     t: &Rc<Task>,
     context: V,
@@ -155,24 +256,7 @@ pub fn http_do(
         let method = std::str::from_utf8(&method.bytes())
             .map_err(|_| "invalid")?
             .to_owned();
-        let raw = url.bytes();
-        if raw.len() > 8192 || raw.iter().any(|c| *c <= 32 || *c == 127 || *c == b'\\') {
-            return Err("invalid".into());
-        };
-        let raw = std::str::from_utf8(&raw).map_err(|_| "invalid")?;
-        if raw.contains('\u{feff}') {
-            return Err("invalid".into());
-        };
-        let url = reqwest::Url::parse(raw).map_err(|_| "invalid")?;
-        if !["http", "https"].contains(&url.scheme())
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.fragment().is_some()
-            || url.port() == Some(0)
-        {
-            return Err("invalid".into());
-        }
+        let (url, mut pairs) = http_url_headers(&url, &headers)?;
         if !["GET", "POST"].contains(&method.as_str())
             || !(0..=NATIVE_MAX as i64).contains(&max.i())
             || !(1..=300000).contains(&timeout.i())
@@ -182,48 +266,6 @@ pub fn http_do(
         let body = native_bytes(&input)?;
         if method == "GET" && !body.is_empty() {
             return Err("invalid".into());
-        }
-        let (h, o, n, _, _) = slice_parts(&headers);
-        if n % 2 != 0 || n > 32768 {
-            return Err("invalid".into());
-        };
-        let mut flat = Vec::new();
-        let mut bounded = 0usize;
-        for i in 0..n as usize {
-            let value = slot(h, o as usize + i).bytes();
-            bounded = bounded.checked_add(value.len() + 2).ok_or("invalid")?;
-            if bounded > 65536 {
-                return Err("invalid".into());
-            };
-            flat.push(value.to_vec())
-        }
-        let mut total = 0usize;
-        let mut pairs = Vec::new();
-        for p in flat.chunks(2) {
-            total = total
-                .checked_add(p[0].len() + p[1].len() + 4)
-                .ok_or("invalid")?;
-            if total > 65536 || p[1].iter().any(|c| *c == 127 || *c < 32 && *c != 9) {
-                return Err("invalid".into());
-            };
-            let name = reqwest::header::HeaderName::from_bytes(&p[0]).map_err(|_| "invalid")?;
-            if [
-                "host",
-                "content-length",
-                "transfer-encoding",
-                "connection",
-                "proxy-authorization",
-                "proxy-connection",
-                "upgrade",
-                "trailer",
-                "te",
-            ]
-            .contains(&name.as_str())
-            {
-                return Err("invalid".into());
-            };
-            let value = reqwest::header::HeaderValue::from_bytes(&p[1]).map_err(|_| "invalid")?;
-            pairs.push((name, value))
         }
         let mut automatic = true;
         for key in ["accept-encoding", "range"] {
@@ -280,12 +322,7 @@ pub fn http_do(
             .build()
             .unwrap_or_else(|e| host_fault(&format!("HTTP runtime acquisition: {e}")));
         let result=runtime.block_on(async move{
- let mut builder=reqwest::Client::builder().http1_only().http1_max_headers(1024).redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never()).pool_max_idle_per_host(0).timeout(Duration::from_nanos(remaining as u64));
- let configured=tls.is_some();
- if let Some(tls)=tls{if let Some(identity)=tls.identity{builder=builder.identity(identity)}if !tls.roots.is_empty(){builder=builder.tls_certs_merge(tls.roots)}builder=builder.tls_danger_accept_invalid_certs(tls.insecure);
- #[cfg(unix)]
- if let Some(socket)=tls.socket{use std::os::unix::ffi::OsStringExt;builder=builder.unix_socket(std::path::PathBuf::from(std::ffi::OsString::from_vec(socket)))}}
- let client=match builder.build(){Ok(client)=>client,Err(_) if configured=>return Err("http: invalid TLS option"),Err(e)=>host_fault(&format!("HTTP client acquisition: {e}"))};
+ let client=match http_client(tls,Some(Duration::from_nanos(remaining as u64))){Ok(client)=>client,Err(())=>return Err("http: invalid TLS option")};
  let work=async move{
  let mut request=client.request(if method=="GET"{reqwest::Method::GET}else{reqwest::Method::POST},url);for (n,v) in pairs{request=request.header(n,v)}
  let mut response=request.body(body).send().await.map_err(|_|"http: transport failure")?;

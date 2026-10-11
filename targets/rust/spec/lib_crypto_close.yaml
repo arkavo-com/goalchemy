@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 5245add9673fb3bc1e28db33f95cf162a2f0a1ad3f54eecb082b1bc5fb5ecaa4
 symbol: "lib_crypto_close"
 implementation: runtime/lib_crypto_close.rs
-implementation_hash: 688dce2a8e6a95d9bc505fbe2a9e0718e973e5a72586b021f0d74efdeb8af18b
+implementation_hash: 540ff6c167d0d9c77ade608919156187ffe5340a548b9bae45d79abeb016675d
 summary: "crypto.Key.Close: release the key handle and invalidate every alias of it."
 suspension: may
 determinism: deterministic

@@ -497,6 +497,23 @@ bool gx_log_enabled(int64_t level);
 void gx_log_emit(int64_t level, int64_t unix_nano, gx_V message, gx_V attrs, gx_V text);
 void gx_lib_http_do(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);
 void gx_http_do(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);
+/* lib/http.DoWith transport options, owned by malloc; shared with exchanges. */
+typedef struct gx_http_transport { char *client_cert,*client_key,*root_cas,*unix_socket; size_t client_cert_len,client_key_len,root_cas_len; bool insecure; } gx_http_transport;
+int gx_http_options(gx_http_transport *t, gx_V options);
+void gx_http_options_free(gx_http_transport *t);
+bool gx_http_valid_url(gx_V url);
+bool gx_http_header_name(gx_V name);
+void gx_lib_http_open(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);
+void gx_lib_http_exchange_write(gx_Task *,gx_V,gx_V);
+void gx_lib_http_exchange_response(gx_Task *,gx_V);
+void gx_lib_http_exchange_read(gx_Task *,gx_V,gx_V);
+void gx_lib_http_exchange_close(gx_Task *,gx_V);
+void gx_http_exchange_write(gx_Task *,gx_V,gx_V);
+void gx_http_exchange_response(gx_Task *,gx_V);
+void gx_http_exchange_read(gx_Task *,gx_V,gx_V);
+/* Native resources besides keys, such as HTTP exchanges, released with the owner's keys. */
+extern void (*gx_native_exchanges_release)(uint64_t domain);
+void gx_native_resources_track(void);
 void gx_lib_http_do_with(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);
 void gx_lib_callback_request(gx_Task *,gx_V,gx_V,gx_V);
 

@@ -44,7 +44,7 @@ public static partial class R
     }
     const string HTTP_BAD_TLS="http: invalid TLS option";
     static readonly HashSet<string> HTTP_OPTIONS=new(StringComparer.Ordinal){"client-cert","client-key","root-cas","insecure-skip-verify","unix-socket"};
-    sealed class HttpTls
+    internal sealed class HttpTls
     {
         internal System.Net.Security.SslStreamCertificateContext client;internal System.Security.Cryptography.X509Certificates.X509Certificate2Collection roots;internal bool insecure;internal string socket;
         internal bool Validate(System.Security.Cryptography.X509Certificates.X509Certificate certificate,System.Security.Cryptography.X509Certificates.X509Chain chain,System.Net.Security.SslPolicyErrors errors)
@@ -61,7 +61,7 @@ public static partial class R
     {
         var all=new System.Security.Cryptography.X509Certificates.X509Certificate2Collection();all.ImportFromPem(pem);if(all.Count==0)throw new Native.Reject(HTTP_BAD_TLS);return all;
     }
-    static HttpTls httpTls(string[] options)
+    internal static HttpTls httpTls(string[] options)
     {
         const string invalid="http: invalid request or limit";
         if(options.Length==0)return null;if(options.Length%2!=0)throw new Native.Reject(invalid);
@@ -84,6 +84,34 @@ public static partial class R
         catch(System.Security.Cryptography.CryptographicException){throw new Native.Reject(HTTP_BAD_TLS);}
         catch(ArgumentException){throw new Native.Reject(HTTP_BAD_TLS);}
         return tls;
+    }
+    /// A dedicated handler with DoWith transport options.
+    internal static SocketsHttpHandler httpHandler(HttpTls tls)
+    {
+        var handler=new SocketsHttpHandler{AllowAutoRedirect=false,AutomaticDecompression=System.Net.DecompressionMethods.None,MaxResponseHeadersLength=64,RequestHeaderEncodingSelector=(name,message)=>System.Text.Encoding.Latin1,ResponseHeaderEncodingSelector=(name,message)=>System.Text.Encoding.Latin1};
+        if(tls!=null){handler.SslOptions.ClientCertificateContext=tls.client;handler.SslOptions.RemoteCertificateValidationCallback=(sender,certificate,chain,errors)=>tls.Validate(certificate,chain,errors);}
+        if(tls?.socket!=null){string path=tls.socket;handler.UseProxy=false;handler.ConnectCallback=async(context,cancel)=>{var socket=new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix,System.Net.Sockets.SocketType.Stream,System.Net.Sockets.ProtocolType.Unspecified);try{await socket.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(path),cancel);return new System.Net.Sockets.NetworkStream(socket,true);}catch{socket.Dispose();throw;}};}
+        return handler;
+    }
+    /// A request with a checked URL and headers, as Do checks them; the caller sets its content.
+    internal static HttpRequestMessage httpCheckedRequest(string method,string raw,string[] pairs,HttpContent content)
+    {
+        const string invalid="http: invalid request or limit";
+        if(raw.Length>8192||pairs.Length%2!=0||pairs.Length>32768)throw new Native.Reject(invalid);
+        string url=Native.utf8(raw);foreach(char c in url)if(c<=32||c==127||c=='\ufeff')throw new Native.Reject(invalid);
+        if(!Uri.TryCreate(url,UriKind.Absolute,out var uri)||uri.Scheme!="http"&&uri.Scheme!="https"||string.IsNullOrEmpty(uri.Host)||uri.UserInfo.Length!=0||uri.Fragment.Length!=0||uri.Port<1||uri.Port>65535||url.Contains('\\'))throw new Native.Reject(invalid);
+        var request=new HttpRequestMessage(new HttpMethod(method),uri){Version=System.Net.HttpVersion.Version11,VersionPolicy=HttpVersionPolicy.RequestVersionExact,Content=content};int total=0;
+        try
+        {
+            for(int i=0;i<pairs.Length;i+=2)
+            {
+                string name=pairs[i],value=pairs[i+1];total+=name.Length+value.Length+4;if(total>65536||!httpToken(name)||HTTP_FORBIDDEN.Contains(name))throw new Native.Reject(invalid);
+                foreach(char c in value)if(c>255||c==127||c<32&&c!='\t')throw new Native.Reject(invalid);
+                if(!request.Headers.TryAddWithoutValidation(name,value)&&(request.Content==null||!request.Content.Headers.TryAddWithoutValidation(name,value)))throw new Native.Reject(invalid);
+            }
+        }
+        catch{request.Dispose();throw;}
+        return request;
     }
     public static void libHttpDo(GoTask task,GoContext context,string method,string raw,Slice headers,Slice input,long max,long timeoutMillis)
     {
@@ -130,9 +158,7 @@ public static partial class R
             HttpClient client=null;SocketsHttpHandler handler=null;HttpResponseMessage response=null;var bodies=new List<Stream>();Exception readFailure=null;HostFault fault=null;object[] result=null;string rejection=null;
             try
             {
-                handler=new SocketsHttpHandler{AllowAutoRedirect=false,AutomaticDecompression=System.Net.DecompressionMethods.None,MaxResponseHeadersLength=64,RequestHeaderEncodingSelector=(name,message)=>System.Text.Encoding.Latin1,ResponseHeaderEncodingSelector=(name,message)=>System.Text.Encoding.Latin1};
-                if(tls!=null){handler.SslOptions.ClientCertificateContext=tls.client;handler.SslOptions.RemoteCertificateValidationCallback=(sender,certificate,chain,errors)=>tls.Validate(certificate,chain,errors);}
-                if(tls?.socket!=null){string path=tls.socket;handler.UseProxy=false;handler.ConnectCallback=async(context,cancel)=>{var socket=new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix,System.Net.Sockets.SocketType.Stream,System.Net.Sockets.ProtocolType.Unspecified);try{await socket.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(path),cancel);return new System.Net.Sockets.NetworkStream(socket,true);}catch{socket.Dispose();throw;}};}
+                handler=httpHandler(tls);
                 client=new HttpClient(handler,false){Timeout=System.Threading.Timeout.InfiniteTimeSpan};response=client.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,lease.cancel.Token).GetAwaiter().GetResult();
                 var raw=response.Content.ReadAsStreamAsync(lease.cancel.Token).GetAwaiter().GetResult();bodies.Add(raw);Stream body=httpBodyWrapper(raw)??throw new HostFault("null HTTP body wrapper");if(!bodies.Contains(body))bodies.Add(body);
                 int code=(int)response.StatusCode;bool bodyless=code==204||code==304||code>=100&&code<200||response.Content.Headers.ContentLength==0;

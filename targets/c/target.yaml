@@ -148,6 +148,11 @@ functions:
   - {id: lib.os.write_file, contract_version: 1.0.0, symbol: gx_lib_os_write_file, implementation: runtime/lib_os_write_file.c, requires: [lib.os.read_file]}
   - {id: lib.http.do, contract_version: 1.1.0, symbol: gx_lib_http_do, implementation: runtime/lib_http_do.c, requires: [lib.crypto.close, std.context.err], harness: "await: gx_lib_http_do(t,{0},{1},{2},{3},{4},{5},{6})"}
   - {id: lib.http.do_with, contract_version: 1.1.0, symbol: gx_lib_http_do_with, implementation: runtime/lib_http_do_with.c, requires: [lib.http.do], harness: "await: gx_lib_http_do_with(t,{0},{1},{2},{3},{4},{5},{6},{7})"}
+  - {id: lib.http.open, contract_version: 1.0.0, symbol: gx_lib_http_open, implementation: runtime/lib_http_open.c, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_write, contract_version: 1.0.0, symbol: gx_lib_http_exchange_write, implementation: runtime/lib_http_exchange_write.c, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_response, contract_version: 1.0.0, symbol: gx_lib_http_exchange_response, implementation: runtime/lib_http_exchange_response.c, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_read, contract_version: 1.0.0, symbol: gx_lib_http_exchange_read, implementation: runtime/lib_http_exchange_read.c, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_close, contract_version: 1.0.0, symbol: gx_lib_http_exchange_close, implementation: runtime/lib_http_exchange_close.c, requires: [lib.http.do, lib.crypto.close, std.context.err]}
   - {id: lib.callback.request, contract_version: 1.0.0, symbol: gx_lib_callback_request, implementation: runtime/lib_callback_request.c, requires: [lib.crypto.close, std.context.err], harness: "await: gx_lib_callback_request(t,{0},{1},{2})"}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: gx_lib_checksum_crc32_ieee, implementation: runtime/lib_checksum_crc32_ieee.c, harness: "gx_lib_checksum_crc32_ieee({0})"}

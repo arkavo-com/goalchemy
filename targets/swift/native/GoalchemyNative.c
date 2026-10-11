@@ -221,3 +221,116 @@ const char *gcn_http_header_name(gcn_http *http,size_t index){return http->heade
 const char *gcn_http_header_value(gcn_http *http,size_t index){return http->headers[index].value;}
 const char *gcn_http_error(gcn_http *http){return http->error ? http->error:"http: transport failure";}
 void gcn_http_release(gcn_http *http){if(http){http_gzip_end(http);http_clear_headers(http);free(http->body);free(http->cert);if(http->key){OPENSSL_cleanse(http->key,http->key_len);free(http->key);}free(http->roots);free(http->socket);free(http);}}
+
+/* Streamed lib/http exchanges: a libcurl transfer thread per exchange; the
+ * blocking operations below run on Swift worker threads. */
+#include <pthread.h>
+#define GCN_EXCHANGE_BUFFER (1u<<20)
+struct gcn_exchange {
+    pthread_mutex_t mu;pthread_cond_t cv;int refs;
+    char *method,*url;struct curl_slist *headers;int64_t length;gcn_http *transport;
+    int stop,ended,done,head;const char *error;
+    const uint8_t *chunk;size_t chunk_len,chunk_off;
+    uint8_t *in;size_t in_len,in_off;
+    char *hdr;size_t hdr_len;long status;
+    int read_paused,write_paused;
+};
+static void exchange_release(gcn_exchange *x){
+    pthread_mutex_lock(&x->mu);int refs=--x->refs;pthread_mutex_unlock(&x->mu);if(refs)return;
+    pthread_mutex_destroy(&x->mu);pthread_cond_destroy(&x->cv);free(x->method);free(x->url);curl_slist_free_all(x->headers);gcn_http_release(x->transport);free(x->in);free(x->hdr);free(x);
+}
+void gcn_exchange_release(gcn_exchange *x){if(x)exchange_release(x);}
+void gcn_exchange_abort(gcn_exchange *x){if(!x)return;pthread_mutex_lock(&x->mu);x->stop=1;pthread_cond_broadcast(&x->cv);pthread_mutex_unlock(&x->mu);}
+static size_t exchange_on_read(char *dest,size_t a,size_t b,void *arg){
+    gcn_exchange *x=arg;size_t cap=a*b,n=0;pthread_mutex_lock(&x->mu);
+    if(x->stop)n=CURL_READFUNC_ABORT;
+    else if(x->chunk && x->chunk_off<x->chunk_len){n=x->chunk_len-x->chunk_off;if(n>cap)n=cap;memcpy(dest,x->chunk+x->chunk_off,n);x->chunk_off+=n;if(x->chunk_off==x->chunk_len){x->chunk=NULL;pthread_cond_broadcast(&x->cv);}}
+    else if(!x->ended){x->read_paused=1;n=CURL_READFUNC_PAUSE;}
+    pthread_mutex_unlock(&x->mu);return n;
+}
+static size_t exchange_on_write(char *data,size_t a,size_t b,void *arg){
+    gcn_exchange *x=arg;size_t n=a*b;pthread_mutex_lock(&x->mu);
+    if(x->stop){pthread_mutex_unlock(&x->mu);return 0;}
+    if(x->in_len-x->in_off>=GCN_EXCHANGE_BUFFER){x->write_paused=1;pthread_mutex_unlock(&x->mu);return CURL_WRITEFUNC_PAUSE;}
+    if(x->in_off){memmove(x->in,x->in+x->in_off,x->in_len-x->in_off);x->in_len-=x->in_off;x->in_off=0;}
+    uint8_t *p=realloc(x->in,x->in_len+n+1);if(!p){x->error="http: transport failure";pthread_mutex_unlock(&x->mu);return 0;}
+    x->in=p;memcpy(p+x->in_len,data,n);x->in_len+=n;pthread_cond_broadcast(&x->cv);pthread_mutex_unlock(&x->mu);return n;
+}
+static size_t exchange_on_header(char *data,size_t a,size_t b,void *arg){
+    gcn_exchange *x=arg;size_t n=a*b;pthread_mutex_lock(&x->mu);
+    if(n>=5 && !memcmp(data,"HTTP/",5)){x->hdr_len=0;x->status=0;if(n>=12)for(size_t i=9;i<12;i++)x->status=x->status*10+(data[i]-'0');}
+    if(n>65536-x->hdr_len){x->error="http: response headers exceed limit";pthread_mutex_unlock(&x->mu);return 0;}
+    char *p=realloc(x->hdr,x->hdr_len+n+1);if(!p){x->error="http: transport failure";pthread_mutex_unlock(&x->mu);return 0;}
+    x->hdr=p;memcpy(p+x->hdr_len,data,n);x->hdr_len+=n;
+    if(((n==2 && data[0]=='\r')||(n==1 && data[0]=='\n')) && !(x->status>=100 && x->status<200)){x->head=1;pthread_cond_broadcast(&x->cv);}
+    pthread_mutex_unlock(&x->mu);return n;
+}
+static void *exchange_transfer(void *arg){
+    gcn_exchange *x=arg;gcn_http *t=x->transport;CURL *easy=curl_easy_init();CURLM *multi=curl_multi_init();const char *error=NULL;CURLcode code=CURLE_OK;int added=0;
+    if(!easy || !multi)error="http: transport failure";
+    if(!error){
+        curl_easy_setopt(easy,CURLOPT_URL,x->url);curl_easy_setopt(easy,CURLOPT_CUSTOMREQUEST,x->method);curl_easy_setopt(easy,CURLOPT_HTTPHEADER,x->headers);
+        curl_easy_setopt(easy,CURLOPT_HTTP_CONTENT_DECODING,0L);curl_easy_setopt(easy,CURLOPT_FOLLOWLOCATION,0L);curl_easy_setopt(easy,CURLOPT_NOSIGNAL,1L);curl_easy_setopt(easy,CURLOPT_FORBID_REUSE,1L);
+        curl_easy_setopt(easy,CURLOPT_PROTOCOLS,CURLPROTO_HTTP|CURLPROTO_HTTPS);
+        curl_easy_setopt(easy,CURLOPT_WRITEFUNCTION,exchange_on_write);curl_easy_setopt(easy,CURLOPT_WRITEDATA,x);curl_easy_setopt(easy,CURLOPT_HEADERFUNCTION,exchange_on_header);curl_easy_setopt(easy,CURLOPT_HEADERDATA,x);
+        if(!strcmp(x->method,"POST")){curl_easy_setopt(easy,CURLOPT_POST,1L);curl_easy_setopt(easy,CURLOPT_READFUNCTION,exchange_on_read);curl_easy_setopt(easy,CURLOPT_READDATA,x);if(x->length>=0)curl_easy_setopt(easy,CURLOPT_POSTFIELDSIZE_LARGE,(curl_off_t)x->length);}
+        curl_easy_setopt(easy,CURLOPT_SSL_VERIFYPEER,t->insecure ? 0L:1L);curl_easy_setopt(easy,CURLOPT_SSL_VERIFYHOST,t->insecure ? 0L:2L);
+        if(t->cert){struct curl_blob cert={t->cert,t->cert_len,CURL_BLOB_COPY},key={t->key,t->key_len,CURL_BLOB_COPY};curl_easy_setopt(easy,CURLOPT_SSLCERT_BLOB,&cert);curl_easy_setopt(easy,CURLOPT_SSLCERTTYPE,"PEM");curl_easy_setopt(easy,CURLOPT_SSLKEY_BLOB,&key);curl_easy_setopt(easy,CURLOPT_SSLKEYTYPE,"PEM");}
+        if(t->roots){curl_easy_setopt(easy,CURLOPT_SSL_CTX_FUNCTION,http_ssl_ctx);curl_easy_setopt(easy,CURLOPT_SSL_CTX_DATA,t);}
+        if(t->socket){curl_easy_setopt(easy,CURLOPT_UNIX_SOCKET_PATH,t->socket);curl_easy_setopt(easy,CURLOPT_NOPROXY,"*");}
+        if(curl_multi_add_handle(multi,easy)!=CURLM_OK)error="http: transport failure";else added=1;
+    }
+    int running=1;
+    while(!error && running){
+        pthread_mutex_lock(&x->mu);int stop=x->stop,resume=0;
+        if(x->read_paused && (x->chunk || x->ended)){x->read_paused=0;resume=1;}
+        if(x->write_paused && x->in_len-x->in_off<GCN_EXCHANGE_BUFFER){x->write_paused=0;resume=1;}
+        pthread_mutex_unlock(&x->mu);
+        if(stop){code=CURLE_ABORTED_BY_CALLBACK;break;}
+        if(resume)curl_easy_pause(easy,CURLPAUSE_CONT);
+        if(curl_multi_perform(multi,&running)!=CURLM_OK){error="http: transport failure";break;}
+        if(running && curl_multi_poll(multi,NULL,0,5,NULL)!=CURLM_OK){error="http: transport failure";break;}
+    }
+    if(!error && code==CURLE_OK){int pending;CURLMsg *msg;while((msg=curl_multi_info_read(multi,&pending)))if(msg->msg==CURLMSG_DONE)code=msg->data.result;}
+    if(added)curl_multi_remove_handle(multi,easy);if(easy)curl_easy_cleanup(easy);if(multi)curl_multi_cleanup(multi);
+    pthread_mutex_lock(&x->mu);x->done=1;if(!x->error)x->error=error ? error:code!=CURLE_OK ? "http: transport failure":NULL;pthread_cond_broadcast(&x->cv);pthread_mutex_unlock(&x->mu);
+    exchange_release(x);return NULL;
+}
+/* Takes ownership of transport (its TLS and socket options). NULL on failure. */
+gcn_exchange *gcn_exchange_open(gcn_http *transport,const char *method,const char *url,const char *const *headers,size_t count,int64_t length){
+    gcn_exchange *x=calloc(1,sizeof(*x));if(!x)return NULL;
+    pthread_mutex_init(&x->mu,NULL);pthread_cond_init(&x->cv,NULL);x->refs=2;x->length=length;x->transport=transport;
+    x->method=strdup(method);x->url=strdup(url);if(!x->method || !x->url){x->refs=1;exchange_release(x);return NULL;}
+    for(size_t i=0;i<count;i+=2){size_t n=strlen(headers[i])+strlen(headers[i+1])+3;char *line=malloc(n);if(!line){x->refs=1;exchange_release(x);return NULL;}
+        if(*headers[i+1])snprintf(line,n,"%s: %s",headers[i],headers[i+1]);else snprintf(line,n,"%s;",headers[i]);
+        struct curl_slist *next=curl_slist_append(x->headers,line);free(line);if(!next){x->refs=1;exchange_release(x);return NULL;}x->headers=next;}
+    const char *extra[]={"Expect:",length<0 ? "Transfer-Encoding: chunked":NULL};
+    for(int i=0;i<2;i++)if(extra[i]){struct curl_slist *next=curl_slist_append(x->headers,extra[i]);if(!next){x->refs=1;exchange_release(x);return NULL;}x->headers=next;}
+    pthread_t thread;if(pthread_create(&thread,NULL,exchange_transfer,x)){x->refs=1;exchange_release(x);return NULL;}
+    pthread_detach(thread);return x;
+}
+void gcn_exchange_retain(gcn_exchange *x){pthread_mutex_lock(&x->mu);x->refs++;pthread_mutex_unlock(&x->mu);}
+const char *gcn_exchange_error(gcn_exchange *x){pthread_mutex_lock(&x->mu);const char *e=x->error ? x->error:"http: transport failure";pthread_mutex_unlock(&x->mu);return e;}
+/* Blocks until the transfer takes all of data: 1, or 0 on failure. */
+int gcn_exchange_write(gcn_exchange *x,const uint8_t *data,size_t n){
+    pthread_mutex_lock(&x->mu);x->chunk=data;x->chunk_len=n;x->chunk_off=0;pthread_cond_broadcast(&x->cv);
+    while(x->chunk && !x->stop && !x->done)pthread_cond_wait(&x->cv,&x->mu);
+    int ok=x->chunk==NULL;x->chunk=NULL;pthread_mutex_unlock(&x->mu);return ok;
+}
+/* Ends the request body and waits for the response head: 1, or 0 on failure. */
+int gcn_exchange_response(gcn_exchange *x){
+    pthread_mutex_lock(&x->mu);x->ended=1;pthread_cond_broadcast(&x->cv);
+    while(!x->head && !x->stop && !x->done)pthread_cond_wait(&x->cv,&x->mu);
+    int ok=x->head && !x->stop;pthread_mutex_unlock(&x->mu);return ok;
+}
+long gcn_exchange_status(gcn_exchange *x){return x->status;}
+const char *gcn_exchange_head(gcn_exchange *x,size_t *length){*length=x->hdr_len;return x->hdr;}
+/* Reads up to max response bytes: the count, 0 at the end, or -1 on failure. */
+long gcn_exchange_read(gcn_exchange *x,uint8_t *buffer,size_t max){
+    pthread_mutex_lock(&x->mu);
+    while(x->in_len==x->in_off && !x->stop && !x->done)pthread_cond_wait(&x->cv,&x->mu);
+    long n;
+    if(x->stop || (x->in_len==x->in_off && x->error))n=-1;
+    else{size_t k=x->in_len-x->in_off;if(k>max)k=max;memcpy(buffer,x->in+x->in_off,k);x->in_off+=k;n=(long)k;pthread_cond_broadcast(&x->cv);}
+    pthread_mutex_unlock(&x->mu);return n;
+}
