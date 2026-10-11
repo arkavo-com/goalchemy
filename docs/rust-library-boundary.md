@@ -23,6 +23,7 @@ native flag on that owner and cancels source contexts. Native pending operations
 retain the accepted separate publication/cleanup-ACK protocol. Retirement drains
 true ACKs, clears provider registrations and native key material, and detaches
 source roots before source-thread teardown. Publication follows coordinator join.
+Calls on [handles](library-handles.md) use their instance's globals instead. See [package variables in libraries](usage.md#package-variables-in-libraries).
 
 Queued cancellation releases owned arguments without waiting for an active
 call. Active cancellation and native faults settle after resource release.

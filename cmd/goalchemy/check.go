@@ -80,3 +80,9 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	return 0
 }
+
+func writeWarnings(w io.Writer, ds []diagnostics.Diagnostic, asJSON bool) {
+	if len(ds) > 0 {
+		_ = diagnostics.Write(w, ds, asJSON)
+	}
+}

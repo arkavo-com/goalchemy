@@ -29,6 +29,7 @@ func runCompile(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		_ = diagnostics.Write(stderr, ds, sf.json)
 		return 1
 	}
+	writeWarnings(stderr, ds, sf.json)
 	if *target == "ir" {
 		ir.Dump(stdout, res.IR)
 		return 0

@@ -16,7 +16,8 @@ all exports of this emitted package; queued cancellation cannot reset another
 caller. Init runs once per fresh runtime, rather than repeatedly against
 persistent mutable globals. Source panic/deadlock and host implementation fault
 return typed LibraryError after retirement; existing executable behavior and
-other-target library/adapter gates remain unchanged.
+other-target library/adapter gates remain unchanged. Calls on
+[handles](library-handles.md) use their instance's globals instead. See [package variables in libraries](usage.md#package-variables-in-libraries).
 
 The Go library runtime is injected only into library output. It installs an
 owner-only native-context observation hook and a wake-only watcher; native

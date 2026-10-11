@@ -10,7 +10,10 @@ import (
 
 type Severity string
 
-const Error Severity = "error"
+const (
+	Error   Severity = "error"
+	Warning Severity = "warning"
+)
 
 type Diagnostic struct {
 	Code     string   `json:"code"`

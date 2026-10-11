@@ -39,7 +39,8 @@ The owner resets source globals, executes initialization exactly once, runs the
 export and copies its result. It retires all native resources and callback
 registrations and clears owner-only canonical field-pointer caches before
 publishing the result. Executable field identity is unchanged. Canonical source
-field aliases remain identical during an acquired call.
+field aliases remain identical during an acquired call. Calls on
+[handles](library-handles.md) use their instance's globals instead. See [package variables in libraries](usage.md#package-variables-in-libraries).
 
 ## Cancellation and providers
 

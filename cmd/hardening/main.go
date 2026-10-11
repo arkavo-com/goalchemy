@@ -401,7 +401,7 @@ func build(dir, target, out string) ([]diagnostics.Diagnostic, time.Duration) {
 	}
 	res, ds := driver.Build(context.Background(), driver.Options{Dir: dir, Gate: gate})
 	if !diagnostics.HasErrors(ds) {
-		ds = append(ds, driver.Emit(target, res, out)...)
+		ds = driver.Emit(target, res, out)
 	}
 	return ds, time.Since(start)
 }

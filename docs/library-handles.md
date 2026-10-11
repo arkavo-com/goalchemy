@@ -46,7 +46,9 @@ The first call that returns a handle without receiving one creates an
 instance. The instance owns its source globals, runs package initialization
 once, and keeps native resources such as crypto keys until it retires. Handles
 created by later calls on the instance (`c.Child()`) join it. Free functions
-without handle arguments still run in a fresh owner with fresh globals.
+without handle arguments still run in a fresh owner with fresh globals, and
+the compiler warns when they write a package variable (`GCW001`); see
+[package variables in libraries](usage.md#package-variables-in-libraries).
 
 Handles from different instances cannot be mixed in one call: that fails with
 `instance_mismatch`. Returning the same pointer twice returns the same host

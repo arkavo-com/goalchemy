@@ -123,7 +123,8 @@ generated source globals before running the exported function. Conversion
 copies and retains inputs when an operation is created; outputs and source
 error fields detach from source storage. `wait()` and `value()` observe the
 same operation result. Cancellation is cooperative, using the supplied token
-or the operation's `cancel()` method.
+or the operation's `cancel()` method. Calls on [handles](library-handles.md)
+use their instance's globals instead. See [package variables in libraries](usage.md#package-variables-in-libraries).
 
 Public structs retain source field names and provide default initializers.
 Integers use exact native widths, floats use Float/Double, arrays use Swift
