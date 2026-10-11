@@ -14,7 +14,8 @@ import (
 )
 
 // TestGeneratedTypeScriptHTTPGzipBrowser runs lib/http gzip handling in a real
-// browser, where fetch decodes and Accept-Encoding cannot be sent.
+// browser, where fetch decodes and Accept-Encoding cannot be sent, and checks
+// that DoWith transport options are rejected there.
 func TestGeneratedTypeScriptHTTPGzipBrowser(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -53,6 +54,13 @@ func Show(ctx context.Context, base, name string, accept bool) (string, error) {
 		}
 	}
 	return strconv.Itoa(status) + " " + string(body) + " encoding=" + encoding, nil
+}
+func ShowTLS(ctx context.Context, base string) (string, error) {
+	status, _, _, err := http.DoWith(ctx, "GET", base+"/single", nil, nil, 1024, 5000, []string{http.InsecureSkipVerify, "true"})
+	if err != nil {
+		return "error: " + err.Error(), nil
+	}
+	return strconv.Itoa(status), nil
 }
 `,
 	} {
