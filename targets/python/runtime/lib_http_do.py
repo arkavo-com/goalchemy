@@ -6,6 +6,9 @@ import threading
 import urllib.parse
 import re
 import zlib
+import os
+import shutil
+import tempfile
 from .task_spawn import sched, register_host, HostFault, fault_text
 from .std_context_err import check_context, host_boundary, CONTEXT_DEADLINE_EXCEEDED
 from .std_errors_new import std_errors_new
@@ -63,7 +66,41 @@ class Lease:
             conn=self.connection;self.connection=None
         if conn is not None:conn.close()
 
+OPTION_NAMES={b'client-cert',b'client-key',b'root-cas',b'insecure-skip-verify'}
+class BadTLS(Exception): pass
+def tls_context(options):
+    """Returns the SSL context for transport options, or None for defaults."""
+    if not options:return None
+    if len(options)%2:raise Reject('invalid')
+    values={};total=0
+    for i in range(0,len(options),2):
+        name,value=options[i],options[i+1]
+        if type(name) is not bytes or type(value) is not bytes:raise Reject('invalid')
+        total+=len(name)+len(value)
+        if total>1<<20 or name in values or name not in OPTION_NAMES:raise Reject('invalid')
+        values[name]=value
+    skip=values.get(b'insecure-skip-verify')
+    if (b'client-cert' in values)!=(b'client-key' in values) or skip not in (None,b'true',b'false'):raise Reject('invalid')
+    ctx=ssl.create_default_context()
+    try:
+        if b'root-cas' in values:ctx.load_verify_locations(cadata=values[b'root-cas'].decode('ascii'))
+        if b'client-cert' in values:
+            directory=tempfile.mkdtemp(prefix='goalchemy-tls-')
+            try:
+                paths=[]
+                for name in (b'client-cert',b'client-key'):
+                    path=os.path.join(directory,name.decode());paths.append(path)
+                    with open(os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'wb') as f:f.write(values[name])
+                ctx.load_cert_chain(paths[0],paths[1])
+            finally:shutil.rmtree(directory,ignore_errors=True)
+    except (ssl.SSLError,ValueError,UnicodeError) as e:raise BadTLS() from e
+    if skip==b'true':ctx.check_hostname=False;ctx.verify_mode=ssl.CERT_NONE
+    return ctx
+
 def lib_http_do(t,context,method,raw,headers,input,max_bytes,timeout):
+    http_do(t,context,method,raw,headers,input,max_bytes,timeout,[])
+
+def http_do(t,context,method,raw,headers,input,max_bytes,timeout,options):
     invalid=b'http: invalid request or limit'
     s=sched();s.check()
     if context is None:
@@ -98,6 +135,10 @@ def lib_http_do(t,context,method,raw,headers,input,max_bytes,timeout):
         path=urllib.parse.quote(u.path or '/',safe="/%:@!$&'()*+,;=-._~")
         if u.query:path+='?'+urllib.parse.quote(u.query,safe="/%?:@!$&'()*+,;=-._~")
         hostname=u.hostname.encode('idna').decode('ascii');port=u.port
+        tls=tls_context(options)
+    except BadTLS:
+        if boundary is not None:boundary.detach()
+        t.rv=[0,NIL,BYTE_NIL,std_errors_new(b'http: invalid TLS option')];return
     except (Reject,ValueError,UnicodeError):
         if boundary is not None:boundary.detach()
         t.rv=[0,NIL,BYTE_NIL,std_errors_new(invalid)];return
@@ -114,7 +155,7 @@ def lib_http_do(t,context,method,raw,headers,input,max_bytes,timeout):
         try:
             # Acquisition errors are implementation faults, separately from I/O.
             try:
-                conn=http.client.HTTPSConnection(hostname,port,timeout=timeout/1000,context=ssl.create_default_context()) if u.scheme=='https' else http.client.HTTPConnection(hostname,port,timeout=timeout/1000)
+                conn=http.client.HTTPSConnection(hostname,port,timeout=timeout/1000,context=tls or ssl.create_default_context()) if u.scheme=='https' else http.client.HTTPConnection(hostname,port,timeout=timeout/1000)
                 conn.response_class=Response
                 with lease.lock:lease.connection=conn
             except BaseException as e:raise HostFault('HTTP acquisition') from e

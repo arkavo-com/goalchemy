@@ -7,6 +7,14 @@ export interface HttpExchange {
   body: Uint8Array;
   max: number;
   signal: AbortSignal;
+  tls: HttpTLS | null;
+}
+// Transport options of lib/http.DoWith; ca adds to the system roots.
+export interface HttpTLS {
+  cert?: string;
+  key?: string;
+  ca?: string;
+  insecure: boolean;
 }
 export type HttpOutcome = { status: number; headers: string[]; body: Uint8Array } | { error: string };
 export interface HttpHost {

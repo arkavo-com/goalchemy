@@ -34,4 +34,5 @@ const char *gcn_http_header_name(gcn_http *, size_t);
 const char *gcn_http_header_value(gcn_http *, size_t);
 const char *gcn_http_error(gcn_http *);
 void gcn_http_release(gcn_http *);
+int gcn_http_tls(gcn_http *, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t, int);
 #endif

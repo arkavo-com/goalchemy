@@ -1234,6 +1234,22 @@ export const cases: Record<string, (h: H) => unknown[] | Promise<unknown[]>> = {
     const r3:any=rv[3];
     return [encInt(r0), encSlice(r1, (e: any) => encString(e)), encSlice(r2, (e: any) => encInt(e)), encError(r3)];
   },
+  "lib.http.do_with/boundary_example": async (h: H) => {
+    const v_ctx = rt.stdContextBackground();
+    const v_method = decString(h.let("method"));
+    const v_url = decString(h.let("url"));
+    const v_headers = decSlice(h.let("headers"), (r: any) => decString(r), false);
+    const v_body = decSlice(h.let("body"), (r: any) => (decInt(r, "u8") as number), true);
+    const v_max_response_bytes = (decInt(h.let("max_response_bytes"), "i64") as bigint);
+    const v_timeout_millis = (decInt(h.let("timeout_millis"), "i64") as bigint);
+    const v_options = decSlice(h.let("options"), (r: any) => decString(r), false);
+    const rv = await harnessHost((t:any)=>{ rt.libHttpDoWith(t,v_ctx,v_method,v_url,v_headers,v_body,v_max_response_bytes,v_timeout_millis,v_options); });
+    const r0:any=rv[0];
+    const r1:any=rv[1];
+    const r2:any=rv[2];
+    const r3:any=rv[3];
+    return [encInt(r0), encSlice(r1, (e: any) => encString(e)), encSlice(r2, (e: any) => encInt(e)), encError(r3)];
+  },
   "lib.log.enabled/debug_disabled_by_default": (h: H) => {
     const v_level = (decInt(h.let("level"), "i64") as bigint);
     const r0 = rt.libLogEnabled(v_level);

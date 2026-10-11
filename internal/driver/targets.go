@@ -612,7 +612,7 @@ func emitRust(res *Result, out string) []diagnostics.Diagnostic {
 	for _, f := range files {
 		name := strings.TrimSuffix(path.Base(f), ".rs")
 		fmt.Fprintf(&mod, "#[path = %q]\npub mod %s;\n", f, name)
-		if strings.HasPrefix(name, "lib_crypto_") || strings.HasPrefix(name, "lib_encoding_") || name == "lib_http_do" || name == "lib_callback_request" {
+		if strings.HasPrefix(name, "lib_crypto_") || strings.HasPrefix(name, "lib_encoding_") || strings.HasPrefix(name, "lib_http_") || name == "lib_callback_request" {
 			mod.WriteString("#[cfg(feature = \"native\")]\n")
 		}
 		fmt.Fprintf(&mod, "pub use %s::*;\n", name)
@@ -680,7 +680,7 @@ exec ./main
 func cNativeLibs(contracts []string) string {
 	var curl, crypto bool
 	for _, c := range contracts {
-		curl = curl || c == "lib.http.do"
+		curl = curl || strings.HasPrefix(c, "lib.http.")
 		crypto = crypto || strings.HasPrefix(c, "lib.crypto.")
 	}
 	libs := ""

@@ -9,6 +9,13 @@ struct GHTTPInput {
   let body: [UInt8]
   let limit: Int
   let timeout: Int64
+  let tls: GHTTPTLS?
+}
+struct GHTTPTLS {
+  var cert: [UInt8]?
+  var key: [UInt8]?
+  var roots: [UInt8]?
+  var insecure = false
 }
 struct GHTTPOutput {
   let status: Int64
@@ -59,8 +66,36 @@ enum GHTTP {
         throw GReject("http: invalid request or limit")
       }
     }
+    let tls = args.count > 7 ? try options(GElements(args[7]).map { $0.bytes }) : nil
     return GHTTPInput(
-      method: method, url: url, headers: headers, body: body, limit: Int(limit), timeout: timeout)
+      method: method, url: url, headers: headers, body: body, limit: Int(limit), timeout: timeout,
+      tls: tls)
+  }
+  static func options(_ options: [[UInt8]]) throws -> GHTTPTLS? {
+    if options.isEmpty { return nil }
+    if options.count % 2 != 0 { throw GReject("http: invalid request or limit") }
+    var values: [String: [UInt8]] = [:]
+    var total = 0
+    for i in stride(from: 0, to: options.count, by: 2) {
+      let name = String(decoding: options[i], as: UTF8.self)
+      total += options[i].count + options[i + 1].count
+      if total > 1 << 20 || values[name] != nil
+        || !["client-cert", "client-key", "root-cas", "insecure-skip-verify"].contains(name)
+        || Array(name.utf8) != options[i]
+      {
+        throw GReject("http: invalid request or limit")
+      }
+      values[name] = options[i + 1]
+    }
+    let skip = values["insecure-skip-verify"]
+    if (values["client-cert"] == nil) != (values["client-key"] == nil)
+      || (skip != nil && skip! != Array("true".utf8) && skip! != Array("false".utf8))
+    {
+      throw GReject("http: invalid request or limit")
+    }
+    return GHTTPTLS(
+      cert: values["client-cert"], key: values["client-key"], roots: values["root-cas"],
+      insecure: skip == Array("true".utf8))
   }
   static func start(_ args: [GValue], _ task: GTask) throws -> GAction {
     let owner = task.owner
@@ -74,6 +109,25 @@ enum GHTTP {
       return .resume(zero(GNative.error("http: invalid request or limit")))
     }
     guard let native = gcn_http_create() else { throw GFault("HTTP allocation failure") }
+    if let tls = input.tls {
+      let none: [UInt8] = []
+      let status = (tls.cert ?? none).withUnsafeBufferPointer { c in
+        (tls.key ?? none).withUnsafeBufferPointer { k in
+          (tls.roots ?? none).withUnsafeBufferPointer { r in
+            gcn_http_tls(
+              native, tls.cert == nil ? nil : (c.baseAddress ?? UnsafePointer(bitPattern: 1)),
+              c.count, k.baseAddress, k.count,
+              tls.roots == nil ? nil : (r.baseAddress ?? UnsafePointer(bitPattern: 1)), r.count,
+              tls.insecure ? 1 : 0)
+          }
+        }
+      }
+      if status != 1 {
+        gcn_http_release(native)
+        if status < 0 { throw GFault("HTTP allocation failure") }
+        return .resume(zero(GNative.error("http: invalid TLS option")))
+      }
+    }
     let operation = owner.newOperation(task)
     operation.retained = args
     operation.cancelNative = { gcn_http_cancel(native) }

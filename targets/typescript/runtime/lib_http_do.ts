@@ -2,7 +2,7 @@ import { sched,type Task } from './task_spawn.ts';
 import { observeContext,onContextCancel,type Context } from './std_context_err.ts';
 import { bytes,byteSlice,stringSlice,strings,errorBox,DeclaredFailure,MAX_BYTES,binaryInput } from '../types/native.ts';
 import { BYTE_NIL,NIL,type Slice } from '../types/slice.ts';
-import { bodyless,installedHttpHost } from '../types/http.ts';
+import { bodyless,installedHttpHost,type HttpTLS } from '../types/http.ts';
 function fail(t:Task,message:string):void{t.rv=[0n,NIL,BYTE_NIL,errorBox(message)];}
 // Fetch forbids these request fields in browsers. Reject them in both targets
 // before submission instead of allowing native fetch to silently discard them.
@@ -24,23 +24,38 @@ function fetchURL(raw:string):string{
  if(path.split('/').some(part=>{const dots=part.replace(/%2e/ig,'.');return dots==='.'||dots==='..';}))throw new DeclaredFailure('invalid');
  return parsed.href;
 }
+const optionNames=new Set(['client-cert','client-key','root-cas','insecure-skip-verify']);
+function tlsOptions(options:string[]):HttpTLS|null{
+ if(options.length===0)return null;
+ if(options.length%2)throw new DeclaredFailure('invalid');
+ const values=new Map<string,string>();let total=0;
+ for(let i=0;i<options.length;i+=2){const n=options[i],v=options[i+1];total+=n.length+v.length;if(total>1<<20||values.has(n)||!optionNames.has(n))throw new DeclaredFailure('invalid');values.set(n,v);}
+ const skip=values.get('insecure-skip-verify');
+ if(values.has('client-cert')!==values.has('client-key')||(skip!==undefined&&skip!=='true'&&skip!=='false'))throw new DeclaredFailure('invalid');
+ return {cert:values.get('client-cert'),key:values.get('client-key'),ca:values.get('root-cas'),insecure:skip==='true'};
+}
 export function libHttpDo(t:Task,ctx:Context|null,method:string,url:string,headers:Slice<string>,body:Slice<number>,max:bigint,timeout:bigint):void{
+ httpDo(t,ctx,method,url,headers,body,max,timeout,[]);
+}
+export function httpDo(t:Task,ctx:Context|null,method:string,url:string,headers:Slice<string>,body:Slice<number>,max:bigint,timeout:bigint,options:string[]):void{
  if(ctx===null){fail(t,'http: invalid request or limit');return;}observeContext(ctx);if(ctx.err!==null){t.rv=[0n,NIL,BYTE_NIL,ctx.err];return;}
- let payload:Uint8Array<ArrayBuffer>,input:Headers,destination:string;const pairs:[string,string][]=[];const host=installedHttpHost();
+ let payload:Uint8Array<ArrayBuffer>,input:Headers,destination:string,tls:HttpTLS|null;const pairs:[string,string][]=[];const host=installedHttpHost();
  try{
   if((method!=='GET'&&method!=='POST')||(method==='GET'&&body.l!==0)||body.l>MAX_BYTES||max<0n||max>BigInt(MAX_BYTES)||timeout<1n||timeout>300000n||headers.l%2||headers.l>32768||url.length>8192)throw new DeclaredFailure('invalid');
   destination=fetchURL(url);
   input=new Headers();const hs=strings(headers);let total=0;
   for(let i=0;i<hs.length;i+=2){const n=hs[i],v=hs[i+1];total+=n.length+v.length+4;if(total>65536||!n||! /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(n)||/[\x00-\x08\x0a-\x1f\x7f]/.test(v)||forbiddenHeader(n,v))throw new DeclaredFailure('invalid');if(host===undefined&&n.toLowerCase()==='accept-encoding'){fail(t,'http: Accept-Encoding is not supported in browsers');return;}input.append(n,v);pairs.push([n,v]);}
   payload=bytes(body);
+  tls=tlsOptions(options);
  }catch(e){if(e instanceof DeclaredFailure||e instanceof TypeError){fail(t,'http: invalid request or limit');return;}throw e;}
+ if(host===undefined&&tls!==null){fail(t,'http: TLS options are not supported in browsers');return;}
  const controller=new AbortController(),owner=sched;let expired=false;
  const stop=()=>controller.abort();const unlink=onContextCancel(ctx,stop);
  const alarm=owner.host.alarm(Number(timeout),()=>{expired=true;stop();});
  const token=owner.registerHost(t,stop,()=>{unlink();alarm();},()=>{observeContext(ctx);return ctx.err===null?null:[0n,NIL,BYTE_NIL,ctx.err];},rv=>[BigInt(rv[0] as number),stringSlice(rv[1] as string[]|null),byteSlice(rv[2] as Uint8Array|null),errorBox(rv[3] as string|null)]);
  owner.launchHost(token,async()=>{
   if(host!==undefined){
-   try{const out=await host.exchange({method,url:destination,headers:pairs,body:payload,max:Number(max),signal:controller.signal});
+   try{const out=await host.exchange({method,url:destination,headers:pairs,body:payload,max:Number(max),signal:controller.signal,tls});
     if('error' in out)return [0,null,null,expired?'http: deadline exceeded':out.error];return [out.status,out.headers,out.body,null];}
    finally{alarm();}
   }

@@ -7,6 +7,10 @@ declare module "node:http" {
 declare module "node:https" {
   export function request(url: string, options: any, callback?: (res: any) => void): any;
 }
+declare module "node:tls" {
+  export const rootCertificates: readonly string[];
+  export function createSecureContext(options?: any): any;
+}
 declare module "node:zlib" {
   export function createGunzip(options?: any): any;
 }

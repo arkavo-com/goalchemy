@@ -319,7 +319,7 @@ func forEachValue(in Instr, fn func(Value)) {
 // which the virtual-time entry rejects on most targets.
 func HostEntry(contracts map[string]bool) bool {
 	for c := range contracts {
-		if strings.HasPrefix(c, "lib.crypto.") || c == "lib.http.do" || c == "lib.callback.request" {
+		if strings.HasPrefix(c, "lib.crypto.") || strings.HasPrefix(c, "lib.http.") || c == "lib.callback.request" {
 			return true
 		}
 	}

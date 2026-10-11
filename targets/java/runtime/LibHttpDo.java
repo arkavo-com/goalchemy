@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.*;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -64,12 +65,73 @@ public final class LibHttpDo {
             if(fault!=null)throw new TaskSpawn.HostFault("HTTP cleanup: "+fault);
         }
     }
+    private static final String BAD_TLS="http: invalid TLS option";
+    private static final Set<String> OPTIONS=Set.of("client-cert","client-key","root-cas","insecure-skip-verify");
+    private static Native.Reject badTls(){return new Native.Reject(BAD_TLS);}
+    private static byte[] pemBlock(String text,String label)throws Native.Reject {
+        String begin="-----BEGIN "+label+"-----",end="-----END "+label+"-----";int a=text.indexOf(begin);if(a<0)return null;int b=text.indexOf(end,a);if(b<0)throw badTls();
+        try{return Base64.getMimeDecoder().decode(text.substring(a+begin.length(),b));}catch(IllegalArgumentException e){throw badTls();}
+    }
+    private static java.security.PrivateKey privateKey(String text)throws Exception {
+        byte[] der=pemBlock(text,"PRIVATE KEY");
+        if(der==null&&(der=pemBlock(text,"RSA PRIVATE KEY"))!=null)der=Der.seq(Der.integer(java.math.BigInteger.ZERO),Der.RSA_ALGORITHM,Der.value(4,der));
+        else if(der==null&&(der=pemBlock(text,"EC PRIVATE KEY"))!=null){
+            Der.Node root=Der.one(der);byte[] curve=null;if(root.tag()!=48)throw badTls();for(Der.Node n:root.children())if(n.tag()==160)curve=n.content();if(curve==null)throw badTls();
+            der=Der.seq(Der.integer(java.math.BigInteger.ZERO),Der.seq(HexFormat.of().parseHex("06072a8648ce3d0201"),curve),Der.value(4,der));
+        }
+        if(der==null)throw badTls();var spec=new java.security.spec.PKCS8EncodedKeySpec(der);
+        for(String algorithm:new String[]{"RSA","EC","Ed25519"})try{return java.security.KeyFactory.getInstance(algorithm).generatePrivate(spec);}catch(java.security.spec.InvalidKeySpecException e){}
+        throw badTls();
+    }
+    private static java.security.cert.X509Certificate[] certificates(String text)throws Exception {
+        var all=java.security.cert.CertificateFactory.getInstance("X.509").generateCertificates(new ByteArrayInputStream(text.getBytes(StandardCharsets.ISO_8859_1)));
+        if(all.isEmpty())throw badTls();return all.stream().map(c->(java.security.cert.X509Certificate)c).toArray(java.security.cert.X509Certificate[]::new);
+    }
+    private static final class TrustAll extends javax.net.ssl.X509ExtendedTrustManager {
+        public void checkClientTrusted(java.security.cert.X509Certificate[] c,String a){}
+        public void checkServerTrusted(java.security.cert.X509Certificate[] c,String a){}
+        public void checkClientTrusted(java.security.cert.X509Certificate[] c,String a,Socket s){}
+        public void checkServerTrusted(java.security.cert.X509Certificate[] c,String a,Socket s){}
+        public void checkClientTrusted(java.security.cert.X509Certificate[] c,String a,javax.net.ssl.SSLEngine e){}
+        public void checkServerTrusted(java.security.cert.X509Certificate[] c,String a,javax.net.ssl.SSLEngine e){}
+        public java.security.cert.X509Certificate[] getAcceptedIssuers(){return new java.security.cert.X509Certificate[0];}
+    }
+    /** The SSL context for DoWith options, or null for the default. */
+    static javax.net.ssl.SSLContext sslContext(String[] options)throws Native.Reject {
+        if(options.length==0)return null;if(options.length%2!=0)throw new Native.Reject(INVALID);
+        Map<String,String> values=new HashMap<>();long total=0;
+        for(int i=0;i<options.length;i+=2){total+=options[i].length()+options[i+1].length();if(total>1<<20||!OPTIONS.contains(options[i])||values.put(options[i],options[i+1])!=null)throw new Native.Reject(INVALID);}
+        String skip=values.get("insecure-skip-verify");
+        if(values.containsKey("client-cert")!=values.containsKey("client-key")||skip!=null&&!skip.equals("true")&&!skip.equals("false"))throw new Native.Reject(INVALID);
+        try{
+            javax.net.ssl.KeyManager[] keys=null;javax.net.ssl.TrustManager[] trust=null;
+            if(values.containsKey("client-cert")){
+                var store=KeyStore.getInstance("PKCS12");store.load(null,null);char[] password=new char[0];
+                store.setKeyEntry("client",privateKey(values.get("client-key")),password,certificates(values.get("client-cert")));
+                var factory=javax.net.ssl.KeyManagerFactory.getInstance(javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());factory.init(store,password);keys=factory.getKeyManagers();
+            }
+            if("true".equals(skip))trust=new javax.net.ssl.TrustManager[]{new TrustAll()};
+            else if(values.containsKey("root-cas")){
+                var system=javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());system.init((KeyStore)null);
+                var store=KeyStore.getInstance("PKCS12");store.load(null,null);int n=0;
+                for(var m:system.getTrustManagers())if(m instanceof javax.net.ssl.X509TrustManager x)for(var c:x.getAcceptedIssuers())store.setCertificateEntry("system-"+(n++),c);
+                for(var c:certificates(values.get("root-cas")))store.setCertificateEntry("extra-"+(n++),c);
+                var factory=javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());factory.init(store);trust=factory.getTrustManagers();
+            }
+            if("true".equals(skip)&&values.containsKey("root-cas"))certificates(values.get("root-cas"));
+            var context=javax.net.ssl.SSLContext.getInstance("TLS");context.init(keys,trust,null);return context;
+        }catch(Native.Reject e){throw e;}catch(Exception e){throw badTls();}
+    }
     public static void libHttpDo(TaskSpawn.Task task,StdContextErr.Context context,String method,String raw,
                                   Slice headers,Slice input,long max,long timeoutMillis) {
+        httpDo(task,context,method,raw,headers,input,max,timeoutMillis,new String[0]);
+    }
+    static void httpDo(TaskSpawn.Task task,StdContextErr.Context context,String method,String raw,
+                                  Slice headers,Slice input,long max,long timeoutMillis,String[] options) {
         if(context==null||context.owner!=null&&context.owner!=TaskSpawn.sched||!method.equals("GET")&&!method.equals("POST")||max<0||max>Native.MAX||timeoutMillis<1||timeoutMillis>300000||raw.length()>8192){task.rv=Native.failure(ZERO,INVALID);return;}
         StdContextErr.observe(context);if(context.err!=null){task.rv=new Object[]{0L,Slice.NIL,Slice.BYTE_NIL,context.err};return;}
         Lease lease=new Lease();StdContextErr.Boundary boundary=new StdContextErr.Boundary(context,timeoutMillis*1000000L,lease::stop);
-        final HttpRequest request;final boolean automaticGzip;final int limit=(int)max;
+        final HttpRequest request;final boolean automaticGzip;final int limit=(int)max;final javax.net.ssl.SSLContext tls;
         try {
             byte[] body=Native.bytes(input);String[] pairs=Native.strings(headers);
             if(method.equals("GET")&&body.length!=0||pairs.length%2!=0||pairs.length>32768)throw new Native.Reject(INVALID);
@@ -78,11 +140,12 @@ public final class LibHttpDo {
             for(int i=0;i<pairs.length;i+=2){String name=pairs[i],value=pairs[i+1];total+=name.length()+value.length()+4;if(total>65536||!token(name)||badValue(value)||FORBIDDEN.contains(name.toLowerCase(Locale.ROOT)))throw new Native.Reject(INVALID);for(int j=0;j<value.length();j++)if(value.charAt(j)>127)throw new Native.Reject(INVALID);builder.header(name,value);String lower=name.toLowerCase(Locale.ROOT);if((lower.equals("accept-encoding")||lower.equals("range"))&&seen.add(lower)&&!value.isEmpty())encoded=true;}
             automaticGzip=!encoded;if(automaticGzip)builder.header("Accept-Encoding","gzip");
             long nanos=Math.max(1,boundary.deadline-TaskSpawn.sched.now());builder.timeout(Duration.ofNanos(nanos));builder.method(method,HttpRequest.BodyPublishers.ofByteArray(body));request=builder.build();
-        }catch(Native.Reject|URISyntaxException|IllegalArgumentException e){boundary.close();task.rv=Native.failure(ZERO,INVALID);return;}
+            tls=sslContext(options);
+        }catch(Native.Reject|URISyntaxException|IllegalArgumentException e){boundary.close();task.rv=Native.failure(ZERO,e instanceof Native.Reject r&&BAD_TLS.equals(r.getMessage())?BAD_TLS:INVALID);return;}
         TaskSpawn.HostToken token=TaskSpawn.sched.registerHost(task,lease::stop,boundary::close,
             ()->boundary.error()==null?null:new Object[]{0L,Slice.NIL,Slice.BYTE_NIL,boundary.error()},
             values->{String error=(String)values[0];if(error!=null)return Native.failure(ZERO,error);return new Object[]{(Long)values[1],Native.strings((String[])values[2]),Native.slice((byte[])values[3]),null};});
-        HttpWork work=new HttpWork(lease,token,request,automaticGzip,limit);
+        HttpWork work=new HttpWork(lease,token,request,automaticGzip,limit,tls);
         Thread worker=null;
         try {
             worker=Thread.ofVirtual().name("goalchemy-http").unstarted(work);worker.start();
@@ -90,13 +153,14 @@ public final class LibHttpDo {
         Native.acknowledgeAfter(worker,token);
     }
     private static final class HttpWork implements Runnable {
-        final Lease lease;final TaskSpawn.HostToken token;HttpRequest request;final boolean automaticGzip;final int limit;
-        HttpWork(Lease lease,TaskSpawn.HostToken token,HttpRequest request,boolean automaticGzip,int limit){this.lease=lease;this.token=token;this.request=request;this.automaticGzip=automaticGzip;this.limit=limit;}
+        final Lease lease;final TaskSpawn.HostToken token;HttpRequest request;final boolean automaticGzip;final int limit;final javax.net.ssl.SSLContext tls;
+        HttpWork(Lease lease,TaskSpawn.HostToken token,HttpRequest request,boolean automaticGzip,int limit,javax.net.ssl.SSLContext tls){this.lease=lease;this.token=token;this.request=request;this.automaticGzip=automaticGzip;this.limit=limit;this.tls=tls;}
         public void run(){
                 Object[] wire={null,0L,new String[0],new byte[0]};TaskSpawn.HostFault fault=null;
                 try {
                     HttpRequest submitted=request;request=null;lease.attachWorker();
-                    HttpClient client=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(30)).build();lease.attachClient(client);
+                    HttpClient.Builder clientBuilder=HttpClient.newBuilder();if(tls!=null)clientBuilder.sslContext(tls);
+                    HttpClient client=clientBuilder.followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(30)).build();lease.attachClient(client);
                     HttpResponse<InputStream> response=client.send(submitted,HttpResponse.BodyHandlers.ofInputStream());lease.attachBody(response.body());
                     int status=response.statusCode();boolean bodyless=status==204||status==304||status/100==1||response.headers().firstValue("Content-Length").map(v->v.trim().equals("0")).orElse(false);
                     boolean gzip=automaticGzip&&!bodyless&&response.headers().firstValue("Content-Encoding").orElse("").equalsIgnoreCase("gzip");

@@ -6,6 +6,8 @@ package http
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net"
@@ -22,7 +24,20 @@ const MaxBytes = 64 << 20
 // MaxHeaderBytes is the largest request or response header size Do accepts (64KiB).
 const MaxHeaderBytes = 64 << 10
 
+// MaxOptionBytes is the largest total size of the options DoWith accepts (1MiB).
+const MaxOptionBytes = 1 << 20
+
+// Option names for DoWith. Values are PEM text, except InsecureSkipVerify,
+// which is "true" or "false".
+const (
+	ClientCert         = "client-cert"
+	ClientKey          = "client-key"
+	RootCAs            = "root-cas"
+	InsecureSkipVerify = "insecure-skip-verify"
+)
+
 var invalid = errors.New("http: invalid request or limit")
+var badTLS = errors.New("http: invalid TLS option")
 var tooLarge = errors.New("http: response body exceeds limit")
 
 // Do performs one bounded HTTP GET or POST exchange. It takes alternating header names/values. timeoutMillis uses real elapsed
@@ -31,12 +46,25 @@ var tooLarge = errors.New("http: response body exceeds limit")
 // Non-2xx/redirect statuses are ordinary results; transport/limit failures
 // return zero status and nil headers/body, never a partial successful body.
 func Do(ctx context.Context, method, rawURL string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64) (int, []string, []byte, error) {
+	return DoWith(ctx, method, rawURL, headers, body, maxResponseBytes, timeoutMillis, nil)
+}
+
+// DoWith is Do with transport options as alternating names and values:
+// ClientCert and ClientKey (both or neither) present a client certificate,
+// RootCAs trusts more certificate authorities in addition to the system's,
+// and InsecureSkipVerify "true" disables server certificate verification.
+// Each name appears at most once. Options apply to https URLs.
+func DoWith(ctx context.Context, method, rawURL string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64, options []string) (int, []string, []byte, error) {
 	if ctx == nil || (method != "GET" && method != "POST") || len(body) > MaxBytes || (method == "GET" && len(body) != 0) || maxResponseBytes < 0 || maxResponseBytes > MaxBytes || timeoutMillis < 1 || timeoutMillis > 300000 || len(headers)%2 != 0 || len(rawURL) > 8192 {
 		return 0, nil, nil, invalid
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" {
 		return 0, nil, nil, invalid
+	}
+	config, err := tlsConfig(options)
+	if err != nil {
+		return 0, nil, nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMillis)*time.Millisecond)
 	defer cancel()
@@ -55,7 +83,7 @@ func Do(ctx context.Context, method, rawURL string, headers []string, body []byt
 	}
 	// Dedicated transport avoids unbounded global pooled resources and host
 	// default-client mutations; proxies follow the standard trusted host config.
-	tr := &stdhttp.Transport{Proxy: stdhttp.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 10 * time.Second, DisableKeepAlives: true, MaxResponseHeaderBytes: MaxHeaderBytes}
+	tr := &stdhttp.Transport{Proxy: stdhttp.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 10 * time.Second, TLSClientConfig: config, DisableKeepAlives: true, MaxResponseHeaderBytes: MaxHeaderBytes}
 	defer tr.CloseIdleConnections()
 	client := &stdhttp.Client{Transport: tr, CheckRedirect: func(*stdhttp.Request, []*stdhttp.Request) error { return stdhttp.ErrUseLastResponse }}
 	resp, err := client.Do(req)
@@ -83,6 +111,51 @@ func Do(ctx context.Context, method, rawURL string, headers []string, body []byt
 	}
 	return resp.StatusCode, result, out, nil
 }
+func tlsConfig(options []string) (*tls.Config, error) {
+	if len(options) == 0 {
+		return nil, nil
+	}
+	if len(options)%2 != 0 {
+		return nil, invalid
+	}
+	values := map[string]string{}
+	total := 0
+	for i := 0; i < len(options); i += 2 {
+		name, value := options[i], options[i+1]
+		total += len(name) + len(value)
+		_, seen := values[name]
+		if total > MaxOptionBytes || seen || (name != ClientCert && name != ClientKey && name != RootCAs && name != InsecureSkipVerify) {
+			return nil, invalid
+		}
+		values[name] = value
+	}
+	cert, hasCert := values[ClientCert]
+	key, hasKey := values[ClientKey]
+	skip, hasSkip := values[InsecureSkipVerify]
+	if hasCert != hasKey || hasSkip && skip != "true" && skip != "false" {
+		return nil, invalid
+	}
+	config := &tls.Config{InsecureSkipVerify: skip == "true"}
+	if hasCert {
+		pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
+		if err != nil {
+			return nil, badTLS
+		}
+		config.Certificates = []tls.Certificate{pair}
+	}
+	if roots, ok := values[RootCAs]; ok {
+		pool, err := x509.SystemCertPool()
+		if err != nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM([]byte(roots)) {
+			return nil, badTLS
+		}
+		config.RootCAs = pool
+	}
+	return config, nil
+}
+
 func token(s string) bool {
 	if s == "" {
 		return false

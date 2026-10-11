@@ -788,6 +788,13 @@ functions:
   - lib.crypto.close
   - std.context.err
   harness: 'native: GNative.lib_http_do({args}, {types})'
+- id: lib.http.do_with
+  contract_version: 1.0.0
+  symbol: GNative.lib_http_do_with
+  implementation: runtime/lib_http_do_with.swift
+  requires:
+  - lib.http.do
+  harness: 'native: GNative.lib_http_do_with({args}, {types})'
 - id: lib.callback.request
   contract_version: 1.0.0
   symbol: GNative.lib_callback_request
