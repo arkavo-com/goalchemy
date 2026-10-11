@@ -16,6 +16,9 @@ import (
 // that type; interface operands are encoded from their dynamic value.
 func (fl *fnLowerer) jsonMarshal(e *ast.CallExpr, obj types.Object, name string) []ir.Value {
 	pkg := obj.Pkg()
+	if name == "MarshalStream" || name == "UnmarshalStream" {
+		return fl.jsonDynamicStream(e, name)
+	}
 	if pkg.Path() != catalog.JSONPackage {
 		fl.term(&ir.PanicRuntime{At: at(e), Msg: "json: the native encoder is unavailable"})
 		var zero []ir.Value
@@ -37,12 +40,7 @@ func (fl *fnLowerer) jsonMarshal(e *ast.CallExpr, obj types.Object, name string)
 	if tv.IsNil() || types.IsInterface(tv.Type) {
 		args = append(args, fl.exprTo(arg, anyT))
 	} else {
-		t := fl.typ(tv.Type)
-		v := fl.exprTo(arg, t)
-		p := fl.temp(fl.ts().PointerTo(t))
-		fl.emit(&ir.New{At: at(e), Dst: p})
-		fl.emit(&ir.Store{At: at(e), Place: &ir.Place{Root: ir.DerefRoot{Ptr: p}, Type: t}, V: v})
-		args = append(args, fl.conv(p, anyT, e))
+		args = append(args, fl.jsonBox(arg, e))
 		helper = "marshalTyped"
 	}
 	if name == "MarshalIndent" {
@@ -82,25 +80,101 @@ func (fl *fnLowerer) jsonUnmarshal(e *ast.CallExpr, g *jsonGen) []ir.Value {
 		f = g.helper("unmarshalAny")
 		args = []ir.Value{data, fl.exprTo(arg, anyT)}
 	} else {
-		elem := tv.Type.Underlying().(*types.Pointer).Elem()
-		pt := fl.ts().PointerTo(fl.typ(elem))
-		var x ir.Value = fl.snap(fl.exprTo(arg, fl.typ(tv.Type)))
-		if x.IRType() != pt {
-			c := fl.temp(pt)
-			fl.emit(&ir.Convert{At: at(e), Dst: c, X: x, Kind: ir.ConvNop})
-			x = c
-		}
-		isNil := fl.temp(fl.ts().Bool())
-		fl.emit(&ir.BinOp{At: at(e), Dst: isNil, Op: ir.Eq, X: x, Y: &ir.Const{Type: pt, Nil: true}})
-		desc := g.desc(elem, true)
-		d := fl.temp(desc.Sig.U().Results[0])
-		fl.emit(&ir.Call{At: at(e), Kind: ir.CallStatic, Func: desc, Dsts: []*ir.Local{d}})
 		f = g.helper("unmarshalTyped")
-		args = []ir.Value{data, fl.conv(x, anyT, e), d, isNil, strConst(fl.ts(), jsontype.RootName(elem))}
+		args = append([]ir.Value{data}, fl.jsonTarget(arg, e, g)...)
 	}
 	out := fl.temp(f.Sig.U().Results[0])
 	fl.emit(&ir.Call{At: at(e), Kind: ir.CallStatic, Func: f, Args: args, Dsts: []*ir.Local{out}})
 	return []ir.Value{out}
+}
+
+// jsonBox evaluates a json.Marshal operand of static non-interface type into
+// a fresh variable and returns a pointer to it as an any.
+func (fl *fnLowerer) jsonBox(arg ast.Expr, e *ast.CallExpr) ir.Value {
+	t := fl.typ(fl.info.Types[arg].Type)
+	v := fl.exprTo(arg, t)
+	p := fl.temp(fl.ts().PointerTo(t))
+	fl.emit(&ir.New{At: at(e), Dst: p})
+	fl.emit(&ir.Store{At: at(e), Place: &ir.Place{Root: ir.DerefRoot{Ptr: p}, Type: t}, V: v})
+	return fl.conv(p, fl.ts().Any(), e)
+}
+
+// jsonTarget evaluates a json.Unmarshal target of static pointer type into
+// the pointer as an any, the decoding descriptor of the pointed-to type,
+// whether the pointer is nil and the root type name for errors.
+func (fl *fnLowerer) jsonTarget(arg ast.Expr, e *ast.CallExpr, g *jsonGen) []ir.Value {
+	tv := fl.info.Types[arg]
+	elem := tv.Type.Underlying().(*types.Pointer).Elem()
+	pt := fl.ts().PointerTo(fl.typ(elem))
+	var x ir.Value = fl.snap(fl.exprTo(arg, fl.typ(tv.Type)))
+	if x.IRType() != pt {
+		c := fl.temp(pt)
+		fl.emit(&ir.Convert{At: at(e), Dst: c, X: x, Kind: ir.ConvNop})
+		x = c
+	}
+	isNil := fl.temp(fl.ts().Bool())
+	fl.emit(&ir.BinOp{At: at(e), Dst: isNil, Op: ir.Eq, X: x, Y: &ir.Const{Type: pt, Nil: true}})
+	desc := g.desc(elem, true)
+	d := fl.temp(desc.Sig.U().Results[0])
+	fl.emit(&ir.Call{At: at(e), Kind: ir.CallStatic, Func: desc, Dsts: []*ir.Local{d}})
+	return []ir.Value{fl.conv(x, fl.ts().Any(), e), d, isNil, strConst(fl.ts(), jsontype.RootName(elem))}
+}
+
+// jsonStream lowers Encoder.Encode and Decoder.Decode like json.Marshal and
+// json.Unmarshal, passing the receiver to the matching source helper.
+func (fl *fnLowerer) jsonStream(e *ast.CallExpr, f *ast.SelectorExpr, sel *types.Selection, name string) []ir.Value {
+	m := sel.Obj().(*types.Func)
+	g := &jsonGen{l: fl.l, pkg: m.Pkg()}
+	recv, _ := fl.receiver(f.X, sel.Index()[:len(sel.Index())-1], m, f)
+	recv = fl.snap(recv)
+	arg := e.Args[0]
+	tv := fl.info.Types[arg]
+	dynamic := tv.IsNil() || types.IsInterface(tv.Type)
+	args := []ir.Value{recv}
+	var helper *ir.Func
+	switch {
+	case name == "Encode" && dynamic:
+		helper = g.helper("encoderAny")
+		args = append(args, fl.exprTo(arg, fl.ts().Any()))
+	case name == "Encode":
+		helper = g.helper("encoderTyped")
+		args = append(args, fl.jsonBox(arg, e))
+		desc := g.desc(tv.Type, false)
+		d := fl.temp(desc.Sig.U().Results[0])
+		fl.emit(&ir.Call{At: at(e), Kind: ir.CallStatic, Func: desc, Dsts: []*ir.Local{d}})
+		args = append(args, d)
+	case dynamic:
+		helper = g.helper("decoderAny")
+		args = append(args, fl.exprTo(arg, fl.ts().Any()))
+	default:
+		helper = g.helper("decoderTyped")
+		args = append(args, fl.jsonTarget(arg, e, g)...)
+	}
+	out := fl.temp(helper.Sig.U().Results[0])
+	fl.emit(&ir.Call{At: at(e), Kind: ir.CallStatic, Func: helper, Args: args, Dsts: []*ir.Local{out}})
+	return []ir.Value{out}
+}
+
+// jsonDynamicStream lowers the native lib/json stream calls in the bodies of
+// Encoder.Encode and Decoder.Decode, which compiled programs reach only
+// through interfaces, to their source counterparts for dynamic values.
+func (fl *fnLowerer) jsonDynamicStream(e *ast.CallExpr, name string) []ir.Value {
+	g := &jsonGen{l: fl.l, pkg: fl.p.Types}
+	helper := g.helper("dynamic" + name)
+	sig := helper.Sig.U()
+	var args []ir.Value
+	for i, a := range e.Args {
+		args = append(args, fl.exprTo(a, sig.Params[i]))
+	}
+	c := &ir.Call{At: at(e), Kind: ir.CallStatic, Func: helper, Args: args}
+	var out []ir.Value
+	for _, r := range sig.Results {
+		d := fl.temp(r)
+		c.Dsts = append(c.Dsts, d)
+		out = append(out, d)
+	}
+	fl.emit(c)
+	return out
 }
 
 type jsonGen struct {

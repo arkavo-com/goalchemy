@@ -26,9 +26,42 @@ const JSONPackage = StdModule + "encoding/json"
 // reflection.
 func JSONMarshal(obj types.Object) (string, bool) {
 	fn, ok := obj.(*types.Func)
-	if !ok || fn.Pkg() == nil || fn.Signature().Recv() != nil || fn.Name() != "Marshal" && fn.Name() != "MarshalIndent" && fn.Name() != "Unmarshal" {
+	if !ok || fn.Pkg() == nil || fn.Signature().Recv() != nil {
 		return "", false
 	}
 	p := fn.Pkg().Path()
-	return fn.Name(), p == JSONPackage || p == LibModule+"json"
+	switch fn.Name() {
+	case "Marshal", "MarshalIndent", "Unmarshal":
+		return fn.Name(), p == JSONPackage || p == LibModule+"json"
+	case "MarshalStream", "UnmarshalStream":
+		return fn.Name(), p == LibModule+"json"
+	}
+	return "", false
+}
+
+// JSONStream reports whether obj is the Encode method of std/encoding/json's
+// Encoder or the Decode method of its Decoder, returning the name. The
+// compiler describes the static type of the operand, as for json.Marshal.
+func JSONStream(obj types.Object) (string, bool) {
+	fn, ok := obj.(*types.Func)
+	if !ok || fn.Pkg() == nil || fn.Pkg().Path() != JSONPackage {
+		return "", false
+	}
+	recv := fn.Signature().Recv()
+	if recv == nil {
+		return "", false
+	}
+	ptr, ok := recv.Type().(*types.Pointer)
+	if !ok {
+		return "", false
+	}
+	named, ok := ptr.Elem().(*types.Named)
+	if !ok {
+		return "", false
+	}
+	switch {
+	case fn.Name() == "Encode" && named.Obj().Name() == "Encoder", fn.Name() == "Decode" && named.Obj().Name() == "Decoder":
+		return fn.Name(), true
+	}
+	return "", false
 }

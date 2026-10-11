@@ -906,6 +906,134 @@ func Valid(data []byte) bool
 
 Valid reports whether data is a valid JSON encoding.
 
+### type Decoder
+
+```go
+type Decoder struct {
+}
+```
+
+A Decoder reads and decodes JSON values from an input stream, with the buffering, tokens and errors of the reference toolchain's encoding/json.Decoder, which is built on encoding/json/jsontext.
+
+### NewDecoder
+
+```go
+func NewDecoder(r io.Reader) *Decoder
+```
+
+NewDecoder returns a new decoder that reads from r. The decoder introduces its own buffering and may read data from r beyond the JSON values requested.
+
+### Decoder.Buffered
+
+```go
+func (dec *Decoder) Buffered() io.Reader
+```
+
+Buffered returns a reader of the data remaining in the Decoder's buffer. The reader is valid until the next call to Decode.
+
+### Decoder.Decode
+
+```go
+func (dec *Decoder) Decode(v any) error
+```
+
+Decode reads the next JSON-encoded value from its input and stores it in the value pointed to by v.
+
+### Decoder.DisallowUnknownFields
+
+```go
+func (dec *Decoder) DisallowUnknownFields()
+```
+
+DisallowUnknownFields causes the Decoder to return an error when the destination is a struct and the input contains object keys which do not match any non-ignored, exported fields in the destination.
+
+### Decoder.InputOffset
+
+```go
+func (dec *Decoder) InputOffset() int64
+```
+
+InputOffset returns the input stream byte offset of the current decoder position. The offset gives the location of the end of the most recently returned token and the beginning of the next token.
+
+### Decoder.More
+
+```go
+func (dec *Decoder) More() bool
+```
+
+More reports whether there is another element in the current array or object being parsed.
+
+### Decoder.Token
+
+```go
+func (dec *Decoder) Token() (Token, error)
+```
+
+Token returns the next JSON token in the input stream. At the end of the input stream, Token returns nil, io.EOF. Token guarantees that the delimiters [ ] { } it returns are properly nested and matched: if Token encounters an unexpected delimiter in the input, it will return an error.
+
+### Decoder.UseNumber
+
+```go
+func (dec *Decoder) UseNumber()
+```
+
+UseNumber causes the Decoder to unmarshal a number into an interface value as a Number instead of as a float64.
+
+### type Delim
+
+```go
+type Delim rune
+```
+
+A Delim is a JSON array or object delimiter, one of [ ] { or }.
+
+### Delim.String
+
+```go
+func (d Delim) String() string
+```
+
+### type Encoder
+
+```go
+type Encoder struct {
+}
+```
+
+An Encoder writes JSON values to an output stream.
+
+### NewEncoder
+
+```go
+func NewEncoder(w io.Writer) *Encoder
+```
+
+NewEncoder returns a new encoder that writes to w.
+
+### Encoder.Encode
+
+```go
+func (enc *Encoder) Encode(v any) error
+```
+
+Encode writes the JSON encoding of v to the stream, with insignificant space characters elided, followed by a newline character, as encoding/json.Encoder.Encode does.
+
+### Encoder.SetEscapeHTML
+
+```go
+func (enc *Encoder) SetEscapeHTML(on bool)
+```
+
+SetEscapeHTML specifies whether problematic HTML characters should be escaped inside JSON quoted strings. The default behavior is to escape &, <, and > to &, <, and >.
+
+### Encoder.SetIndent
+
+```go
+func (enc *Encoder) SetIndent(prefix, indent string)
+```
+
+SetIndent instructs the encoder to format each subsequent encoded value as if indented by the package-level function Indent(dst, src, prefix, indent). Calling SetIndent("", "") disables indentation.
+
 ### type InvalidUnmarshalError
 
 ```go
@@ -1046,6 +1174,14 @@ A SyntaxError is a description of a JSON syntax error. [Unmarshal] will return a
 ```go
 func (e *SyntaxError) Error() string
 ```
+
+### type Token
+
+```go
+type Token any
+```
+
+A Token holds a value of one of these types: Delim, for the four JSON delimiters [ ] { }; bool, for JSON booleans; float64, for JSON numbers; Number, for JSON numbers; string, for JSON string literals; nil, for JSON null.
 
 ### type UnmarshalTypeError
 

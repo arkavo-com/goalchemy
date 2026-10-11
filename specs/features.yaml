@@ -23,7 +23,7 @@ features:
   - {id: control_flow, gate: sequential, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [control_flow, switch_forms]}
   - {id: defer_panic_recover, gate: sequential, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [defer_recover, runtime_panics, panic_custom]}
   - {id: errors, gate: sequential, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [errors_values, std_fmt_errors]}
-  - {id: std_packages, gate: sequential, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [std_packages, std_time, std_fmt_errors, std_slog, std_os, std_jsonvalue, std_json_marshal, std_json_marshalers, std_json_unmarshal, std_json_unmarshal_corpus, std_json_proto]}
+  - {id: std_packages, gate: sequential, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [std_packages, std_time, std_fmt_errors, std_slog, std_os, std_jsonvalue, std_json_marshal, std_json_marshalers, std_json_unmarshal, std_json_unmarshal_corpus, std_json_proto, std_json_stream]}
   - {id: protobuf_json, gate: sequential, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [proto_platform]}
   - {id: evaluation_order, gate: sequential, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [eval_order]}
   - {id: tasks_channels_select, gate: cooperative, status: supported, targets: [go, typescript, python, java, csharp, rust, c, swift], fixtures: [co_pipeline, co_select_loop, co_buffered, co_select_default, co_chan_panics, co_sched_trace]}

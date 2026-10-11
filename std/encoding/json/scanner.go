@@ -26,6 +26,8 @@ type scanner struct {
 	err error
 
 	bytes int64
+
+	depthBase int
 }
 
 func newScanner() *scanner {
@@ -84,7 +86,7 @@ func (s *scanner) eof() int {
 
 func (s *scanner) pushParseState(c byte, newParseState int, successState int) int {
 	s.parseState = append(s.parseState, newParseState)
-	if len(s.parseState) <= maxNestingDepth {
+	if len(s.parseState)+s.depthBase <= maxNestingDepth {
 		return successState
 	}
 	return s.error(c, "exceeded max depth")

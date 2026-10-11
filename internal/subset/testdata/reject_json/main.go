@@ -106,4 +106,23 @@ func main() {
 	_ = json.Unmarshal(data, &v)
 	u := json.Unmarshal // want GCS006
 	_ = u
+
+	enc := json.NewEncoder(nil)
+	_ = enc.Encode(Point{})
+	_ = enc.Encode(Fn{})           // want GCS006
+	_ = enc.Encode([]any{Point{}}) // want GCS006
+	encode := enc.Encode           // want GCS006
+	_ = encode
+	defer enc.Encode(1) // want GCS006
+	dec := json.NewDecoder(nil)
+	_ = dec.Decode(&p)
+	_ = dec.Decode(p)       // want GCS006
+	_ = dec.Decode(&Fn{})   // want GCS006
+	_ = dec.Decode(any(&p)) // want GCS006
+	_ = dec.Decode(any(new([]any)))
+	decode := dec.Decode // want GCS006
+	_ = decode
+	var s struct{ *json.Decoder }
+	_ = s.Decode(&p)
+	_ = s.Decode(p) // want GCS006
 }

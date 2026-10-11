@@ -419,6 +419,9 @@ func (c *checker) ident(id *ast.Ident) {
 		}
 		return
 	}
+	if name, ok := catalog.JSONStream(obj); ok && c.pkg.PkgPath != catalog.JSONPackage && !c.called[id] {
+		c.unsupported(id, "GCS006", jsonStreamName(name)+" used as a method value", "Call "+jsonStreamName(name)+" directly.")
+	}
 	if obj.Pkg() != nil && !c.prog.IsSource(obj.Pkg().Path()) {
 		if !c.opts.External(obj) {
 			c.report(id, "GCS008", "external symbol "+objName(obj),

@@ -34,6 +34,8 @@ const (
 	nativeMarshalerSyntax
 )
 
+const nativeError = -1
+
 func nativeResult(b []byte, kind int, name, src, msg string, offset int64, cause error) ([]byte, error) {
 	switch kind {
 	case nativeOK:
@@ -46,6 +48,8 @@ func nativeResult(b []byte, kind int, name, src, msg string, offset int64, cause
 		return nil, &MarshalerError{name, cause, src}
 	case nativeMarshalerSyntax:
 		return nil, &MarshalerError{name, &SyntaxError{msg, offset}, src}
+	case nativeError:
+		return nil, cause
 	}
 	return nil, &encodingError{msg}
 }
@@ -218,6 +222,7 @@ type field struct {
 	omitEmpty bool
 	quoted    bool
 	viaPtr    bool
+	rawKey    string
 	t         *typeInfo
 	addr      func(any) any
 }
@@ -240,7 +245,7 @@ func describe(t, elem, key *typeInfo, load, value, deref func(any) any, length f
 }
 
 func addField(t *typeInfo, name, key string, omitEmpty, quoted, viaPtr bool, ft *typeInfo, addr func(any) any) {
-	t.fields = append(t.fields, field{name: name, key: key, omitEmpty: omitEmpty, quoted: quoted, viaPtr: viaPtr, t: ft, addr: addr})
+	t.fields = append(t.fields, field{name: name, key: key, rawKey: `"` + name + `":`, omitEmpty: omitEmpty, quoted: quoted, viaPtr: viaPtr, t: ft, addr: addr})
 }
 
 const (
@@ -253,6 +258,7 @@ type encodeState struct {
 	ptrLevel int
 	ptrSeen  []any
 	depth    int
+	rawHTML  bool
 }
 
 func marshalTyped(p any, t *typeInfo) ([]byte, error) {
@@ -418,7 +424,7 @@ func (e *encodeState) marshalJSON(v any, name string) error {
 	b, err := m.MarshalJSON()
 	if err == nil {
 		var out []byte
-		out, err = compactValue(e.buf, b, true, e.valueOffset(b), e.depth+1)
+		out, err = compactValue(e.buf, b, !e.rawHTML, e.valueOffset(b), e.depth+1)
 		if err == nil {
 			e.buf = out
 		}
@@ -458,7 +464,7 @@ func (e *encodeState) marshalText(v any, name string) error {
 		}
 		return &MarshalerError{name, err, "MarshalText"}
 	}
-	e.buf = appendString(e.buf, string(b), true)
+	e.buf = appendString(e.buf, string(b), !e.rawHTML)
 	return nil
 }
 
@@ -487,9 +493,9 @@ func (e *encodeState) basic(v any, kind int, quoted bool) error {
 	case kindString:
 		s := v.(string)
 		if quoted {
-			e.buf = appendString(e.buf, string(appendString(nil, s, true)), false)
+			e.buf = appendString(e.buf, string(appendString(nil, s, !e.rawHTML)), false)
 		} else {
-			e.buf = appendString(e.buf, s, true)
+			e.buf = appendString(e.buf, s, !e.rawHTML)
 		}
 	}
 	return nil
@@ -575,7 +581,11 @@ func (e *encodeState) structValue(p any, t *typeInfo, addr bool) error {
 		}
 		e.buf = append(e.buf, next)
 		next = ','
-		e.buf = append(e.buf, f.key...)
+		if e.rawHTML {
+			e.buf = append(e.buf, f.rawKey...)
+		} else {
+			e.buf = append(e.buf, f.key...)
+		}
 		if err := e.typed(fp, f.t, addr || f.viaPtr, f.quoted); err != nil {
 			return err
 		}
@@ -669,7 +679,7 @@ func (e *encodeState) mapValue(p any, t *typeInfo) error {
 		if i > 0 {
 			e.buf = append(e.buf, ',')
 		}
-		e.buf = appendString(e.buf, s, true)
+		e.buf = appendString(e.buf, s, !e.rawHTML)
 		e.buf = append(e.buf, ':')
 		if err := e.typed(sv.vals[i], t.elem, false, false); err != nil {
 			return err
@@ -783,7 +793,7 @@ func (e *encodeState) dynamic(v any, quoted bool) error {
 			if i > 0 {
 				e.buf = append(e.buf, ',')
 			}
-			e.buf = appendString(e.buf, k, true)
+			e.buf = appendString(e.buf, k, !e.rawHTML)
 			e.buf = append(e.buf, ':')
 			if err := e.dynamic(sv.vals[i], false); err != nil {
 				return err
