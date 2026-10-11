@@ -82,6 +82,7 @@ var opaqueContracts = map[string]string{
 	"sync.WaitGroup":  "std.sync.waitgroup.add",
 	"context.Context": "std.context.err",
 	"crypto.Key":      "lib.crypto.close",
+	"http.Exchange":   "lib.http.exchange_close",
 }
 
 func intKind(t *ir.Type) string { return t.U().Int.String() }

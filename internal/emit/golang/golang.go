@@ -213,6 +213,7 @@ var opaqueContracts = map[string]string{
 	"sync.WaitGroup":  "std.sync.waitgroup.add",
 	"context.Context": "std.context.background",
 	"crypto.Key":      "lib.crypto.close",
+	"http.Exchange":   "lib.http.exchange_close",
 }
 
 func (e *emitter) p_(format string, args ...any) {

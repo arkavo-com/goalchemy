@@ -148,5 +148,10 @@ functions:
   - {id: lib.encoding.base64_url_encode, contract_version: 1.0.0, symbol: rt.libEncodingBase64UrlEncode, implementation: runtime/lib_encoding_base64_url_encode.ts, harness: "rt.libEncodingBase64UrlEncode({0})"}
   - {id: lib.http.do, contract_version: 1.1.0, symbol: rt.libHttpDo, implementation: runtime/lib_http_do.ts, requires: [std.context.err], harness: "host: rt.libHttpDo(t,{0},{1},{2},{3},{4},{5},{6})"}
   - {id: lib.http.do_with, contract_version: 1.1.0, symbol: rt.libHttpDoWith, implementation: runtime/lib_http_do_with.ts, requires: [lib.http.do], harness: "host: rt.libHttpDoWith(t,{0},{1},{2},{3},{4},{5},{6},{7})"}
+  - {id: lib.http.open, contract_version: 1.0.0, symbol: rt.libHttpOpen, implementation: runtime/lib_http_open.ts, requires: [lib.http.do, lib.http.exchange_close]}
+  - {id: lib.http.exchange_write, contract_version: 1.0.0, symbol: rt.libHttpExchangeWrite, implementation: runtime/lib_http_exchange_write.ts, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_response, contract_version: 1.0.0, symbol: rt.libHttpExchangeResponse, implementation: runtime/lib_http_exchange_response.ts, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_read, contract_version: 1.0.0, symbol: rt.libHttpExchangeRead, implementation: runtime/lib_http_exchange_read.ts, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_close, contract_version: 1.0.0, symbol: rt.libHttpExchangeClose, implementation: runtime/lib_http_exchange_close.ts, requires: [std.context.err]}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: rt.libChecksumCRC32IEEE, implementation: runtime/lib_checksum_crc32_ieee.ts, harness: "rt.libChecksumCRC32IEEE({0})"}

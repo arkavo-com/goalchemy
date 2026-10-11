@@ -17,6 +17,7 @@ export async function run(base){
   const out={};
   for (const [name,accept] of [['/single',false],['/large',false],['/empty',false],['/explicit',true]]) out[name]=await g.Show(base,name,accept);
   out['/tls']=await g.ShowTLS(base);
+  out['/echo']=await g.Stream(base);
   return out;
 }`;
 const result = await build({ stdin: { resolveDir: generated, contents: suite }, bundle: true, platform: 'browser', format: 'esm', write: false });
@@ -28,6 +29,12 @@ const bodies = {
   '/explicit': single,
 };
 const server = createServer((req, res) => {
+  if (req.url === '/echo') {
+    const parts = [];
+    req.on('data', chunk => parts.push(chunk));
+    req.on('end', () => res.end(Buffer.concat(parts)));
+    return;
+  }
   if (req.url in bodies) {
     res.writeHead(200, { 'Content-Encoding': 'gzip', 'Content-Length': bodies[req.url].length });
     res.end(bodies[req.url]);
@@ -55,10 +62,11 @@ try {
     '/empty': '200  encoding=gzip',
     '/explicit': 'error: http: Accept-Encoding is not supported in browsers',
     '/tls': 'error: http: transport options are not supported in browsers',
+    '/echo': '200 streamed body',
   };
   if (failures.length || JSON.stringify(got) !== JSON.stringify(want))
     throw new Error('browser gzip failures: ' + failures + '; got ' + JSON.stringify(got));
-  console.log('PASS Chromium ' + await browser.version() + ': lib/http gzip decoding, header stripping, decoded limit, Accept-Encoding and transport option rejection');
+  console.log('PASS Chromium ' + await browser.version() + ': lib/http gzip decoding, header stripping, decoded limit, Accept-Encoding and transport option rejection, std/http exchange');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

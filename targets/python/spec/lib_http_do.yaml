@@ -5,7 +5,7 @@ contract_version: 1.1.0
 contract_hash: 4cf1e993d08435a42604c5f9c9480f9fd2e1ca7c071895e7fd093da0927faf9e
 symbol: "rt.lib_http_do"
 implementation: runtime/lib_http_do.py
-implementation_hash: e2e4d672980fede187a586dfea0a9a9c8935606f50be6dc5523cbea72edb3631
+implementation_hash: 196f9d478b9433693baf64e23402a688bf0b9d6cb1415dcff0597ee0084ce1a3
 summary: "http.Do: one bounded HTTP GET or POST exchange that keeps TLS verification and does not follow redirects."
 suspension: may
 determinism: nondeterministic

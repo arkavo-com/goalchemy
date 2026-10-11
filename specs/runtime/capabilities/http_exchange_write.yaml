@@ -1,0 +1,53 @@
+{
+  "id": "lib.http.exchange_write",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "http.Exchange.Write: send the next chunk of the request body.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/http.(Exchange).Write",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "exchange",
+        "type": "*http.Exchange"
+      },
+      {
+        "name": "data",
+        "type": "[]byte"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "err",
+        "type": "error"
+      }
+    ]
+  },
+  "depends_on": [
+    {
+      "id": "core.task.spawn",
+      "version": "1.0.0"
+    }
+  ],
+  "suspension": "may",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "A nil *http.Exchange is invalid except for Close.",
+    "nil": "Nil byte slices are empty. A nil context returns an error; methods on a nil *http.Exchange return an invalid error and Close accepts nil.",
+    "bounds": "data<=1MiB. The total written must not exceed a known content length.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "Input bytes and header slices are not mutated.",
+    "aliasing": "Exchanges are aliased opaque handles; outputs are independently owned.",
+    "allocation": "Native buffers are host-managed. One Write or Read moves at most 1MiB, so request and response bodies are never held whole.",
+    "errors": "Writes after Response, beyond the content length or on an exchange without a body return \"http: invalid exchange operation\"; after Close \"http: exchange closed\"; transport failures, cancellation and the deadline return errors.",
+    "panics": "No deliberate panic on invalid input. Host allocation failures remain host failures.",
+    "observations": "Write returns once the transport has taken the bytes."
+  },
+  "notes": "Native acceptance tests in lib/http. Exchanges are released by Close and when their runtime retires.",
+  "cases": [],
+  "native_tests": [
+    "lib/http/exchange_test.go"
+  ]
+}

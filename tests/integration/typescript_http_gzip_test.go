@@ -15,7 +15,7 @@ import (
 
 // TestGeneratedTypeScriptHTTPGzipBrowser runs lib/http gzip handling in a real
 // browser, where fetch decodes and Accept-Encoding cannot be sent, and checks
-// that DoWith transport options are rejected there.
+// that DoWith transport options are rejected there and std/http streams.
 func TestGeneratedTypeScriptHTTPGzipBrowser(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -37,7 +37,7 @@ func TestGeneratedTypeScriptHTTPGzipBrowser(t *testing.T) {
 	for name, text := range map[string]string{
 		"go.mod": fmt.Sprintf("module gzipprobe\n\ngo 1.25\nrequire github.com/eugenioenko/goalchemy v0.0.0\nreplace github.com/eugenioenko/goalchemy => %s\n", root),
 		"library.go": `package gzipprobe
-import ("github.com/eugenioenko/goalchemy/lib/context";"github.com/eugenioenko/goalchemy/lib/http";"github.com/eugenioenko/goalchemy/std/strconv")
+import ("github.com/eugenioenko/goalchemy/lib/context";"github.com/eugenioenko/goalchemy/lib/http";"github.com/eugenioenko/goalchemy/std/strconv";shttp "github.com/eugenioenko/goalchemy/std/http";"github.com/eugenioenko/goalchemy/std/io";"github.com/eugenioenko/goalchemy/std/strings")
 func Show(ctx context.Context, base, name string, accept bool) (string, error) {
 	var h []string
 	if accept {
@@ -54,6 +54,18 @@ func Show(ctx context.Context, base, name string, accept bool) (string, error) {
 		}
 	}
 	return strconv.Itoa(status) + " " + string(body) + " encoding=" + encoding, nil
+}
+func Stream(ctx context.Context, base string) (string, error) {
+	resp, err := shttp.Do(ctx, &shttp.Request{Method: "POST", URL: base + "/echo", Body: strings.NewReader("streamed body"), TimeoutMillis: 5000})
+	if err != nil {
+		return "error: " + err.Error(), nil
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "error: " + err.Error(), nil
+	}
+	return strconv.Itoa(resp.Status) + " " + string(b), nil
 }
 func ShowTLS(ctx context.Context, base string) (string, error) {
 	status, _, _, err := http.DoWith(ctx, "GET", base+"/single", nil, nil, 1024, 5000, []string{http.InsecureSkipVerify, "true"})

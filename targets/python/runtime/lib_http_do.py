@@ -110,6 +110,42 @@ def unix_connector(conn,path):
         conn.sock=sock
     return connect
 
+def validate_request(raw,headers):
+    """Checks a URL and header slice as Do does; returns (url parts, hostname, port, path, header pairs, automatic gzip)."""
+    if type(raw) is not bytes or len(raw)>8192:raise Reject('invalid')
+    url=raw.decode('utf-8','strict')
+    if any(ord(c)<=32 or ord(c)==127 or c=='\ufeff' for c in url) or '\\' in url:raise Reject('invalid')
+    u=urllib.parse.urlsplit(url)
+    if u.scheme not in ('http','https') or not u.hostname or u.username is not None or u.password is not None or u.fragment or u.port is not None and not 1<=u.port<=65535:raise Reject('invalid')
+    if type(headers) is not Slice or headers.l%2:raise Reject('invalid')
+    pairs=[];total=0;automatic=True;seen=set()
+    for i in range(0,headers.l,2):
+        name=headers.a[headers.o+i];value=headers.a[headers.o+i+1]
+        if type(name) is not bytes or type(value) is not bytes:raise Reject('invalid')
+        total+=len(name)+len(value)+4
+        if total>65536 or not re.fullmatch(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+",name) or name.decode('ascii').lower() in FORBIDDEN or any(c==127 or c<32 and c!=9 for c in value):raise Reject('invalid')
+        lower=name.decode('ascii').lower()
+        if lower in ('accept-encoding','range') and lower not in seen:
+            seen.add(lower)
+            if value:automatic=False
+        pairs.append((name.decode('ascii'),value.decode('latin-1')))
+    path=urllib.parse.quote(u.path or '/',safe="/%:@!$&'()*+,;=-._~")
+    if u.query:path+='?'+urllib.parse.quote(u.query,safe="/%?:@!$&'()*+,;=-._~")
+    hostname=u.hostname.encode('idna').decode('ascii');port=u.port
+    return u,hostname,port,path,pairs,automatic
+
+def flat_headers(response,skip=()):
+    """Canonical response header names, sorted, values in server order."""
+    mapped={}
+    for name,value in response.getheaders():
+        canon='-'.join(p[:1].upper()+p[1:].lower() for p in name.split('-'))
+        if canon in skip:continue
+        mapped.setdefault(canon,[]).append(value)
+    flat=[]
+    for name in sorted(mapped):
+        for value in mapped[name]:flat.extend([name.encode('ascii'),value.encode('latin-1')])
+    return flat
+
 def lib_http_do(t,context,method,raw,headers,input,max_bytes,timeout):
     http_do(t,context,method,raw,headers,input,max_bytes,timeout,[])
 
@@ -128,26 +164,7 @@ def http_do(t,context,method,raw,headers,input,max_bytes,timeout,options):
         boundary=host_boundary(context,timeout*1000000)
         body=byte_input(input)
         if method==b'GET' and body:raise Reject('invalid')
-        if type(raw) is not bytes or len(raw)>8192:raise Reject('invalid')
-        url=raw.decode('utf-8','strict')
-        if any(ord(c)<=32 or ord(c)==127 or c=='\ufeff' for c in url) or '\\' in url:raise Reject('invalid')
-        u=urllib.parse.urlsplit(url)
-        if u.scheme not in ('http','https') or not u.hostname or u.username is not None or u.password is not None or u.fragment or u.port is not None and not 1<=u.port<=65535:raise Reject('invalid')
-        if type(headers) is not Slice or headers.l%2:raise Reject('invalid')
-        pairs=[];total=0;automatic=True;seen=set()
-        for i in range(0,headers.l,2):
-            name=headers.a[headers.o+i];value=headers.a[headers.o+i+1]
-            if type(name) is not bytes or type(value) is not bytes:raise Reject('invalid')
-            total+=len(name)+len(value)+4
-            if total>65536 or not re.fullmatch(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+",name) or name.decode('ascii').lower() in FORBIDDEN or any(c==127 or c<32 and c!=9 for c in value):raise Reject('invalid')
-            lower=name.decode('ascii').lower()
-            if lower in ('accept-encoding','range') and lower not in seen:
-                seen.add(lower)
-                if value:automatic=False
-            pairs.append((name.decode('ascii'),value.decode('latin-1')))
-        path=urllib.parse.quote(u.path or '/',safe="/%:@!$&'()*+,;=-._~")
-        if u.query:path+='?'+urllib.parse.quote(u.query,safe="/%?:@!$&'()*+,;=-._~")
-        hostname=u.hostname.encode('idna').decode('ascii');port=u.port
+        u,hostname,port,path,pairs,automatic=validate_request(raw,headers)
         tls,unix=tls_context(options)
         if unix is not None and not hasattr(socket,'AF_UNIX'):raise Reject('invalid')
     except BadTLS:
