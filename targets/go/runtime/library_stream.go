@@ -166,3 +166,132 @@ func HostStream(stream any) Callback {
 		return func() {}
 	}
 }
+
+// StreamOps runs the source std/io operations behind a host view of a
+// handle. Each operation is a library call on the handle.
+type StreamOps struct {
+	Read  func(h *Handle, n int) ([]byte, bool, error)
+	Write func(h *Handle, p []byte) (int, error)
+	Seek  func(h *Handle, offset int64, whence int) (int64, error)
+	Close func(h *Handle) error
+}
+
+// StreamObj holds a source std/io value returned to the host, so interface
+// values of any dynamic type can key the instance table.
+type StreamObj struct{ V any }
+
+// Stream is a host io view of a source reader or writer. Its methods are
+// safe for concurrent use; calls are serialized with the instance's others.
+type Stream struct {
+	h   *Handle
+	ops *StreamOps
+}
+
+// NewStream returns the view of h through ops.
+func NewStream(h *Handle, ops *StreamOps) *Stream { return &Stream{h: h, ops: ops} }
+
+var errUnsupported = &LibraryError{Kind: "unsupported"}
+
+func (s *Stream) Read(p []byte) (int, error) {
+	if s.ops.Read == nil {
+		return 0, errUnsupported
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	data, eof, err := s.ops.Read(s.h, len(p))
+	n := copy(p, data)
+	if err == nil && eof {
+		err = io.EOF
+	}
+	return n, err
+}
+
+func (s *Stream) Write(p []byte) (int, error) {
+	if s.ops.Write == nil {
+		return 0, errUnsupported
+	}
+	written := 0
+	for written < len(p) {
+		chunk := p[written:]
+		if len(chunk) > 1<<20 {
+			chunk = chunk[:1<<20]
+		}
+		n, err := s.ops.Write(s.h, append([]byte(nil), chunk...))
+		written += n
+		if err != nil {
+			return written, err
+		}
+	}
+	return written, nil
+}
+
+func (s *Stream) Seek(offset int64, whence int) (int64, error) {
+	if s.ops.Seek == nil {
+		return 0, errUnsupported
+	}
+	return s.ops.Seek(s.h, offset, whence)
+}
+
+// Close runs the source Close, if any, and releases the handle.
+func (s *Stream) Close() error { return s.ops.Close(s.h) }
+
+// WriteTo copies the stream to w in large chunks.
+func (s *Stream) WriteTo(w io.Writer) (int64, error) {
+	var total int64
+	for {
+		data, eof, err := s.ops.Read(s.h, 1<<20)
+		if len(data) > 0 {
+			n, werr := w.Write(data)
+			total += int64(n)
+			if werr != nil {
+				return total, werr
+			}
+		}
+		if err != nil {
+			return total, err
+		}
+		if eof {
+			return total, nil
+		}
+	}
+}
+
+// As returns s with the methods of the std/io interface kind. Close is
+// always present: it releases the handle.
+func (s *Stream) As(kind string) any {
+	switch kind {
+	case "Reader", "ReadCloser":
+		return struct {
+			io.Reader
+			io.WriterTo
+			io.Closer
+		}{s, s, s}
+	case "Writer", "WriteCloser":
+		return struct {
+			io.Writer
+			io.Closer
+		}{s, s}
+	case "ReadSeeker", "ReadSeekCloser":
+		return struct {
+			io.Reader
+			io.WriterTo
+			io.Seeker
+			io.Closer
+		}{s, s, s, s}
+	case "WriteSeeker":
+		return struct {
+			io.Writer
+			io.Seeker
+			io.Closer
+		}{s, s, s}
+	case "ReadWriter":
+		return struct {
+			io.Reader
+			io.WriterTo
+			io.Writer
+			io.Closer
+		}{s, s, s, s}
+	}
+	return s
+}

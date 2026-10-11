@@ -143,7 +143,18 @@ func (e *emitter) library() (string, error) {
 			}
 		}
 		for _, t := range f.Sig.Results {
-			if !sourceError(t) && abi.Handle(t) == nil {
+			if !sourceError(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
+				convert(t)
+			}
+		}
+	}
+	if e.p.HostIOFunc("ReadView") != nil {
+		for _, name := range []string{"ReadView", "WriteView", "SeekView"} {
+			f := e.p.HostIOFunc(name)
+			for _, t := range f.Sig.Params[1:] {
+				convert(t)
+			}
+			for _, t := range f.Sig.Results[:len(f.Sig.Results)-1] {
 				convert(t)
 			}
 		}
@@ -202,6 +213,60 @@ func (e *emitter) library() (string, error) {
 		}
 		return fmt.Sprintf("%sdef factory(ctx, owned, fresh):\n%s    call = lambda: %s\n%s    return rt.LibrarySequence(%s, call) if fresh else call()\n", indent, indent, call, indent, init)
 	}
+	streamOps := func(name string, ops ir.StreamOps, obj string, closeFactory string) {
+		op := func(fn string, params []string, out string) {
+			f := e.p.HostIOFunc(fn)
+			as := []string{obj}
+			for i := range params {
+				as = append(as, fmt.Sprintf("_input_%s(owned[%d])", e.names.Type(f.Sig.Params[i+1].U(), ""), i))
+			}
+			last := len(f.Sig.Results) - 1
+			fmt.Fprintf(&b, "def %s_%s(h, %s):\n    hs = [h]\n%s    def output(rv, inst):\n        err = _source_failure(rv[%d])\n        if err is not None: raise err\n        return %s\n    return rt.library_submit(factory, output, _library_state, [%s], None, hs).result()\n\n",
+				name, fn, strings.Join(params, ", "), factory(f, as, "    "), last, out, strings.Join(params, ", "))
+		}
+		var entries []string
+		if ops.Read {
+			op("ReadView", []string{"n"}, fmt.Sprintf("(_output_%s(rv[0]) or b'', rv[1])", e.names.Type(e.p.HostIOFunc("ReadView").Sig.Results[0].U(), "")))
+			entries = append(entries, fmt.Sprintf("'read': %s_ReadView", name))
+		}
+		if ops.Write {
+			op("WriteView", []string{"data"}, "rv[0]")
+			entries = append(entries, fmt.Sprintf("'write': %s_WriteView", name))
+		}
+		if ops.Seek {
+			op("SeekView", []string{"offset", "whence"}, "rv[0]")
+			entries = append(entries, fmt.Sprintf("'seek': %s_SeekView", name))
+		}
+		fmt.Fprintf(&b, "def %s_close(h):\n    hs = [h]\n", name)
+		if closeFactory == "" {
+			b.WriteString("    factory = None\n")
+		} else {
+			b.WriteString(closeFactory)
+		}
+		fmt.Fprintf(&b, "    rt.library_close(h, _library_state, factory, _source_failure).result()\n\n%s = {%s}\n\n", name, strings.Join(append(entries, fmt.Sprintf("'close': %s_close", name)), ", "))
+	}
+	kinds := map[string]bool{}
+	for _, f := range funcs {
+		for _, t := range f.Sig.Results {
+			if k := ir.StreamKind(t); k != "" && !kinds[k] {
+				kinds[k] = true
+				run := ""
+				if ir.StreamCloses(k) {
+					run = factory(e.p.HostIOFunc("CloseView"), []string{"rt.library_obj(hs[0])"}, "    ")
+				}
+				streamOps("_stream_"+k, ir.KindOps(k), "rt.library_obj(hs[0])", run)
+			}
+		}
+	}
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			run := ""
+			if h.Close != nil {
+				run = factory(h.Close, []string{"rt.library_obj(hs[0])"}, "    ")
+			}
+			streamOps("_stream_"+h.Name, h.Stream, "rt.box("+e.td(h.Ptr)+", rt.library_obj(hs[0]))", run)
+		}
+	}
 	used := map[string]bool{}
 	for _, h := range abi.Handles {
 		if used[h.Name] {
@@ -215,7 +280,11 @@ func (e *emitter) library() (string, error) {
 		} else {
 			b.WriteString("        factory = None\n")
 		}
-		b.WriteString("        return rt.library_close(h0, _library_state, factory, _source_failure)\n    def __enter__(self): return self\n    def __exit__(self, *exc):\n        self.close().result()\n        return False\n    async def __aenter__(self): return self\n    async def __aexit__(self, *exc):\n        await self.close()\n        return False\n")
+		b.WriteString("        return rt.library_close(h0, _library_state, factory, _source_failure)\n")
+		if h.Stream.Any() {
+			fmt.Fprintf(&b, "    def as_file(self):\n        \"\"\"Returns the handle as a binary file-like object (io.RawIOBase). Each\n        operation is a blocking call on the handle; closing it closes the handle.\"\"\"\n        return rt.SourceStream(self._h, _stream_%s)\n", h.Name)
+		}
+		b.WriteString("    def __enter__(self): return self\n    def __exit__(self, *exc):\n        self.close().result()\n        return False\n    async def __aenter__(self): return self\n    async def __aexit__(self, *exc):\n        await self.close()\n        return False\n")
 		for _, f := range h.Methods {
 			if err := e.libraryWrapper(&b, abi, ir.MethodName(f), h, f, factory); err != nil {
 				return "", err
@@ -293,6 +362,9 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	out := func(i int) string {
 		if h := abi.Handle(results[i]); h != nil {
 			return fmt.Sprintf("_wrap_%s(inst, rv[%d])", h.Name, i)
+		}
+		if k := ir.StreamKind(results[i]); k != "" {
+			return fmt.Sprintf("rt.library_wrap(inst, rv[%d], \"io.%s\", lambda h: rt.SourceStream(h, _stream_%s))", i, k, k)
 		}
 		return fmt.Sprintf("_output_%s(rv[%d])", e.names.Type(results[i].U(), ""), i)
 	}

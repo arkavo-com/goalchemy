@@ -222,6 +222,73 @@ export function hostStream(v:unknown,kind:string):Callback|null{
  };
 }
 
+/** Source std/io operations behind a host stream view; each one is a
+ * library call on the handle. read returns the data and whether the source
+ * reached io.EOF. */
+export interface StreamOps {
+ read?(h:Handle,size:number):Promise<[Uint8Array,boolean]>;
+ write?(h:Handle,data:Uint8Array):Promise<number>;
+ seek?(h:Handle,offset:bigint,whence:number):Promise<bigint>;
+ close(h:Handle):Promise<void>;
+}
+/** A source reader: read returns null at end of stream. */
+export interface SourceReader extends AsyncIterable<Uint8Array> {
+ read(size?:number):Promise<Uint8Array|null>;
+ /** A web ReadableStream over the reader; use Readable.fromWeb or
+  * Readable.from(reader) for a Node stream. Ending or canceling it does not
+  * close the handle. */
+ stream(chunkSize?:number):ReadableStream<Uint8Array>;
+}
+/** A source writer. */
+export interface SourceWriter {
+ write(data:Uint8Array):Promise<number>;
+ /** A web WritableStream into the writer; closing it closes the handle. */
+ writable():WritableStream<Uint8Array>;
+}
+/** A seekable source stream; whence is 0 (start), 1 (current) or 2 (end). */
+export interface SourceSeeker { seek(offset:bigint,whence?:number):Promise<bigint>; }
+/** Every source stream is a handle: close runs the source Close, if any,
+ * and releases it. */
+export interface SourceCloser extends AsyncDisposable { close():Promise<void>; }
+
+const CHUNK=64<<10;
+/** The host view of a source std/io reader or writer. */
+export class SourceStream implements SourceReader,SourceWriter,SourceSeeker,SourceCloser {
+ readonly #h:Handle;readonly #ops:StreamOps;
+ /** @internal */
+ constructor(h:Handle,ops:StreamOps){this.#h=h;this.#ops=ops;}
+ async read(size:number=CHUNK):Promise<Uint8Array|null>{
+  if(!this.#ops.read)throw new LibraryError('unsupported');
+  if(!Number.isSafeInteger(size)||size<0)invalidBoundary();
+  if(size===0)return new Uint8Array(0);
+  const [data,eof]=await this.#ops.read(this.#h,size);
+  return data.length===0&&eof?null:data;
+ }
+ async write(data:Uint8Array):Promise<number>{
+  if(!this.#ops.write)throw new LibraryError('unsupported');
+  if(!(data instanceof Uint8Array))invalidBoundary();
+  let written=0;
+  do{written+=await this.#ops.write(this.#h,data.slice(written,written+(1<<20)));}while(written<data.length);
+  return written;
+ }
+ seek(offset:bigint,whence:number=0):Promise<bigint>{
+  if(!this.#ops.seek)return Promise.reject(new LibraryError('unsupported'));
+  if(typeof offset!=='bigint'||![0,1,2].includes(whence))invalidBoundary();
+  return this.#ops.seek(this.#h,offset,whence);
+ }
+ close():Promise<void>{return this.#ops.close(this.#h);}
+ [Symbol.asyncDispose]():Promise<void>{return this.close();}
+ async *[Symbol.asyncIterator]():AsyncGenerator<Uint8Array>{
+  for(;;){const chunk=await this.read(CHUNK);if(chunk===null)return;if(chunk.length>0)yield chunk;}
+ }
+ stream(chunkSize:number=CHUNK):ReadableStream<Uint8Array>{
+  return new ReadableStream<Uint8Array>({pull:async c=>{const chunk=await this.read(chunkSize);if(chunk===null)c.close();else c.enqueue(chunk);}},{highWaterMark:0});
+ }
+ writable():WritableStream<Uint8Array>{
+  return new WritableStream<Uint8Array>({write:async chunk=>{await this.write(chunk);},close:()=>this.close()});
+ }
+}
+
 /** Source float boundary accepts numeric IEEE values, including NaN and infinities. */
 export function boundaryFloat(v:unknown,bits:number):number {
  if(v===undefined)return 0;

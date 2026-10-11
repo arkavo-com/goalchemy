@@ -401,3 +401,55 @@ def library_stream(v, kind):
         finally:
             _stream_thread.active = False
     return provider
+
+
+import io as _io
+
+class SourceStream(_io.RawIOBase):
+    """The host view of a source std/io reader or writer: a binary,
+    unbuffered file-like object. Each operation is a blocking library call
+    on its handle; close runs the source Close, if any, and releases it.
+    Wrap it in io.BufferedReader or io.BufferedWriter for buffering."""
+    def __init__(self, h, ops):
+        super().__init__()
+        self._h = h; self._ops = ops
+    def __del__(self):
+        pass
+    def readable(self): return 'read' in self._ops
+    def writable(self): return 'write' in self._ops
+    def seekable(self): return 'seek' in self._ops
+    def _op(self, name):
+        op = self._ops.get(name)
+        if op is None: raise _io.UnsupportedOperation(name)
+        return op
+    def readinto(self, b):
+        read = self._op('read')
+        view = memoryview(b).cast('B')
+        if len(view) == 0: return 0
+        data, eof = read(self._h, len(view))
+        view[:len(data)] = data
+        return len(data)
+    def read1(self, size=-1):
+        return self.read(size)
+    def readall(self):
+        read = self._op('read')
+        parts = []
+        while True:
+            data, eof = read(self._h, 1 << 20)
+            parts.append(data)
+            if not data: return b''.join(parts)
+    def write(self, b):
+        write = self._op('write')
+        data = memoryview(b).cast('B')
+        n = 0
+        while True:
+            n += write(self._h, bytes(data[n:n + (1 << 20)]))
+            if n >= len(data): return n
+    def seek(self, offset, whence=0):
+        return self._op('seek')(self._h, offset, whence)
+    def tell(self):
+        return self.seek(0, 1)
+    def close(self):
+        if self.closed: return
+        try: self._ops['close'](self._h)
+        finally: super().close()

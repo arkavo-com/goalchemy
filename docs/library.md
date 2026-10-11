@@ -2971,6 +2971,20 @@ const MaxChunk = 128<<10 - 16
 
 MaxChunk bounds the bytes moved by one host operation, within every target's callback reply limit.
 
+```go
+const MaxView = 1 << 20
+```
+
+MaxView bounds the bytes one host read of a source stream returns.
+
+### CloseView
+
+```go
+func CloseView(c io.Closer) error
+```
+
+CloseView closes c for a host stream view.
+
 ### ReadCloser
 
 ```go
@@ -2995,6 +3009,14 @@ func ReadSeeker(id int64) io.ReadSeeker
 
 ReadSeeker returns the host stream id as an io.ReadSeeker.
 
+### ReadView
+
+```go
+func ReadView(r io.Reader, n int) ([]byte, bool, error)
+```
+
+ReadView reads at most n bytes from r for a host stream view. It retries empty reads, so it returns data, end of stream, or an error. eof reports that r returned io.EOF; data read before it is returned with it.
+
 ### ReadWriter
 
 ```go
@@ -3011,6 +3033,14 @@ func Reader(id int64) io.Reader
 
 Reader returns the host stream id as an io.Reader.
 
+### SeekView
+
+```go
+func SeekView(s io.Seeker, offset int64, whence int) (int64, error)
+```
+
+SeekView seeks s for a host stream view.
+
 ### WriteCloser
 
 ```go
@@ -3026,6 +3056,14 @@ func WriteSeeker(id int64) io.WriteSeeker
 ```
 
 WriteSeeker returns the host stream id as an io.WriteSeeker.
+
+### WriteView
+
+```go
+func WriteView(w io.Writer, p []byte) (int, error)
+```
+
+WriteView writes all of p to w for a host stream view.
 
 ### Writer
 

@@ -172,18 +172,31 @@ const HostIOPackage = "github.com/eugenioenko/goalchemy/std/io/hostio"
 const ioPackage = "github.com/eugenioenko/goalchemy/std/io"
 
 // needsHostIO reports whether an exported function or method of a library
-// root takes a std/io interface parameter.
+// root takes or returns a std/io interface, or whether an exported type has
+// Read or Write methods that hosts can use as a stream.
 func needsHostIO(roots []*packages.Package) bool {
-	usesIO := func(sig *types.Signature) bool {
-		for i := 0; i < sig.Params().Len(); i++ {
-			if n, ok := sig.Params().At(i).Type().(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == ioPackage {
+	isIO := func(vs *types.Tuple) bool {
+		for i := 0; i < vs.Len(); i++ {
+			if n, ok := vs.At(i).Type().(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == ioPackage {
 				return true
 			}
 		}
 		return false
 	}
+	usesIO := func(sig *types.Signature) bool { return isIO(sig.Params()) || isIO(sig.Results()) }
+	streamMethod := func(m *types.Func) bool {
+		if m.Name() != "Read" && m.Name() != "Write" {
+			return false
+		}
+		sig := m.Signature()
+		if sig.Params().Len() != 1 {
+			return false
+		}
+		s, ok := sig.Params().At(0).Type().(*types.Slice)
+		return ok && types.Identical(s.Elem(), types.Typ[types.Byte])
+	}
 	for _, r := range roots {
-		if r.Name == "main" || r.Types == nil || r.Imports[ioPackage] == nil {
+		if r.Name == "main" || r.Types == nil {
 			continue
 		}
 		scope := r.Types.Scope()
@@ -199,7 +212,7 @@ func needsHostIO(roots []*packages.Package) bool {
 				}
 				if n, ok := obj.Type().(*types.Named); ok {
 					for i := 0; i < n.NumMethods(); i++ {
-						if m := n.Method(i); m.Exported() && usesIO(m.Signature()) {
+						if m := n.Method(i); m.Exported() && (usesIO(m.Signature()) || streamMethod(m)) {
 							return true
 						}
 					}
