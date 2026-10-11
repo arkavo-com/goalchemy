@@ -20,7 +20,7 @@ public final class LibHttpDo {
     private static final Set<String> FORBIDDEN=Set.of("host","content-length","transfer-encoding","connection","proxy-authorization","proxy-connection","upgrade","trailer","te");
     private static boolean token(String value){if(value.isEmpty())return false;for(int i=0;i<value.length();i++){char c=value.charAt(i);if(!(c>='A'&&c<='Z'||c>='a'&&c<='z'||c>='0'&&c<='9'||"!#$%&'*+-.^_`|~".indexOf(c)>=0))return false;}return true;}
     private static boolean badValue(String value){for(int i=0;i<value.length();i++){char c=value.charAt(i);if(c==127||c<32&&c!='\t')return true;}return false;}
-    private static String canonical(String value){StringBuilder s=new StringBuilder();boolean upper=true;for(int i=0;i<value.length();i++){char c=value.charAt(i);s.append(upper?Character.toUpperCase(c):Character.toLowerCase(c));upper=c=='-';}return s.toString();}
+    static String canonical(String value){StringBuilder s=new StringBuilder();boolean upper=true;for(int i=0;i<value.length();i++){char c=value.charAt(i);s.append(upper?Character.toUpperCase(c):Character.toLowerCase(c));upper=c=='-';}return s.toString();}
     private static final class Lease {
         private Thread worker;private HttpClient client;private final ArrayList<InputStream> bodies=new ArrayList<>();
         private boolean stopped,sealed;private Throwable cleanupFault;private IOException readFailure;
@@ -128,6 +128,15 @@ public final class LibHttpDo {
     public static void libHttpDo(TaskSpawn.Task task,StdContextErr.Context context,String method,String raw,
                                   Slice headers,Slice input,long max,long timeoutMillis) {
         httpDo(task,context,method,raw,headers,input,max,timeoutMillis,new String[0]);
+    }
+    /** A request builder for a checked URL and headers, as Do checks them. */
+    static HttpRequest.Builder checkedRequest(String raw,String[] pairs)throws Native.Reject {
+        if(raw.length()>8192||pairs.length%2!=0||pairs.length>32768)throw new Native.Reject(INVALID);
+        URI uri;try{uri=new URI(Native.utf8(raw));}catch(URISyntaxException|IllegalArgumentException e){throw new Native.Reject(INVALID);}
+        if(!Set.of("http","https").contains(uri.getScheme())||uri.getHost()==null||uri.getRawUserInfo()!=null||uri.getRawFragment()!=null||uri.getPort()>65535||uri.getPort()==0)throw new Native.Reject(INVALID);
+        HttpRequest.Builder builder=HttpRequest.newBuilder(uri);int total=0;
+        for(int i=0;i<pairs.length;i+=2){String name=pairs[i],value=pairs[i+1];total+=name.length()+value.length()+4;if(total>65536||!token(name)||badValue(value)||FORBIDDEN.contains(name.toLowerCase(Locale.ROOT)))throw new Native.Reject(INVALID);for(int j=0;j<value.length();j++)if(value.charAt(j)>127)throw new Native.Reject(INVALID);try{builder.header(name,value);}catch(IllegalArgumentException e){throw new Native.Reject(INVALID);}}
+        return builder;
     }
     static void httpDo(TaskSpawn.Task task,StdContextErr.Context context,String method,String raw,
                                   Slice headers,Slice input,long max,long timeoutMillis,String[] options) {

@@ -40,8 +40,22 @@ impl NativeKey {
     }
 }
 thread_local! {static KEYS:RefCell<BTreeMap<u64,NativeKey>>=RefCell::new(BTreeMap::new());static NEXT_KEY:Cell<u64>=Cell::new(1);}
+thread_local! {static NATIVE_RETIRE: RefCell<Vec<fn()>> = RefCell::new(Vec::new());}
+/// Registers a release of other native resources, such as HTTP exchanges,
+/// run when the owner retires.
+pub fn on_native_retire(release: fn()) {
+    NATIVE_RETIRE.with(|r| {
+        let mut r = r.borrow_mut();
+        if !r.iter().any(|f| std::ptr::fn_addr_eq(*f, release)) {
+            r.push(release)
+        }
+    })
+}
 pub fn crypto_retire() {
-    KEYS.with(|k| k.borrow_mut().clear())
+    KEYS.with(|k| k.borrow_mut().clear());
+    for release in NATIVE_RETIRE.with(|r| r.borrow().clone()) {
+        release()
+    }
 }
 fn own_key(k: NativeKey) -> V {
     let id = NEXT_KEY.with(|n| {

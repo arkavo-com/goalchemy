@@ -6788,11 +6788,11 @@ Package http provides bounded HTTP exchanges, retaining TLS verification and ret
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
 | `Do` | yes | yes | yes | yes | yes | yes | yes | yes |
 | `DoWith` | yes | yes | yes | yes | yes | yes | yes | yes |
-| `Exchange.Close` | no | no | yes | no | yes | no | no | yes |
-| `Exchange.Read` | no | no | yes | no | yes | no | no | yes |
-| `Exchange.Response` | no | no | yes | no | yes | no | no | yes |
-| `Exchange.Write` | no | no | yes | no | yes | no | no | yes |
-| `Open` | no | no | yes | no | yes | no | no | yes |
+| `Exchange.Close` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Exchange.Read` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Exchange.Response` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Exchange.Write` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Open` | yes | yes | yes | yes | yes | yes | yes | yes |
 
 ### Do
 

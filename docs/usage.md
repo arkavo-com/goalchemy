@@ -449,6 +449,17 @@ _, err = io.Copy(out, resp.Body)
 - It runs on `lib/http.Open`: an `Exchange` with `Write`, `Response`, `Read`
   and `Close`, each moving at most 1 MiB.
 
+| Target | Exchange |
+| --- | --- |
+| Go | `net/http` with an `io.Pipe` request body |
+| TypeScript (Node) | `node:http`/`node:https`, writes waiting for each flush and the response read in paused mode |
+| TypeScript (browser) | `fetch`, with the limits below |
+| Python | `http.client` with chunked framing |
+| Java | `java.net.http.HttpClient` with an `InputStream` body publisher fed one chunk at a time |
+| C# | `HttpClient` with a custom `HttpContent` fed one chunk at a time |
+| Rust | reqwest with a channel-fed `http_body::Body` on a per-exchange Tokio thread |
+| C and Swift | a libcurl transfer thread per exchange, pausing its read and write callbacks |
+
 Browsers cannot stream request bodies over HTTP/1.1, so in a browser the
 request body is collected (at most 64 MiB) and sent when the response is
 requested; the response body still streams. Browser `fetch` decodes

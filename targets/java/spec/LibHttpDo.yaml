@@ -5,7 +5,7 @@ contract_version: 1.1.0
 contract_hash: 4cf1e993d08435a42604c5f9c9480f9fd2e1ca7c071895e7fd093da0927faf9e
 symbol: "LibHttpDo.libHttpDo"
 implementation: runtime/LibHttpDo.java
-implementation_hash: e9cc6250ddffde8272782c1d617c14a091b7c7dadd5a5792567f70cc193cd5a9
+implementation_hash: a28b539aa8e5ecbe1201cfac986fd68da2ed073bb5c1bf078f507fa953bd3c45
 summary: "http.Do: one bounded HTTP GET or POST exchange that keeps TLS verification and does not follow redirects."
 suspension: may
 determinism: nondeterministic

@@ -132,6 +132,11 @@ enum GNative {
         }
         return .park
       case "lib.http.do", "lib.http.do_with": return try GHTTP.start(args, task)
+      case "lib.http.open": return try GHTTPExchanges.open(args, task)
+      case "lib.http.exchange_write": return try GHTTPExchanges.write(args, task)
+      case "lib.http.exchange_response": return try GHTTPExchanges.response(args, task)
+      case "lib.http.exchange_read": return try GHTTPExchanges.read(args, task)
+      case "lib.http.exchange_close": return .resume(GHTTPExchanges.close(args))
       case "lib.callback.request": return try GCallback.start(args, task)
       default:
         if contract.hasPrefix("lib.crypto.") { return try GCrypto.start(contract, args, task) }

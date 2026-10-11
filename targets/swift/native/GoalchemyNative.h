@@ -36,4 +36,15 @@ const char *gcn_http_error(gcn_http *);
 void gcn_http_release(gcn_http *);
 int gcn_http_socket(gcn_http *, const char *);
 int gcn_http_tls(gcn_http *, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t, int);
+typedef struct gcn_exchange gcn_exchange;
+gcn_exchange *gcn_exchange_open(gcn_http *, const char *, const char *, const char *const *, size_t, int64_t);
+void gcn_exchange_retain(gcn_exchange *);
+void gcn_exchange_release(gcn_exchange *);
+void gcn_exchange_abort(gcn_exchange *);
+const char *gcn_exchange_error(gcn_exchange *);
+int gcn_exchange_write(gcn_exchange *, const uint8_t *, size_t);
+int gcn_exchange_response(gcn_exchange *);
+long gcn_exchange_status(gcn_exchange *);
+const char *gcn_exchange_head(gcn_exchange *, size_t *);
+long gcn_exchange_read(gcn_exchange *, uint8_t *, size_t);
 #endif

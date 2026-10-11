@@ -284,8 +284,10 @@ name = "goalchemy-rust-harness"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
  "crc32fast",
  "flate2",
+ "http-body",
  "openssl",
  "reqwest",
  "tokio",

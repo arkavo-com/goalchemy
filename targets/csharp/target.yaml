@@ -149,5 +149,10 @@ functions:
   - {id: lib.callback.request, contract_version: 1.0.0, symbol: R.libCallbackRequest, implementation: runtime/LibCallbackRequest.cs, requires: [std.context.err], harness: "host: R.libCallbackRequest(t,{0},{1},{2})"}
   - {id: lib.http.do, contract_version: 1.1.0, symbol: R.libHttpDo, implementation: runtime/LibHttpDo.cs, requires: [std.context.err], harness: "host: R.libHttpDo(t,{0},{1},{2},{3},{4},{5},{6})"}
   - {id: lib.http.do_with, contract_version: 1.1.0, symbol: R.libHttpDoWith, implementation: runtime/LibHttpDoWith.cs, requires: [lib.http.do], harness: "host: R.libHttpDoWith(t,{0},{1},{2},{3},{4},{5},{6},{7})"}
+  - {id: lib.http.open, contract_version: 1.0.0, symbol: R.libHttpOpen, implementation: runtime/LibHttpOpen.cs, requires: [lib.http.do, lib.http.exchange_close]}
+  - {id: lib.http.exchange_write, contract_version: 1.0.0, symbol: R.libHttpExchangeWrite, implementation: runtime/LibHttpExchangeWrite.cs, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_response, contract_version: 1.0.0, symbol: R.libHttpExchangeResponse, implementation: runtime/LibHttpExchangeResponse.cs, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_read, contract_version: 1.0.0, symbol: R.libHttpExchangeRead, implementation: runtime/LibHttpExchangeRead.cs, requires: [lib.http.exchange_close]}
+  - {id: lib.http.exchange_close, contract_version: 1.0.0, symbol: R.libHttpExchangeClose, implementation: runtime/LibHttpExchangeClose.cs, requires: [lib.http.do, std.context.err]}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: R.libChecksumCRC32IEEE, implementation: runtime/LibChecksumCRC32IEEE.cs, harness: "R.libChecksumCRC32IEEE({0})"}

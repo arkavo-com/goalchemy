@@ -102,6 +102,7 @@ var opaque = map[string][2]string{
 	"sync.WaitGroup":  {"WaitGroup", "std.sync.waitgroup.add"},
 	"context.Context": {"GoContext", "std.context.err"},
 	"crypto.Key":      {"Native.Key", "lib.crypto.close"},
+	"http.Exchange":   {"R.Exchange", "lib.http.exchange_close"},
 }
 
 func intKind(t *ir.Type) string { return t.U().Int.String() }

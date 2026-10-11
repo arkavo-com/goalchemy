@@ -795,6 +795,38 @@ functions:
   requires:
   - lib.http.do
   harness: 'native: GNative.lib_http_do_with({args}, {types})'
+- id: lib.http.open
+  contract_version: 1.0.0
+  symbol: GNative.lib_http_open
+  implementation: runtime/lib_http_open.swift
+  requires:
+  - lib.http.do
+  - lib.http.exchange_close
+- id: lib.http.exchange_write
+  contract_version: 1.0.0
+  symbol: GNative.lib_http_exchange_write
+  implementation: runtime/lib_http_exchange_write.swift
+  requires:
+  - lib.http.exchange_close
+- id: lib.http.exchange_response
+  contract_version: 1.0.0
+  symbol: GNative.lib_http_exchange_response
+  implementation: runtime/lib_http_exchange_response.swift
+  requires:
+  - lib.http.exchange_close
+- id: lib.http.exchange_read
+  contract_version: 1.0.0
+  symbol: GNative.lib_http_exchange_read
+  implementation: runtime/lib_http_exchange_read.swift
+  requires:
+  - lib.http.exchange_close
+- id: lib.http.exchange_close
+  contract_version: 1.0.0
+  symbol: GNative.lib_http_exchange_close
+  implementation: runtime/lib_http_exchange_close.swift
+  requires:
+  - lib.http.do
+  - std.context.err
 - id: lib.callback.request
   contract_version: 1.0.0
   symbol: GNative.lib_callback_request
