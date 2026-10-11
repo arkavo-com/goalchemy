@@ -34,6 +34,7 @@ Why two importable roots:
 | [errors](#stderrors) | `github.com/eugenioenko/goalchemy/std/errors` | Package errors implements functions to manipulate errors: creation, wrapping inspection with Is and As, and joining. |
 | [fmt](#stdfmt) | `github.com/eugenioenko/goalchemy/std/fmt` | Package fmt formats values into strings and errors with Go's verbs, flags, widths, precisions and argument indexes. |
 | [io](#stdio) | `github.com/eugenioenko/goalchemy/std/io` | Package io provides basic interfaces to I/O primitives and helpers that combine them, matching Go's io package. |
+| [io/hostio](#stdiohostio) | `github.com/eugenioenko/goalchemy/std/io/hostio` | Package hostio adapts host streams passed to library exports as std/io interfaces. |
 | [log/slog](#stdlogslog) | `github.com/eugenioenko/goalchemy/std/log/slog` | Package slog provides structured logging with Go's log/slog API. |
 | [os](#stdos) | `github.com/eugenioenko/goalchemy/std/os` | Package os reads and writes whole files on the host file system. |
 | [sort](#stdsort) | `github.com/eugenioenko/goalchemy/std/sort` | Package sort sorts collections through the Len, Less, and Swap methods. |
@@ -2954,6 +2955,118 @@ type WriterTo interface {
 ```
 
 WriterTo wraps the WriteTo method.
+
+
+## std/io/hostio
+
+```go
+import "github.com/eugenioenko/goalchemy/std/io/hostio"
+```
+
+Package hostio adapts host streams passed to library exports as std/io interfaces. The compiler includes it in libraries whose exports take std/io parameters; programs do not import it directly. Each operation is a host callback named "goalchemy.stream.<id>" carrying a one-byte opcode: 'r' with an 8-byte count, 'w' with data, 's' with an 8-byte offset and 1-byte whence, or 'c'. Every reply starts with a status byte: 0 for success, 1 for a read that reached end of stream, or 2 for a host error followed by its message. Read data, or the 8-byte big-endian write count or seek position, follows a success status.
+
+```go
+const MaxChunk = 128<<10 - 16
+```
+
+MaxChunk bounds the bytes moved by one host operation, within every target's callback reply limit.
+
+### ReadCloser
+
+```go
+func ReadCloser(id int64) io.ReadCloser
+```
+
+ReadCloser returns the host stream id as an io.ReadCloser.
+
+### ReadSeekCloser
+
+```go
+func ReadSeekCloser(id int64) io.ReadSeekCloser
+```
+
+ReadSeekCloser returns the host stream id as an io.ReadSeekCloser.
+
+### ReadSeeker
+
+```go
+func ReadSeeker(id int64) io.ReadSeeker
+```
+
+ReadSeeker returns the host stream id as an io.ReadSeeker.
+
+### ReadWriter
+
+```go
+func ReadWriter(id int64) io.ReadWriter
+```
+
+ReadWriter returns the host stream id as an io.ReadWriter.
+
+### Reader
+
+```go
+func Reader(id int64) io.Reader
+```
+
+Reader returns the host stream id as an io.Reader.
+
+### WriteCloser
+
+```go
+func WriteCloser(id int64) io.WriteCloser
+```
+
+WriteCloser returns the host stream id as an io.WriteCloser.
+
+### WriteSeeker
+
+```go
+func WriteSeeker(id int64) io.WriteSeeker
+```
+
+WriteSeeker returns the host stream id as an io.WriteSeeker.
+
+### Writer
+
+```go
+func Writer(id int64) io.Writer
+```
+
+Writer returns the host stream id as an io.Writer.
+
+### type Stream
+
+```go
+type Stream struct {
+}
+```
+
+Stream is a host stream identified by a per-call registry number.
+
+### Stream.Close
+
+```go
+func (s *Stream) Close() error
+```
+
+### Stream.Read
+
+```go
+func (s *Stream) Read(p []byte) (int, error)
+```
+
+### Stream.Seek
+
+```go
+func (s *Stream) Seek(offset int64, whence int) (int64, error)
+```
+
+### Stream.Write
+
+```go
+func (s *Stream) Write(p []byte) (int, error)
+```
 
 
 ## std/log/slog

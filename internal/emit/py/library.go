@@ -138,7 +138,7 @@ func (e *emitter) library() (string, error) {
 			params = params[1:]
 		}
 		for _, t := range params {
-			if !sourceContext(t) && abi.Handle(t) == nil {
+			if !sourceContext(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				convert(t)
 			}
 		}
@@ -240,7 +240,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	indent := ""
 	params := f.Sig.Params
 	ps := []string{}
-	var as, owned, hs, conv []string
+	var as, owned, hs, conv, streams []string
 	if recv != nil {
 		indent = "    "
 		params = params[1:]
@@ -255,6 +255,11 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		}
 		a := fmt.Sprintf("a%d", i)
 		ps = append(ps, a)
+		if k := ir.StreamKind(t); k != "" {
+			as = append(as, fmt.Sprintf("(None if ids[%d] == 0 else %s(ids[%d]))", len(streams), e.symbol(e.p.StreamAdapter(k).Sym), len(streams)))
+			streams = append(streams, fmt.Sprintf("rt.library_stream(%s, %q)", a, k))
+			continue
+		}
 		if h := abi.Handle(t); h != nil {
 			conv = append(conv, fmt.Sprintf("rt.library_handle(%s, %s)", a, h.Name))
 			hs = append(hs, fmt.Sprintf("hv[%d]", len(conv)-1))
@@ -269,6 +274,12 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	in := indent + "    "
 	if len(conv) > 0 {
 		fmt.Fprintf(b, "%stry: hv = [%s]\n%sexcept rt.LibraryFailure as e: return rt.library_failed(e)\n", in, strings.Join(conv, ", "), in)
+	}
+	fmt.Fprintf(b, "%sids = [0] * %d\n", in, len(streams))
+	if len(streams) > 0 {
+		fmt.Fprintf(b, "%stry: sv = [%s]\n%sexcept rt.LibraryFailure as e: return rt.library_failed(e)\n", in, strings.Join(streams, ", "), in)
+	} else {
+		fmt.Fprintf(b, "%ssv = []\n", in)
 	}
 	fmt.Fprintf(b, "%shs = [%s]\n", in, strings.Join(hs, ", "))
 	b.WriteString(factory(f, as, in))
@@ -296,6 +307,6 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		}
 		fmt.Fprintf(b, "%s    return (%s,)\n", in, strings.Join(vals, ", "))
 	}
-	fmt.Fprintf(b, "%sreturn rt.library_submit(factory, output, _library_state, [%s], options, hs)\n\n", in, strings.Join(owned, ", "))
+	fmt.Fprintf(b, "%sreturn rt.library_submit(factory, output, _library_state, [%s], options, hs, None, sv, ids)\n\n", in, strings.Join(owned, ", "))
 	return nil
 }

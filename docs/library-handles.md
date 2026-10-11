@@ -85,3 +85,35 @@ TypeScript `setLibraryWarn` in `rt/runtime/library.js`, Python
 `rt.set_library_warn`, Java `Library.warn`, C# `Library.Warn`, Rust
 `set_library_warn`, C `gxc_set_warning_handler` and Swift
 `setGoalchemyWarningHandler`.
+
+## Host streams
+
+Exported functions and handle methods can take `std/io` interfaces as
+parameters: `io.Reader`, `io.Writer`, `io.ReadCloser`, `io.WriteCloser`,
+`io.ReadSeeker`, `io.ReadSeekCloser`, `io.WriteSeeker` and `io.ReadWriter`.
+The host passes its native stream; Go, TypeScript and Python support this
+today, and other targets reject such exports with `GCE007`.
+
+| Target | Host passes |
+|---|---|
+| Go | any value implementing the matching standard `io` interface |
+| TypeScript | an object with `read(size)` (null at end), `write(data)`, `seek(offset, whence)` and `close()` as needed; Node `Readable`/`Writable`, web `ReadableStream`/`WritableStream`, `AsyncIterable<Uint8Array>`, `Blob` (seekable) or `Uint8Array` (seekable) |
+| Python | a file-like object (`readinto` or `read`, `write`, `seek`, `close`) or `bytes` |
+
+- Each Read, Write, Seek and Close is a host operation through the callback
+  mailbox: it suspends the calling source task, and reads and writes copy
+  their buffers. One operation moves at most 128 KiB; `io.Copy` and
+  `io.ReadAll` loop as usual.
+- Host end of stream (an empty read, `null`, or `io.EOF`) becomes `io.EOF`.
+  A host error becomes a source error carrying its message.
+- A stream passed to an instance stays usable by later calls on the instance
+  until it retires, so a handle can keep a reader.
+- A host stream method that calls back into the library fails that call with
+  kind `reentrant` instead of deadlocking. Go detects this per goroutine,
+  Python per thread and TypeScript through `AsyncLocalStorage` in Node; the
+  portable browser entry cannot detect it.
+- Stream operations use a background context: canceling a call does not
+  interrupt a host read already in progress.
+
+The adapter is the source package `std/io/hostio`, which the compiler adds to
+libraries whose exports take `std/io` interfaces.

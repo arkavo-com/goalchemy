@@ -145,7 +145,7 @@ func (e *emitter) sourceFile(name, pkg string) ([]byte, map[int]token.Position, 
 	})
 	var out bytes.Buffer
 	out.WriteString(header)
-	for _, imp := range []struct{ name, path string }{{"context", "context"}, {"reflect", "reflect"}, {"rt", "goalchemyout/rt"}} {
+	for _, imp := range []struct{ name, path string }{{"context", "context"}, {"io", "io"}, {"reflect", "reflect"}, {"rt", "goalchemyout/rt"}} {
 		if used[imp.name] {
 			fmt.Fprintf(&out, "import %q\n", imp.path)
 		}

@@ -131,9 +131,10 @@ class Instance:
     def __init__(self):
         self.globals=None; self.native_keys={}; self.native_next_key=0; self.domain=object()
         self.objects={}; self.live=0; self.poisoned=False; self.retired=False
+        self.streams={}; self.next_stream=0
     def retire_now(self):
         if self.retired: return
-        self.retired=True; self.globals=None; self.objects.clear(); self.native_keys.clear()
+        self.retired=True; self.globals=None; self.objects.clear(); self.native_keys.clear(); self.streams.clear()
 
 class Handle:
     """The host's reference to one source object of an instance."""
@@ -206,7 +207,7 @@ def library_close(h, state, factory, failure):
         return None
     return library_submit(factory, output, state, [], None, [h], closing=h)
 
-def library_submit(factory, output, state, inputs, options=None, handles=(), closing=None):
+def library_submit(factory, output, state, inputs, options=None, handles=(), closing=None, streams=(), ids=None):
     from ..runtime.task_spawn import snapshot, _drive, sched
     from ..runtime.std_context_background import std_context_background
     from ..runtime.std_context_with_cancel import std_context_with_cancel
@@ -224,6 +225,8 @@ def library_submit(factory, output, state, inputs, options=None, handles=(), clo
     except BaseException as e:
         op._future.set_exception(LibraryFailure('invalid_argument')); return op
     handles=list(handles)
+    if getattr(_stream_thread,'active',False):
+        op._future.set_exception(LibraryFailure('reentrant')); return op
     me=next((h for h in handles if h is not None), None)
     if me is closing: me=None
     with _condition:
@@ -256,7 +259,7 @@ def library_submit(factory, output, state, inputs, options=None, handles=(), clo
             if not fresh and state.load is not None: state.load(inst.globals)
             def start():
                 nonlocal state_s
-                s=sched();state_s=s;s.native_keys=inst.native_keys;s.native_next_key=inst.native_next_key;s.domain=inst.domain;s.library_callbacks=callbacks
+                s=sched();state_s=s;s.native_keys=inst.native_keys;s.native_next_key=inst.native_next_key;s.domain=inst.domain;s.library_callbacks=_register_streams(inst,callbacks,streams,ids)
                 op._mailbox=s.mailbox
                 ctx,cancel=std_context_with_cancel(std_context_background())
                 s.library_poll=lambda: cancel() if op._cancel.is_set() else None
@@ -335,3 +338,66 @@ def library_float(v, bits):
         return round_float(float(v), bits)
     except (OverflowError, ValueError):
         raise LibraryFailure('invalid_argument') from None
+
+
+_stream_thread = threading.local()
+
+def _register_streams(inst, callbacks, streams, ids):
+    for i, provider in enumerate(streams):
+        if provider is None: continue
+        inst.next_stream += 1
+        ids[i] = inst.next_stream
+        inst.streams['goalchemy.stream.%d' % inst.next_stream] = provider
+    merged = dict(callbacks)
+    merged.update(inst.streams)
+    return merged
+
+def _stream_of(v):
+    import io
+    if type(v) in (bytes, bytearray, memoryview): return io.BytesIO(bytes(v))
+    return v
+
+def _int(b, at):
+    return int.from_bytes(b[at:at+8], 'big', signed=True)
+
+def _serve(s, req):
+    op = req[0:1]
+    if op == b'r':
+        n = _int(req, 1)
+        if n < 0 or n >= 128 << 10: raise ValueError('hostio: malformed stream request')
+        if hasattr(s, 'readinto'):
+            buf = bytearray(n)
+            k = s.readinto(buf)
+            data = None if k is None else bytes(buf[:k])
+        else:
+            data = s.read(n)
+        if data is None: data = b''
+        if type(data) not in (bytes, bytearray) or len(data) > n: raise ValueError('hostio: invalid read result')
+        return (b'\x01' if n and not data else b'\x00') + bytes(data)
+    if op == b'w':
+        k = s.write(bytes(req[1:]))
+        return b'\x00' + (len(req) - 1 if k is None else k).to_bytes(8, 'big', signed=True)
+    if op == b's':
+        pos = s.seek(_int(req, 1), req[9])
+        return b'\x00' + int(pos).to_bytes(8, 'big', signed=True)
+    if op == b'c':
+        s.close()
+        return b'\x00'
+    raise ValueError('hostio: malformed stream request')
+
+def library_stream(v, kind):
+    """Adapts a host file-like object, or bytes, to a std/io parameter.
+    Reads and writes copy their buffers; an empty read is io.EOF."""
+    if v is None: return None
+    s = _stream_of(v)
+    need = [m for m, k in (('read', 'Read'), ('write', 'Write'), ('seek', 'Seek'), ('close', 'Close')) if k in kind]
+    if any(not callable(getattr(s, m, None)) for m in need): raise LibraryFailure('invalid_argument')
+    def provider(request):
+        _stream_thread.active = True
+        try:
+            return _serve(s, bytes(request.payload))
+        except BaseException as e:
+            return b'\x02' + str(e).encode('utf-8', 'replace')
+        finally:
+            _stream_thread.active = False
+    return provider

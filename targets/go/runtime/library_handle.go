@@ -24,12 +24,14 @@ type LibraryState struct {
 // globals, native resources and handle table. Its fields are only accessed
 // while holding the library reservation.
 type Instance struct {
-	globals  any
-	retire   []func()
-	objects  map[any]*instanceEntry
-	live     int
-	poisoned bool
-	retired  bool
+	streams    Callbacks
+	nextStream int64
+	globals    any
+	retire     []func()
+	objects    map[any]*instanceEntry
+	live       int
+	poisoned   bool
+	retired    bool
 }
 
 type instanceEntry struct {
@@ -48,6 +50,7 @@ func (inst *Instance) retireNow() {
 	inst.retire = nil
 	inst.globals = nil
 	inst.objects = nil
+	inst.streams = nil
 }
 
 // Handle is the host's reference to one source object of an instance.
@@ -166,7 +169,7 @@ func CloseHandle(h *Handle, state *LibraryState, run func(Context, bool) Frame) 
 			rv[0] = SnapshotError(rv[0].(error))
 		}
 		return rv
-	}, h)
+	}, h, nil)
 	if err != nil {
 		var poisoned *LibraryError
 		if e, ok := err.(*LibraryError); ok && e.Kind == "poisoned" {
@@ -193,6 +196,14 @@ func CloseHandle(h *Handle, state *LibraryState, run func(Context, bool) Frame) 
 // RunLibraryCall runs one export or handle method. handles lists the handle
 // arguments, receiver first; a call with no live handle creates a fresh owner,
 // which becomes an instance when its results include handles.
-func RunLibraryCall(ctx context.Context, callbacks Callbacks, state *LibraryState, handles []*Handle, build func(Context, bool) Frame, own func(*Instance, []any) []any) ([]any, error) {
-	return runLibrary(ctx, callbacks, state, handles, build, own, nil)
+//
+// streams are host std/io streams passed as arguments: each is registered on
+// the instance under a fresh id, written to ids before build runs, and stays
+// reachable to later calls on the instance.
+func RunLibraryCall(ctx context.Context, callbacks Callbacks, state *LibraryState, handles []*Handle, build func(Context, bool) Frame, own func(*Instance, []any) []any, streams []Callback, ids []int64) ([]any, error) {
+	var pending *pendingStreams
+	if len(streams) > 0 {
+		pending = &pendingStreams{streams, ids}
+	}
+	return runLibrary(ctx, callbacks, state, handles, build, own, nil, pending)
 }

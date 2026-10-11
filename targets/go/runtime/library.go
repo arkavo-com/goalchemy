@@ -116,10 +116,10 @@ func RunLibrary(ctx context.Context, callbacks Callbacks, build func(Context) Fr
 	if own != nil {
 		ownAll = func(_ *Instance, rv []any) []any { return own(rv) }
 	}
-	return runLibrary(ctx, callbacks, &LibraryState{Reset: reset}, nil, func(c Context, _ bool) Frame { return build(c) }, ownAll, nil)
+	return runLibrary(ctx, callbacks, &LibraryState{Reset: reset}, nil, func(c Context, _ bool) Frame { return build(c) }, ownAll, nil, nil)
 }
 
-func runLibrary(ctx context.Context, callbacks Callbacks, state *LibraryState, handles []*Handle, build func(Context, bool) Frame, own func(*Instance, []any) []any, closing *Handle) (rv []any, err error) {
+func runLibrary(ctx context.Context, callbacks Callbacks, state *LibraryState, handles []*Handle, build func(Context, bool) Frame, own func(*Instance, []any) []any, closing *Handle, streams *pendingStreams) (rv []any, err error) {
 	// Covers native boundary failures before scheduler construction/reservation.
 	defer func() {
 		if recover() != nil {
@@ -129,6 +129,9 @@ func runLibrary(ctx context.Context, callbacks Callbacks, state *LibraryState, h
 	}()
 	if ctx == nil {
 		return nil, &LibraryError{Kind: "invalid_context"}
+	}
+	if reentrantStream() {
+		return nil, &LibraryError{Kind: "reentrant"}
 	}
 	// Registry copied before queue acquisition, alongside generated input snapshots.
 	registry := make(Callbacks, len(callbacks))
@@ -193,7 +196,7 @@ func runLibrary(ctx context.Context, callbacks Callbacks, state *LibraryState, h
 	sched.shutdown()
 	s := &scheduler{rng: seed(), nextID: 1, harness: true, host: true, epoch: time.Now(), library: true}
 	sched = s
-	s.callbacks = registry
+	s.callbacks = registerStreams(inst, registry, streams)
 	keep := false
 	defer func() {
 		p := recover()

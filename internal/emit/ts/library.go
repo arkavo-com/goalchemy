@@ -204,7 +204,7 @@ func (e *emitter) library() (string, error) {
 			params = params[1:]
 		}
 		for _, t := range params {
-			if !sourceContext(t) && abi.Handle(t) == nil {
+			if !sourceContext(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				converter(t)
 			}
 		}
@@ -313,13 +313,20 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 			as = append(as, "rt.obj(this[H])")
 			hs = append(hs, "this[H]")
 		}
-		var conv []string
+		var conv, streams []string
 		for i, t := range params {
 			if sourceContext(t) {
 				as = append(as, "ctx")
 				continue
 			}
 			a := fmt.Sprintf("a%d", i)
+			if k := ir.StreamKind(t); k != "" {
+				ps = append(ps, a+": rt.HostStreamInput | null")
+				conv = append(conv, fmt.Sprintf("const s%d=rt.hostStream(a%d,%q);\n", i, i, k))
+				as = append(as, fmt.Sprintf("(ids[%d]===0n?null:%s(ids[%d]))", len(streams), e.symbol(e.p.StreamAdapter(k).Sym), len(streams)))
+				streams = append(streams, fmt.Sprintf("s%d", i))
+				continue
+			}
 			ps = append(ps, a+": "+typ(t))
 			if h := abi.Handle(t); h != nil {
 				conv = append(conv, fmt.Sprintf("const h%d=handle$%s(a%d);\n", i, h.Name, i))
@@ -355,6 +362,11 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		for _, c := range conv {
 			b.WriteString(c)
 		}
+		ids := make([]string, len(streams))
+		for i := range ids {
+			ids[i] = "0n"
+		}
+		fmt.Fprintf(b, "const ids:bigint[]=[%s];\n", strings.Join(ids, ","))
 		fmt.Fprintf(b, "const owned=await rt.runLibraryCall(options,libraryState,[%s],%s,(inst,rv)=>{\nreturn [", strings.Join(hs, ","), frame(f, as))
 		for i := 0; i < n; i++ {
 			if h := abi.Handle(results[i]); h != nil {
@@ -366,7 +378,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		if hasErr {
 			fmt.Fprintf(b, "sourceFailure(rv[%d]),", n)
 		}
-		b.WriteString("];});\n")
+		fmt.Fprintf(b, "];},null,[%s],ids);\n", strings.Join(streams, ","))
 		if hasErr {
 			fmt.Fprintf(b, "if(owned[%d]!==null)throw owned[%d];\n", n, n)
 		}

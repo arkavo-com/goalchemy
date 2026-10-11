@@ -55,8 +55,9 @@ export class Instance {
  readonly domain:object={};
  readonly objects=new Map<unknown,{handle:Handle;ref:WeakRef<object>}>();
  readonly retain:(()=>void)[]=[];
+ streams:Record<string,Callback>={};nextStream=0n;
  live=0;poisoned=false;retired=false;
- retireNow():void{if(this.retired)return;this.retired=true;this.globals=undefined;this.objects.clear();for(const r of this.retain.splice(0)){try{r();}catch{}}}
+ retireNow():void{if(this.retired)return;this.retired=true;this.globals=undefined;this.objects.clear();this.streams={};for(const r of this.retain.splice(0)){try{r();}catch{}}}
 }
 
 /** The host's reference to one source object of an instance. */
@@ -84,7 +85,8 @@ export function wrap<W extends object>(inst:Instance,obj:unknown,name:string,mak
 }
 export function obj<T>(h:Handle|null):T{return (h===null?null:h.obj) as T;}
 
-export async function runLibraryCall(options:CallOptions,state:LibraryState,handles:(Handle|null)[],entry:(ctx:Context,fresh:boolean)=>Frame,capture:(inst:Instance,rv:unknown[])=>unknown[],closing:Handle|null=null):Promise<unknown[]>{
+export async function runLibraryCall(options:CallOptions,state:LibraryState,handles:(Handle|null)[],entry:(ctx:Context,fresh:boolean)=>Frame,capture:(inst:Instance,rv:unknown[])=>unknown[],closing:Handle|null=null,streams:(Callback|null)[]=[],ids:bigint[]=[]):Promise<unknown[]>{
+ if(streamContext?.getStore()===true)throw new LibraryError('reentrant');
  const self=handles.find(h=>h!==null)??null;
  if(self!==null&&self!==closing&&self.closed)throw new LibraryError('closed');
  let signal=options.signal;let callAbort:AbortController|null=null;
@@ -100,7 +102,8 @@ export async function runLibraryCall(options:CallOptions,state:LibraryState,hand
  if(self!==null&&self!==closing)self.active=callAbort;
  let cancel=()=>{};let keep=!fresh;
  try{
-  installCallbacks(options.callbacks??Object.freeze({}));
+  streams.forEach((cb,i)=>{if(cb===null)return;owner.nextStream++;ids[i]=owner.nextStream;owner.streams['goalchemy.stream.'+owner.nextStream]=cb;});
+  installCallbacks(Object.freeze({...(options.callbacks??{}),...owner.streams}));
   if(!fresh)state.load?.(owner.globals);
   return await driveLibrary(()=>{if(fresh)state.reset();const[ctx,stop]=stdContextWithCancel(BACKGROUND);cancel=stop;return entry(ctx,fresh);},rv=>{const out=capture(owner,rv);if(fresh&&owner.live>0)keep=true;return out;},signal,()=>cancel(),{domain:owner.domain,retire:(s:Scheduler,failure:unknown)=>{
    if(failure instanceof FatalPanic||(failure!==undefined&&!(failure instanceof NativeCanceled)&&!(failure instanceof LibraryError))){if(!fresh)owner.poisoned=true;return;}
@@ -135,6 +138,88 @@ export async function closeHandle(h:Handle,state:LibraryState,run:((ctx:Context,
   throw e;
  }
  if(rv[0]!==null)throw rv[0];
+}
+
+/** A host stream passed for a std/io parameter. Plain objects implement the
+ * operations they support; read returns null at end of stream. Web and Node
+ * streams, Blobs and Uint8Arrays are adapted. */
+export interface HostStream {
+ read?(size:number):Promise<Uint8Array|null>|Uint8Array|null;
+ write?(data:Uint8Array):Promise<number|void>|number|void;
+ seek?(offset:bigint,whence:number):Promise<bigint>|bigint;
+ close?():Promise<void>|void;
+}
+interface NodeReadable { read(size?:number):unknown; once(event:string,fn:(...a:unknown[])=>void):unknown; removeListener(event:string,fn:(...a:unknown[])=>void):unknown; readableEnded?:boolean; }
+interface NodeWritable { write(chunk:Uint8Array,cb:(err?:Error|null)=>void):boolean; end(cb?:()=>void):unknown; on(event:string,fn:(...a:unknown[])=>void):unknown; }
+export type HostStreamInput=HostStream|ReadableStream<Uint8Array>|WritableStream<Uint8Array>|AsyncIterable<Uint8Array>|Blob|Uint8Array|NodeReadable|NodeWritable;
+interface StreamContext { run<T>(store:boolean,fn:()=>T):T; getStore():boolean|undefined; }
+let streamContext:StreamContext|null=null;
+/** Node installs an AsyncLocalStorage so a host stream that calls back into
+ * the library fails fast; portable hosts cannot detect re-entry. */
+export function installStreamContext(context:StreamContext):void{streamContext=context;}
+function chunked(next:()=>Promise<Uint8Array|null>):HostStream{
+ let pending:Uint8Array|null=null;
+ return {async read(size){
+  while(pending===null||pending.length===0){pending=await next();if(pending===null)return null;}
+  const out=pending.subarray(0,size);pending=pending.subarray(out.length);return out;
+ }};
+}
+function bytesStream(data:Uint8Array):HostStream{
+ let pos=0;
+ return {read(size){if(pos>=data.length)return null;const out=data.subarray(pos,pos+size);pos+=out.length;return out;},
+  seek(offset,whence){const base=whence===0?0n:whence===1?BigInt(pos):BigInt(data.length);const next=base+offset;if(next<0n)throw new Error('seek: negative position');pos=Number(next);return next;}};
+}
+function blobStream(blob:Blob):HostStream{
+ let pos=0;
+ return {async read(size){if(pos>=blob.size)return null;const out=new Uint8Array(await blob.slice(pos,pos+size).arrayBuffer());pos+=out.length;return out;},
+  seek(offset,whence){const base=whence===0?0n:whence===1?BigInt(pos):BigInt(blob.size);const next=base+offset;if(next<0n)throw new Error('seek: negative position');pos=Number(next);return next;}};
+}
+function nodeReadable(r:NodeReadable):HostStream{
+ return chunked(()=>new Promise<Uint8Array|null>((resolve,reject)=>{
+  const attempt=():void=>{
+   const chunk=r.read();
+   if(chunk!==null&&chunk!==undefined){resolve(chunk instanceof Uint8Array?chunk:new TextEncoder().encode(String(chunk)));return;}
+   if(r.readableEnded){resolve(null);return;}
+   const done=():void=>{r.removeListener('readable',retry);r.removeListener('end',ended);r.removeListener('error',failed);};
+   const retry=():void=>{done();attempt();};const ended=():void=>{done();resolve(null);};const failed=(e:unknown):void=>{done();reject(e);};
+   r.once('readable',retry);r.once('end',ended);r.once('error',failed);
+  };
+  attempt();
+ }));
+}
+function hostStreamOf(v:unknown):HostStream{
+ if(v instanceof Uint8Array)return bytesStream(v);
+ if(typeof Blob!=='undefined'&&v instanceof Blob)return blobStream(v);
+ if(typeof ReadableStream!=='undefined'&&v instanceof ReadableStream){const reader=(v as ReadableStream<Uint8Array>).getReader();return {...chunked(async()=>{const r=await reader.read();return r.done?null:r.value;}),close(){return reader.cancel();}};}
+ if(typeof WritableStream!=='undefined'&&v instanceof WritableStream){const writer=(v as WritableStream<Uint8Array>).getWriter();return {async write(d){await writer.write(d);return d.length;},close(){return writer.close();}};}
+ const o=v as Record<string,unknown>;
+ if(typeof o.on==='function'&&typeof o.end==='function'&&typeof o.write==='function'){const w=v as NodeWritable;return {write(d){return new Promise<number>((resolve,reject)=>{w.write(d,e=>e?reject(e):resolve(d.length));});},close(){return new Promise<void>(resolve=>{w.end(()=>resolve());});}};}
+ if(typeof o.on==='function'&&typeof o.read==='function'&&typeof o.once==='function')return nodeReadable(v as NodeReadable);
+ if(typeof o.read==='function'||typeof o.write==='function'||typeof o.seek==='function'||typeof o.close==='function')return v as HostStream;
+ if(typeof (o as {[Symbol.asyncIterator]?:unknown})[Symbol.asyncIterator]==='function'){const it=(v as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();return chunked(async()=>{const r=await it.next();return r.done?null:r.value;});}
+ invalidBoundary();
+}
+function streamInt(b:Uint8Array,at:number):bigint{let v=0n;for(let i=0;i<8;i++)v=(v<<8n)|BigInt(b[at+i]);return BigInt.asIntN(64,v);}
+function streamBytes(v:bigint):Uint8Array{const b=new Uint8Array(9);let x=BigInt.asUintN(64,v);for(let i=8;i>=1;i--){b[i]=Number(x&255n);x>>=8n;}return b;}
+async function serveStream(s:HostStream,req:Uint8Array):Promise<Uint8Array>{
+ switch(req[0]){
+ case 114:{const n=Number(streamInt(req,1));const data=await s.read!(n);if(data===null||data===undefined)return new Uint8Array([1]);if(!(data instanceof Uint8Array)||data.length>n)throw new Error('hostio: invalid read result');const out=new Uint8Array(1+data.length);out.set(data,1);return out;}
+ case 119:{const data=req.slice(1);const n=await s.write!(data);return streamBytes(BigInt(typeof n==='number'?n:data.length));}
+ case 115:return streamBytes(BigInt(await s.seek!(streamInt(req,1),req[9])));
+ case 99:await s.close?.();return new Uint8Array([0]);
+ }
+ throw new Error('hostio: malformed stream request');
+}
+/** Adapts a host stream to the provider serving one std/io parameter; reads
+ * and writes copy their buffers. Host end of stream becomes io.EOF. */
+export function hostStream(v:unknown,kind:string):Callback|null{
+ if(v===null||v===undefined)return null;
+ const s=hostStreamOf(v);
+ if((kind.includes('Read')&&typeof s.read!=='function')||(kind.includes('Write')&&typeof s.write!=='function')||(kind.includes('Seek')&&typeof s.seek!=='function'))invalidBoundary();
+ return (_signal,request)=>{
+  const run=():Promise<Uint8Array>=>serveStream(s,request??new Uint8Array(0)).catch(e=>{const m=new TextEncoder().encode(e instanceof Error?e.message:String(e));const out=new Uint8Array(1+m.length);out[0]=2;out.set(m,1);return out;});
+  return streamContext?streamContext.run(true,run):run();
+ };
 }
 
 /** Source float boundary accepts numeric IEEE values, including NaN and infinities. */
