@@ -611,3 +611,68 @@ extension GLibrary {
     return frame
   }
 }
+
+/// Source std/io operations behind a host stream view; each one blocks on a
+/// library call on the handle. read returns the data and whether the source
+/// reached io.EOF.
+struct GStreamOps {
+  var read: ((GHandle, Int64) throws -> ([UInt8], Bool))?
+  var write: ((GHandle, [UInt8]) throws -> Int64)?
+  var seek: ((GHandle, Int64, Int64) throws -> Int64)?
+  var close: (GHandle) throws -> Void
+}
+/// The host view of a source std/io reader or writer. Operations block until
+/// their library call completes; an operation the source lacks throws kind
+/// "unsupported". close() runs the source Close, if any; deinit releases the
+/// handle without it. Iterate it with for try await to read Data chunks.
+public final class GoalchemySourceStream: AsyncSequence {
+  public typealias Element = Data
+  let handle: GHandle
+  let ops: GStreamOps
+  let owned: Bool
+  init(_ handle: GHandle, _ ops: GStreamOps, owned: Bool = true) {
+    self.handle = handle
+    self.ops = ops
+    self.owned = owned
+  }
+  deinit { if owned { GLibrary.finalize(handle) } }
+  public var canRead: Bool { ops.read != nil }
+  public var canWrite: Bool { ops.write != nil }
+  public var canSeek: Bool { ops.seek != nil }
+  /// Reads up to maxLength bytes; nil at end of stream.
+  public func read(_ maxLength: Int = 64 << 10) throws -> [UInt8]? {
+    guard let read = ops.read else { throw GoalchemyFailure("unsupported", "stream cannot read") }
+    if maxLength <= 0 { return [] }
+    let (data, eof) = try read(handle, Int64(Swift.min(maxLength, 1 << 20)))
+    return data.isEmpty && eof ? nil : data
+  }
+  /// Reads into buffer; returns the count, or 0 at end of stream.
+  public func read(into buffer: UnsafeMutableBufferPointer<UInt8>) throws -> Int {
+    guard let data = try read(buffer.count) else { return 0 }
+    _ = buffer.initialize(from: data)
+    return data.count
+  }
+  /// Writes all of data.
+  @discardableResult public func write(_ data: [UInt8]) throws -> Int {
+    guard let write = ops.write else { throw GoalchemyFailure("unsupported", "stream cannot write") }
+    var done = 0
+    repeat {
+      let end = Swift.min(data.count, done + (1 << 20))
+      done += Int(try write(handle, Array(data[done..<end])))
+    } while done < data.count
+    return done
+  }
+  /// Seeks; whence is 0 (start), 1 (current) or 2 (end).
+  public func seek(_ offset: Int64, _ whence: Int = 0) throws -> Int64 {
+    guard let seek = ops.seek else { throw GoalchemyFailure("unsupported", "stream cannot seek") }
+    guard (0...2).contains(whence) else { throw GoalchemyFailure("invalid_argument", "whence must be 0, 1 or 2") }
+    return try seek(handle, offset, Int64(whence))
+  }
+  /// Runs the source Close, if any, and releases the handle.
+  public func close() throws { try ops.close(handle) }
+  public struct AsyncIterator: AsyncIteratorProtocol {
+    let stream: GoalchemySourceStream
+    public mutating func next() async throws -> Data? { try stream.read().map { Data($0) } }
+  }
+  public func makeAsyncIterator() -> AsyncIterator { AsyncIterator(stream: self) }
+}

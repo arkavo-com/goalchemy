@@ -65,10 +65,16 @@ pub fn permanent_root(v: V) {
 }
 
 pub fn alloc(o: Obj) -> H {
+    // Byte storage counts one allocation per KiB, so large buffers that
+    // become garbage quickly still trigger collections.
+    let weight = match &o {
+        Obj::Bytes(b) => b.len() >> 10,
+        _ => 0,
+    };
     HEAP.with(|hp| {
         let mut hp = hp.borrow_mut();
         hp.live += 1;
-        hp.since += 1;
+        hp.since += 1 + weight;
         if hp.live > hp.peak {
             hp.peak = hp.live;
         }

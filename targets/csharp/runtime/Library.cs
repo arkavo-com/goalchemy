@@ -253,4 +253,67 @@ public static class Library
     public static byte[] bytes(byte[] value){if(value==null)return null;length(value.Length);return (byte[])value.Clone();}
     public static string binaryString(string value){value??="";length(value.Length);foreach(char c in value)if(c>255)throw invalid();return value;}
     public static long integer(long value,int bits,bool signed){if(bits<64){long low=signed?-(1L<<(bits-1)):0,high=(1L<<(signed?bits-1:bits))-1;if(value<low||value>high)throw invalid();}return value;}
+    /// Source std/io operations behind a host stream view; each one is a library call on the handle. Read completes with (data, eof).
+    public sealed class StreamOps
+    {
+        internal readonly Func<Handle,long,Operation<(byte[],bool)>> read;internal readonly Func<Handle,byte[],Operation<long>> write;
+        internal readonly Func<Handle,long,long,Operation<long>> seek;internal readonly Func<Handle,Operation<object>> close;
+        public StreamOps(Func<Handle,long,Operation<(byte[],bool)>> read,Func<Handle,byte[],Operation<long>> write,Func<Handle,long,long,Operation<long>> seek,Func<Handle,Operation<object>> close){this.read=read;this.write=write;this.seek=seek;this.close=close;}
+    }
+    /// The host view of a source std/io reader or writer as a System.IO.Stream. Each operation is a library call on the handle;
+    /// failures surface as IOException with the Library.Failure as inner exception. Dispose runs the source Close, if any, and releases the handle.
+    public sealed class SourceStream : System.IO.Stream
+    {
+        readonly Handle h;readonly StreamOps ops;int disposed;
+        public SourceStream(Handle h,StreamOps ops){this.h=h;this.ops=ops;}
+        public override bool CanRead=>ops.read!=null&&disposed==0;
+        public override bool CanWrite=>ops.write!=null&&disposed==0;
+        public override bool CanSeek=>ops.seek!=null&&disposed==0;
+        static async System.Threading.Tasks.Task<T> Await<T>(Operation<T> op,System.Threading.CancellationToken token)
+        {
+            using var reg=token.CanBeCanceled?token.Register(()=>op.Cancel()):default;
+            try{return await op.Completion.ConfigureAwait(false);}
+            catch(Failure f){throw new System.IO.IOException(f.Message,f);}
+        }
+        public override async System.Threading.Tasks.ValueTask<int> ReadAsync(Memory<byte> buffer,System.Threading.CancellationToken token=default)
+        {
+            if(ops.read==null)throw new NotSupportedException("unsupported");
+            if(buffer.Length==0)return 0;
+            var (data,_)=await Await(ops.read(h,Math.Min(buffer.Length,1<<20)),token).ConfigureAwait(false);
+            data??=Array.Empty<byte>();data.CopyTo(buffer);return data.Length;
+        }
+        public override async System.Threading.Tasks.ValueTask WriteAsync(ReadOnlyMemory<byte> buffer,System.Threading.CancellationToken token=default)
+        {
+            if(ops.write==null)throw new NotSupportedException("unsupported");
+            int done=0;
+            do{int n=Math.Min(buffer.Length-done,1<<20);done+=(int)await Await(ops.write(h,buffer.Slice(done,n).ToArray()),token).ConfigureAwait(false);}while(done<buffer.Length);
+        }
+        public override System.Threading.Tasks.Task<int> ReadAsync(byte[] buffer,int offset,int count,System.Threading.CancellationToken token)=>ReadAsync(buffer.AsMemory(offset,count),token).AsTask();
+        public override System.Threading.Tasks.Task WriteAsync(byte[] buffer,int offset,int count,System.Threading.CancellationToken token)=>WriteAsync(buffer.AsMemory(offset,count),token).AsTask();
+        public override int Read(byte[] buffer,int offset,int count){ValidateBufferArguments(buffer,offset,count);return ReadAsync(buffer.AsMemory(offset,count)).AsTask().GetAwaiter().GetResult();}
+        public override int Read(Span<byte> buffer){var tmp=new byte[buffer.Length];int n=Read(tmp,0,tmp.Length);tmp.AsSpan(0,n).CopyTo(buffer);return n;}
+        public override void Write(byte[] buffer,int offset,int count){ValidateBufferArguments(buffer,offset,count);WriteAsync(buffer.AsMemory(offset,count)).AsTask().GetAwaiter().GetResult();}
+        public override void Write(ReadOnlySpan<byte> buffer)=>Write(buffer.ToArray(),0,buffer.Length);
+        public override long Seek(long offset,System.IO.SeekOrigin origin)
+        {
+            if(ops.seek==null)throw new NotSupportedException("unsupported");
+            return Await(ops.seek(h,offset,(long)origin),default).GetAwaiter().GetResult();
+        }
+        public override long Length{get{long at=Seek(0,System.IO.SeekOrigin.Current),end=Seek(0,System.IO.SeekOrigin.End);Seek(at,System.IO.SeekOrigin.Begin);return end;}}
+        public override long Position{get=>Seek(0,System.IO.SeekOrigin.Current);set=>Seek(value,System.IO.SeekOrigin.Begin);}
+        public override void SetLength(long value)=>throw new NotSupportedException("unsupported");
+        public override void Flush(){}
+        /// Runs the source Close, if any, and releases the handle.
+        public System.Threading.Tasks.Task CloseAsync()=>Await(ops.close(h),default);
+        protected override void Dispose(bool disposing)
+        {
+            if(disposing&&System.Threading.Interlocked.Exchange(ref disposed,1)==0)CloseAsync().GetAwaiter().GetResult();
+            base.Dispose(disposing);
+        }
+        public override async System.Threading.Tasks.ValueTask DisposeAsync()
+        {
+            if(System.Threading.Interlocked.Exchange(ref disposed,1)==0)await CloseAsync().ConfigureAwait(false);
+            GC.SuppressFinalize(this);
+        }
+    }
 }

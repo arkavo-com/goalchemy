@@ -223,12 +223,23 @@ func (e *emitter) library() (string, error) {
 			}
 		}
 		for _, t := range f.Sig.Results {
-			if !sourceError(t) && abi.Handle(t) == nil {
+			if !sourceError(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				convert(t)
 			}
 		}
 	}
-	b.WriteString("pub use rt::{Operation, CallOptions, LibraryError, ErrorKind, Cancellation, Provider, ProviderRequest, ProviderError, HostWire, set_log_handler, LogRecord, LogHandler, set_library_warn, WarningHandler, Stream};\nfn source_failure(v: &V) -> LibraryError {\nif veq(v,&context_canceled()) {return LibraryError::new(ErrorKind::Canceled,\"context canceled\");}\nif veq(v,&context_deadline_exceeded()) {return LibraryError::new(ErrorKind::DeadlineExceeded,\"context deadline exceeded\");}\n")
+	if e.p.HostIOFunc("ReadView") != nil {
+		for _, name := range []string{"ReadView", "WriteView", "SeekView"} {
+			f := e.p.HostIOFunc(name)
+			for _, t := range f.Sig.Params[1:] {
+				convert(t)
+			}
+			for _, t := range f.Sig.Results[:len(f.Sig.Results)-1] {
+				convert(t)
+			}
+		}
+	}
+	b.WriteString("pub use rt::{Operation, CallOptions, LibraryError, ErrorKind, Cancellation, Provider, ProviderRequest, ProviderError, HostWire, set_log_handler, LogRecord, LogHandler, set_library_warn, WarningHandler, Stream, SourceStream};\nfn source_failure(v: &V) -> LibraryError {\nif veq(v,&context_canceled()) {return LibraryError::new(ErrorKind::Canceled,\"context canceled\");}\nif veq(v,&context_deadline_exceeded()) {return LibraryError::new(ErrorKind::DeadlineExceeded,\"context deadline exceeded\");}\n")
 	var errorTypes []*ir.Type
 	for _, t := range e.p.Types.All {
 		if t.Kind == ir.KPointer && t.Elem.U().Kind == ir.KStruct && libraryValue(t.Elem, map[*ir.Type]bool{}) && e.tds[t] {
@@ -267,6 +278,60 @@ func (e *emitter) library() (string, error) {
 		c := call(f, args)
 		return fmt.Sprintf("library_owner_call(%d, init_zero_globals, options, &inst, fresh, move |ctx| {\nlet _ = &ctx;\nif fresh { library_sequence(%s, move || %s) } else { library_call(move || %s) }\n}, |rv, inst| {\nlet _ = inst;\n%s\n})", len(e.p.Globals), init, c, c, output)
 	}
+	streamOps := func(name string, ops ir.StreamOps, obj func(*ir.Type) string, closeBody string) {
+		op := func(fn string, params []string, result, out string) string {
+			f := e.p.HostIOFunc(fn)
+			args := []string{obj(f.Sig.Params[0])}
+			var ps []string
+			for i, p := range params {
+				args = append(args, fmt.Sprintf("input_%s(%s)", e.names.Type(f.Sig.Params[i+1].U(), ""), p))
+				ps = append(ps, fmt.Sprintf("%s: %s", p, typ(f.Sig.Params[i+1])))
+			}
+			last := len(f.Sig.Results) - 1
+			fname := fmt.Sprintf("%s_%s", name, strings.ToLower(fn))
+			fmt.Fprintf(&b, "fn %s(h: &std::sync::Arc<rt::Handle>, %s) -> Operation<%s> {\nlet h0 = Some(h.clone());\nOperation::submit_handles(CallOptions::default(), vec![h0.clone()], None, vec![], Default::default(), move |options, inst, fresh| %s)\n}\n",
+				fname, strings.Join(ps, ", "), result, owner(f, args, fmt.Sprintf("if !rv[%d].is_nil() {return Err(source_failure(&rv[%d]));}\nOk(%s)", last, last, out)))
+			return "Some(" + fname + ")"
+		}
+		res := func(fn string, i int) string {
+			t := e.p.HostIOFunc(fn).Sig.Results[i]
+			return fmt.Sprintf("output_%s(rv[%d].clone())", e.names.Type(t.U(), ""), i)
+		}
+		read, write, seek := "None", "None", "None"
+		if ops.Read {
+			read = op("ReadView", []string{"n"}, "(Vec<u8>, bool)", "("+res("ReadView", 0)+", "+res("ReadView", 1)+")")
+		}
+		if ops.Write {
+			write = op("WriteView", []string{"d"}, "i64", res("WriteView", 0)+" as i64")
+		}
+		if ops.Seek {
+			seek = op("SeekView", []string{"off", "wh"}, "i64", res("SeekView", 0)+" as i64")
+		}
+		fmt.Fprintf(&b, "fn %s_close(h: &std::sync::Arc<rt::Handle>) -> Operation<()> {\n%s\n}\nstatic %s: rt::StreamOps = rt::StreamOps { read: %s, write: %s, seek: %s, close: %s_close };\n", name, closeBody, strings.ToUpper(name), read, write, seek, name)
+	}
+	kinds := map[string]bool{}
+	for _, f := range funcs {
+		for _, t := range f.Sig.Results {
+			if k := ir.StreamKind(t); k != "" && !kinds[k] {
+				kinds[k] = true
+				body := "library_close(h, |_, _, _| Ok(()))"
+				if ir.StreamCloses(k) {
+					body = fmt.Sprintf("let h0 = Some(h.clone());\nlibrary_close(h, move |options, inst, fresh| %s)", owner(e.p.HostIOFunc("CloseView"), []string{"library_obj(&h0)"}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
+				}
+				streamOps("stream_ops_"+strings.ToLower(k), ir.KindOps(k), func(*ir.Type) string { return "library_obj(&h0)" }, body)
+			}
+		}
+	}
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			body := "library_close(h, |_, _, _| Ok(()))"
+			if h.Close != nil {
+				body = fmt.Sprintf("let h0 = Some(h.clone());\nlibrary_close(h, move |options, inst, fresh| %s)", owner(h.Close, []string{"library_obj(&h0)"}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
+			}
+			td := e.td(h.Ptr)
+			streamOps("stream_ops_handle_"+strings.ToLower(h.Name), h.Stream, func(*ir.Type) string { return "boxv(" + td + ", library_obj(&h0))" }, body)
+		}
+	}
 	for _, h := range abi.Handles {
 		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close when done;\n/// dropping the last clone releases it without running Close.\n#[derive(Clone)]\npub struct %s(std::sync::Arc<rt::Handle>);\nimpl PartialEq for %s { fn eq(&self, other: &Self) -> bool { rt::Handle::same(&self.0, &other.0) } }\nimpl Eq for %s {}\nimpl std::fmt::Debug for %s { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(%q) } }\n#[allow(non_snake_case)]\nimpl %s {\n", h.Name, h.Name, h.Name, h.Name, h.Name, h.Name, h.Name)
 		b.WriteString("/// Runs the source Close, if any, and releases the handle. Queued calls fail\n/// and an active call is canceled first.\npub fn close(&self) -> Operation<()> {\n")
@@ -274,6 +339,9 @@ func (e *emitter) library() (string, error) {
 			fmt.Fprintf(&b, "let h0 = Some(self.0.clone());\nlibrary_close(&self.0, move |options, inst, fresh| %s)\n}\n", owner(h.Close, []string{"library_obj(&h0)"}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
 		} else {
 			b.WriteString("library_close(&self.0, |_, _, _| Ok(()))\n}\n")
+		}
+		if h.Stream.Any() {
+			fmt.Fprintf(&b, "/// The handle as a std::io stream; each operation is a call on the handle and\n/// closing the stream closes the handle.\npub fn io(&self) -> SourceStream {\nSourceStream::new(self.0.clone(), &STREAM_OPS_HANDLE_%s)\n}\n", strings.ToUpper(h.Name))
 		}
 		for _, f := range h.Methods {
 			name := ir.MethodName(f)
@@ -299,6 +367,9 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 				return "Option<&" + h.Name + ">"
 			}
 			return "Option<" + h.Name + ">"
+		}
+		if ir.StreamKind(t) != "" {
+			return "Option<SourceStream>"
 		}
 		return typ(t)
 	}
@@ -344,6 +415,10 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		rs = append(rs, ptyp(results[i], false))
 		if h := abi.Handle(results[i]); h != nil {
 			outs = append(outs, fmt.Sprintf("library_wrap(inst, rv[%d].clone(), %q).map(%s)", i, h.Name, h.Name))
+			continue
+		}
+		if k := ir.StreamKind(results[i]); k != "" {
+			outs = append(outs, fmt.Sprintf("library_wrap(inst, rv[%d].clone(), \"io.%s\").map(|h| SourceStream::new(h, &STREAM_OPS_%s))", i, k, strings.ToUpper(k)))
 			continue
 		}
 		outs = append(outs, fmt.Sprintf("output_%s(rv[%d].clone())", e.names.Type(results[i].U(), ""), i))

@@ -57,13 +57,25 @@ int goalchemy_invoke(const char *name, const gxc_value *arguments, size_t count,
     const gxc_options *options, gxc_value *result, gxc_error *error);
 /* Error kinds: 1 source, 2 panic, 3 host fault, 4 fatal, 5 invalid argument,
  * 6 canceled, 7 closed handle, 8 poisoned instance, 9 handles of different
- * instances, 10 a host stream function called back into the library. Handle methods are invoked as "Type.Method" with the receiver
+ * instances, 10 a host stream function called back into the library, 11 a
+ * stream operation the source lacks. Handle methods are invoked as "Type.Method" with the receiver
  * as the first argument. Returning the same source pointer again returns the
  * same live gxc_handle. */
 /* Fails calls queued on h, cancels its active call, runs the source Close if
  * any, then releases h. Later calls fail with kind 7. h stays valid until
  * gxc_handle_free. */
 int gxc_handle_close(gxc_handle *h, gxc_error *error);
+/* Source streams: std/io results are handles of type "io.Reader",
+ * "io.ReadCloser" and so on, and handles whose source type has Read or Write
+ * are streams too. Each operation is a call on the handle; gxc_handle_close
+ * runs the source Close, if any. gxc_stream_read reads at most length bytes
+ * (at most 1 MiB) into buffer and sets *count; a count of 0 for a non-zero
+ * length is end of stream. gxc_stream_write writes all of data and sets
+ * *count to the bytes written. gxc_stream_seek (whence 0 start, 1 current,
+ * 2 end) sets *position. They return the error kind, 0 on success. */
+int gxc_stream_read(gxc_handle *h, uint8_t *buffer, size_t length, size_t *count, gxc_error *error);
+int gxc_stream_write(gxc_handle *h, const uint8_t *data, size_t length, size_t *count, gxc_error *error);
+int gxc_stream_seek(gxc_handle *h, int64_t offset, int whence, int64_t *position, gxc_error *error);
 /* Releases h without running Close if it is still open, then frees it. */
 void gxc_handle_free(gxc_handle *h);
 const char *gxc_handle_type(const gxc_handle *h);
