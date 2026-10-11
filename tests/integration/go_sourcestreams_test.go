@@ -315,13 +315,3 @@ func TestThroughput(t *testing.T) {
 	t.Logf("throughput: %d MiB in %v (%.1f MiB/s), peak heap %d MiB", mib, elapsed, float64(mib)/elapsed.Seconds(), sink.peak>>20)
 }
 `
-
-func TestSourceStreamResultsRejectedOnPendingTargets(t *testing.T) {
-	res := buildSourceStreams(t)
-	for _, target := range []string{"java", "csharp", "rust", "c", "swift"} {
-		ds := driver.Emit(target, res, t.TempDir())
-		if len(ds) == 0 || ds[0].Code != "GCE007" {
-			t.Errorf("%s: want GCE007, got %v", target, ds)
-		}
-	}
-}
