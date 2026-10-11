@@ -10,7 +10,7 @@ cp "$root/tests/byte_storage_test.rs" "$out/main.rs"
 {
   for f in "$out"/rt/types/*.rs "$out"/rt/runtime/*.rs; do
     d=$(basename "$(dirname "$f")"); n=$(basename "$f" .rs)
-    case "$n" in lib_crypto_*|lib_encoding_*|lib_http_do|lib_callback_request|lib_checksum_crc32_ieee) continue ;; esac
+    case "$n" in lib_crypto_*|lib_encoding_*|lib_http_*|lib_callback_request|lib_checksum_crc32_ieee) continue ;; esac
     printf '#[path = "%s/%s.rs"]\npub mod %s;\npub use %s::*;\n' "$d" "$n" "$n" "$n"
   done
 } > "$out/rt/mod.rs"
