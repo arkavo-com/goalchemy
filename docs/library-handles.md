@@ -121,3 +121,47 @@ The host passes its native stream.
 
 The adapter is the source package `std/io/hostio`, which the compiler adds to
 libraries whose exports take `std/io` interfaces.
+
+## Source streams
+
+Exported functions and handle methods can return the same `std/io`
+interfaces: `io.Reader`, `io.Writer`, `io.ReadCloser`, `io.WriteCloser`,
+`io.ReadSeeker`, `io.ReadSeekCloser`, `io.WriteSeeker` and `io.ReadWriter`.
+The host receives a native stream. A handle type whose pointer has
+`Read([]byte) (int, error)` or `Write([]byte) (int, error)` (and optionally
+`Seek(int64, int) (int64, error)`) is also usable as a native stream.
+
+| Target | Returned stream | Handle that is a reader or writer |
+|---|---|---|
+| Go | a value of the standard `io` interface type; it also has `Close` (and `WriteTo` when it reads) | `h.IO()`, an `io` interface with `Close` |
+| TypeScript | `SourceStream`, typed as `SourceReader`, `SourceWriter`, `SourceSeeker` and `SourceCloser` as the kind allows: `read(size)` (null at end), `write(data)`, `seek(offset, whence)`, `stream()` (a web `ReadableStream`), `writable()` (a web `WritableStream`), `for await`, `close()` and `await using` | `h.io()`, `h.stream()`, `h.writable()` and `for await (const chunk of h)` |
+| Python | `rt.SourceStream`, an unbuffered binary file (`io.RawIOBase`): `read`, `readinto`, `readall`, `write`, `seek`, `tell`, `close` and `with` | `h.as_file()` |
+
+Java, C#, Rust, C and Swift reject exports returning `std/io` interfaces with
+`GCE007` for now.
+
+- A returned stream is a handle of the call's instance, with the same rules:
+  calls on it are serialized with the instance's other calls, a nil interface
+  crosses as the host's null, `Close` runs the source `Close` when the kind
+  has one and then releases the handle, later operations fail with `closed`,
+  and a stream collected without `Close` is released with a warning. Each
+  returned stream is a new host object.
+- A handle's stream view shares the handle: closing the view closes the
+  handle, and the view does not need its own Close.
+- Each read, write or seek is one library call through the `std/io/hostio`
+  functions `ReadView`, `WriteView` and `SeekView`. Buffers are copied; one
+  read returns at most 1 MiB, and writes are split into 1 MiB calls. A read
+  returns data, end of stream or an error: source `io.EOF` becomes the host's
+  end of stream, and other source errors fail with kind `source`.
+- Operations a kind does not have fail with kind `unsupported` (TypeScript
+  types and Python `readable()`/`writable()`/`seekable()` reflect the kind).
+- In TypeScript, ending or canceling `stream()` does not close the handle;
+  closing `writable()` does. Use `Readable.from(stream)` or
+  `Readable.fromWeb(stream.stream())` for a Node `Readable`.
+- Python streams are synchronous: each operation blocks until its call
+  completes. Wrap them in `io.BufferedReader` or `io.BufferedWriter` for
+  buffering.
+
+Copying 256 MiB host → source → host (a host stream passed to an export that
+returns it as an `io.ReadCloser`) runs with bounded memory; the integration
+tests log the rate per target.

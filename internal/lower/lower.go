@@ -93,6 +93,9 @@ func Lower(prog *frontend.Program, reg *catalog.Registry) (*ir.Program, []diagno
 	}
 	l.guard(token.NoPos, l.lowerInit)
 	l.guard(token.NoPos, l.jsonNilPointers)
+	if l.out.Library {
+		l.boxStreamHandles()
+	}
 	l.completeMethodSets()
 	l.entry()
 	for _, f := range l.out.Funcs {
@@ -436,6 +439,31 @@ func (l *Lowerer) entry() {
 	}
 	b.Term = &ir.Return{}
 	l.out.Entry = f
+}
+
+// boxStreamHandles gives exported root structs whose pointers have Read or
+// Write methods a method set, so library bindings can pass them to std/io.
+func (l *Lowerer) boxStreamHandles() {
+	for _, r := range l.prog.Roots {
+		if r.Types == nil {
+			continue
+		}
+		scope := r.Types.Scope()
+		for _, name := range scope.Names() {
+			tn, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok || !tn.Exported() || tn.IsAlias() {
+				continue
+			}
+			if _, ok := tn.Type().Underlying().(*types.Struct); !ok {
+				continue
+			}
+			ptr := types.NewPointer(tn.Type())
+			ms := types.NewMethodSet(ptr)
+			if ms.Lookup(tn.Pkg(), "Read") != nil || ms.Lookup(tn.Pkg(), "Write") != nil {
+				l.ts.Of(ptr).Boxed = true
+			}
+		}
+	}
 }
 
 // completeMethodSets fills the method set of every boxed type, creating

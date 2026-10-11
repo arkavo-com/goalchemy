@@ -49,6 +49,12 @@ func (e *emitter) library() (string, error) {
 	}
 	names := map[*ir.Type]string{}
 	used := map[string]bool{"LibraryError": true, "CallOptions": true, "Callback": true, "LogRecord": true, "LogHandler": true}
+	if libraryStreams(e.p, abi) {
+		b.WriteString("export { SourceStream } from './rt/runtime/library.ts';\nexport type { SourceReader, SourceWriter, SourceSeeker, SourceCloser } from './rt/runtime/library.ts';\n")
+		for _, n := range []string{"SourceStream", "SourceReader", "SourceWriter", "SourceSeeker", "SourceCloser"} {
+			used[n] = true
+		}
+	}
 	handleElems := map[*ir.Type]bool{}
 	for _, h := range abi.Handles {
 		if used[h.Name] {
@@ -70,6 +76,9 @@ func (e *emitter) library() (string, error) {
 	typ = func(t *ir.Type) string {
 		if h := abi.Handle(t); h != nil {
 			return h.Name + " | null"
+		}
+		if k := ir.StreamKind(t); k != "" {
+			return "(" + streamType(ir.KindOps(k)) + ") | null"
 		}
 		if n := names[t]; n != "" {
 			return n
@@ -212,7 +221,18 @@ func (e *emitter) library() (string, error) {
 			if i == len(f.Sig.Results)-1 && sourceError(t) {
 				continue
 			}
-			if abi.Handle(t) == nil {
+			if abi.Handle(t) == nil && ir.StreamKind(t) == "" {
+				converter(t)
+			}
+		}
+	}
+	if view := e.p.HostIOFunc("ReadView"); view != nil {
+		for _, name := range []string{"ReadView", "WriteView", "SeekView"} {
+			f := e.p.HostIOFunc(name)
+			for _, t := range f.Sig.Params[1:] {
+				converter(t)
+			}
+			for _, t := range f.Sig.Results[:len(f.Sig.Results)-1] {
 				converter(t)
 			}
 		}
@@ -275,6 +295,57 @@ func (e *emitter) library() (string, error) {
 		}
 		return "(ctx,fresh)=>fresh?rt.librarySequence(" + init + ",()=>" + call + "):" + call
 	}
+	streamOps := func(name string, ops ir.StreamOps, obj string, closeRun string) {
+		call := func(fn string, args []string, outs string) string {
+			f := e.p.HostIOFunc(fn)
+			return fmt.Sprintf("rt.runLibraryCall({},libraryState,[h],%s,(inst,rv)=>[%s,sourceFailure(rv[%d])]).then(o=>{if(o[%d]!==null)throw o[%d];return o;})",
+				frame(f, append([]string{obj}, args...)), outs, len(f.Sig.Results)-1, len(f.Sig.Results)-1, len(f.Sig.Results)-1)
+		}
+		conv := func(fn string, i int, dir string) string {
+			f := e.p.HostIOFunc(fn)
+			t := f.Sig.Params
+			if dir == "output$" {
+				t = f.Sig.Results
+			}
+			return e.names.Type(t[i].U(), dir)
+		}
+		fmt.Fprintf(&b, "const %s:rt.StreamOps={\n", name)
+		if ops.Read {
+			fmt.Fprintf(&b, "read:(h,n)=>%s.then(o=>[(o[0] as Uint8Array|null)??new Uint8Array(0),o[1] as boolean]),\n",
+				call("ReadView", []string{conv("ReadView", 1, "input$") + "(BigInt(n))"}, conv("ReadView", 0, "output$")+"(rv[0]),rv[1]"))
+		}
+		if ops.Write {
+			fmt.Fprintf(&b, "write:(h,d)=>%s.then(o=>Number(o[0])),\n",
+				call("WriteView", []string{conv("WriteView", 1, "input$") + "(d)"}, conv("WriteView", 0, "output$")+"(rv[0])"))
+		}
+		if ops.Seek {
+			fmt.Fprintf(&b, "seek:(h,off,whence)=>%s.then(o=>o[0] as bigint),\n",
+				call("SeekView", []string{conv("SeekView", 1, "input$") + "(off)", conv("SeekView", 2, "input$") + "(BigInt(whence))"}, conv("SeekView", 0, "output$")+"(rv[0])"))
+		}
+		fmt.Fprintf(&b, "close:h=>rt.closeHandle(h,libraryState,%s,sourceFailure),\n};\n", closeRun)
+	}
+	kinds := map[string]bool{}
+	for _, f := range funcs {
+		for _, t := range f.Sig.Results {
+			if k := ir.StreamKind(t); k != "" && !kinds[k] {
+				kinds[k] = true
+				run := "null"
+				if ir.StreamCloses(k) {
+					run = frame(e.p.HostIOFunc("CloseView"), []string{"rt.obj(h)"})
+				}
+				streamOps("streamOps$"+k, ir.KindOps(k), "rt.obj(h)", run)
+			}
+		}
+	}
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			run := "null"
+			if h.Close != nil {
+				run = frame(h.Close, []string{"rt.obj(h)"})
+			}
+			streamOps("streamOps$"+h.Name, h.Stream, "rt.box("+e.td(h.Ptr)+",rt.obj(h))", run)
+		}
+	}
 	for _, h := range abi.Handles {
 		fmt.Fprintf(&b, "/** Handle to a source *%s owned by a library instance. Call close() when\n * done; a collected handle is released without running Close. */\nexport class %s {\nreadonly [H]:rt.Handle;\n/** @internal */\nconstructor(h:rt.Handle){this[H]=h;}\n", h.Name, h.Name)
 		run := "null"
@@ -282,6 +353,15 @@ func (e *emitter) library() (string, error) {
 			run = frame(h.Close, []string{"rt.obj(this[H])"})
 		}
 		fmt.Fprintf(&b, "/** Runs the source Close, if any, and releases the handle. Queued calls\n * fail and an active call is canceled first. */\nclose():Promise<void>{return rt.closeHandle(this[H],libraryState,%s,sourceFailure);}\n[Symbol.asyncDispose]():Promise<void>{return this.close();}\n", run)
+		if h.Stream.Any() {
+			fmt.Fprintf(&b, "/** The handle as a stream; each operation is a call on the handle and\n * close() closes the handle. */\nio():%s{return new rt.SourceStream(this[H],streamOps$%s);}\n", streamType(h.Stream), h.Name)
+			if h.Stream.Read {
+				b.WriteString("/** A web ReadableStream over the handle's Read. */\nstream(chunkSize?:number):ReadableStream<Uint8Array>{return this.io().stream(chunkSize);}\n[Symbol.asyncIterator]():AsyncIterator<Uint8Array>{return this.io()[Symbol.asyncIterator]();}\n")
+			}
+			if h.Stream.Write {
+				b.WriteString("/** A web WritableStream into the handle's Write; closing it closes the handle. */\nwritable():WritableStream<Uint8Array>{return this.io().writable();}\n")
+			}
+		}
 		for _, f := range h.Methods {
 			if err := e.libraryWrapper(&b, abi, ir.MethodName(f), h, f, typ, frame); err != nil {
 				return "", err
@@ -373,6 +453,10 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 				fmt.Fprintf(b, "wrap$%s(inst,rv[%d]),", h.Name, i)
 				continue
 			}
+			if k := ir.StreamKind(results[i]); k != "" {
+				fmt.Fprintf(b, "rt.wrap(inst,rv[%d],\"io.%s\",h=>new rt.SourceStream(h,streamOps$%s)),", i, k, k)
+				continue
+			}
 			fmt.Fprintf(b, "%s(rv[%d]),", e.names.Type(results[i].U(), "output$"), i)
 		}
 		if hasErr {
@@ -390,4 +474,30 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		b.WriteString("}\n")
 	}
 	return nil
+}
+
+// streamType is the TypeScript type of a source stream with ops.
+func streamType(ops ir.StreamOps) string {
+	var parts []string
+	if ops.Read {
+		parts = append(parts, "rt.SourceReader")
+	}
+	if ops.Write {
+		parts = append(parts, "rt.SourceWriter")
+	}
+	if ops.Seek {
+		parts = append(parts, "rt.SourceSeeker")
+	}
+	return strings.Join(append(parts, "rt.SourceCloser", "AsyncDisposable"), " & ")
+}
+
+// libraryStreams reports whether a library returns std/io streams or has
+// handles usable as streams.
+func libraryStreams(p *ir.Program, abi *ir.LibraryABI) bool {
+	for _, h := range abi.Handles {
+		if h.Stream.Any() {
+			return true
+		}
+	}
+	return p.StreamResult() != ""
 }

@@ -19,6 +19,20 @@ type Handle struct {
 	// Close is the source Close() error method, if any. Host Close runs it
 	// before releasing the handle.
 	Close *Func
+	// Stream lists the std/io methods of *T when it is a reader or writer,
+	// which hosts can use through their native stream idiom.
+	Stream StreamOps
+}
+
+// StreamOps lists the std/io operations a host stream view supports.
+type StreamOps struct{ Read, Write, Seek, Close bool }
+
+// Any reports whether the view reads or writes.
+func (o StreamOps) Any() bool { return o.Read || o.Write }
+
+// KindOps returns the operations of a std/io interface kind.
+func KindOps(kind string) StreamOps {
+	return StreamOps{StreamReads(kind), StreamWrites(kind), StreamSeeks(kind), StreamCloses(kind)}
 }
 
 // LibraryABI describes the handles reachable from a library's exports.
@@ -93,6 +107,41 @@ func (p *Program) StreamAdapter(kind string) *Func {
 	return nil
 }
 
+// HostIOFunc returns the hostio function name, such as "ReadView", or nil.
+func (p *Program) HostIOFunc(name string) *Func {
+	for _, f := range p.Funcs {
+		if f.Pkg == HostIOPackage && f.Recv == nil && f.Name == "hostio."+name {
+			return f
+		}
+	}
+	return nil
+}
+
+// streamResults reports whether std/io results can cross as source streams.
+func (p *Program) streamResults() bool { return p.HostIOFunc("ReadView") != nil }
+
+func isBytes(t *Type) bool {
+	u := t.U()
+	return u.Kind == KSlice && u.Elem.U().Kind == KInt && u.Elem.U().Int == U8
+}
+
+func isInt64(t *Type) bool { u := t.U(); return u.Kind == KInt && u.Int == I64 }
+
+// streamMethod reports whether f has the std/io signature of its name.
+func streamMethod(f *Func) bool {
+	ps, rs := f.Sig.Params[1:], f.Sig.Results
+	if len(rs) != 2 || !isInt64(rs[0]) || !(rs[1].Kind == KNamed && rs[1].Name == "error") {
+		return false
+	}
+	switch MethodName(f) {
+	case "Read", "Write":
+		return len(ps) == 1 && isBytes(ps[0])
+	case "Seek":
+		return len(ps) == 2 && isInt64(ps[0]) && isInt64(ps[1])
+	}
+	return false
+}
+
 // MethodName returns the source method name of a handle method.
 func MethodName(f *Func) string { return f.Name[strings.LastIndex(f.Name, ".")+1:] }
 
@@ -139,7 +188,7 @@ func (p *Program) LibraryHandles(value func(*Type) bool) (*LibraryABI, error) {
 		}
 		results := f.Sig.Results
 		for i, t := range results {
-			if !(i == len(results)-1 && isError(t)) && !crosses(t) {
+			if !(i == len(results)-1 && isError(t)) && !crosses(t) && !(StreamKind(t) != "" && p.streamResults()) {
 				return fmt.Errorf("unsupported result %s", t.Name)
 			}
 		}
@@ -158,7 +207,7 @@ func (p *Program) LibraryHandles(value func(*Type) bool) (*LibraryABI, error) {
 			}
 		}
 		for i, t := range f.Sig.Results {
-			if !(i == len(f.Sig.Results)-1 && isError(t)) && !ok(t) {
+			if !(i == len(f.Sig.Results)-1 && isError(t)) && !ok(t) && !(StreamKind(t) != "" && p.streamResults()) {
 				return false
 			}
 		}
@@ -197,6 +246,22 @@ func (p *Program) LibraryHandles(value func(*Type) bool) (*LibraryABI, error) {
 			}
 			h.Methods = append(h.Methods, f)
 		}
+		if !p.streamResults() {
+			continue
+		}
+		for _, f := range h.Methods {
+			if streamMethod(f) {
+				switch MethodName(f) {
+				case "Read":
+					h.Stream.Read = true
+				case "Write":
+					h.Stream.Write = true
+				case "Seek":
+					h.Stream.Seek = true
+				}
+			}
+		}
+		h.Stream.Close = h.Close != nil
 	}
 	return a, nil
 }
@@ -207,4 +272,26 @@ func isHandleShape(t *Type, roots map[string]bool) bool {
 	}
 	e := t.Elem
 	return e.Kind == KNamed && roots[e.Pkg] && token.IsExported(e.Obj) && e.U().Kind == KStruct
+}
+
+// StreamResult returns the std/io interface name of the first stream result
+// of an export or exported root method, or "".
+func (p *Program) StreamResult() string {
+	roots := map[string]bool{}
+	for _, pkg := range p.Packages {
+		if pkg.Root {
+			roots[pkg.Path] = true
+		}
+	}
+	for _, f := range p.Funcs {
+		if !roots[f.Pkg] || !token.IsExported(MethodName(f)) {
+			continue
+		}
+		for _, t := range f.Sig.Results {
+			if k := StreamKind(t); k != "" {
+				return k
+			}
+		}
+	}
+	return ""
 }
