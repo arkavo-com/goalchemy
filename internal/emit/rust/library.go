@@ -218,7 +218,7 @@ func (e *emitter) library() (string, error) {
 			params = params[1:]
 		}
 		for _, t := range params {
-			if !sourceContext(t) && abi.Handle(t) == nil {
+			if !sourceContext(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				convert(t)
 			}
 		}
@@ -228,7 +228,7 @@ func (e *emitter) library() (string, error) {
 			}
 		}
 	}
-	b.WriteString("pub use rt::{Operation, CallOptions, LibraryError, ErrorKind, Cancellation, Provider, ProviderRequest, ProviderError, HostWire, set_log_handler, LogRecord, LogHandler, set_library_warn, WarningHandler};\nfn source_failure(v: &V) -> LibraryError {\nif veq(v,&context_canceled()) {return LibraryError::new(ErrorKind::Canceled,\"context canceled\");}\nif veq(v,&context_deadline_exceeded()) {return LibraryError::new(ErrorKind::DeadlineExceeded,\"context deadline exceeded\");}\n")
+	b.WriteString("pub use rt::{Operation, CallOptions, LibraryError, ErrorKind, Cancellation, Provider, ProviderRequest, ProviderError, HostWire, set_log_handler, LogRecord, LogHandler, set_library_warn, WarningHandler, Stream};\nfn source_failure(v: &V) -> LibraryError {\nif veq(v,&context_canceled()) {return LibraryError::new(ErrorKind::Canceled,\"context canceled\");}\nif veq(v,&context_deadline_exceeded()) {return LibraryError::new(ErrorKind::DeadlineExceeded,\"context deadline exceeded\");}\n")
 	var errorTypes []*ir.Type
 	for _, t := range e.p.Types.All {
 		if t.Kind == ir.KPointer && t.Elem.U().Kind == ir.KStruct && libraryValue(t.Elem, map[*ir.Type]bool{}) && e.tds[t] {
@@ -303,7 +303,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		return typ(t)
 	}
 	params := f.Sig.Params
-	var ps, args, hs, pre []string
+	var ps, args, hs, pre, streams []string
 	if recv != nil {
 		params = params[1:]
 		ps = append(ps, "&self")
@@ -317,6 +317,13 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 			continue
 		}
 		a := fmt.Sprintf("a%d", i)
+		if k := ir.StreamKind(t); k != "" {
+			ps = append(ps, a+": Option<Stream>")
+			pre = append(pre, fmt.Sprintf("let s%d = match library_stream(%s, %q) { Ok(s) => s, Err(e) => return Operation::settled(Err(e)) };", i, a, k))
+			args = append(args, fmt.Sprintf("{ let id = ids.lock().unwrap()[%d]; if id == 0 { V::Nil } else { %s(V::Int(id)) } }", len(streams), e.symbol(e.p.StreamAdapter(k).Sym, "f_")))
+			streams = append(streams, fmt.Sprintf("s%d", i))
+			continue
+		}
 		ps = append(ps, a+": "+ptyp(t, true))
 		if abi.Handle(t) != nil {
 			pre = append(pre, fmt.Sprintf("let h%d = %s.map(|x| x.0.clone());", i+1, a))
@@ -354,6 +361,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		output = fmt.Sprintf("if !rv[%d].is_nil() {return Err(source_failure(&rv[%d]));}\n", n, n)
 	}
 	output += "Ok(" + out + ")"
-	fmt.Fprintf(b, "pub fn %s(%s) -> Operation<%s> {\n%s\nOperation::submit_handles(options, vec![%s], None, move |options, inst, fresh| %s)\n}\n",
-		name, strings.Join(ps, ","), result, strings.Join(pre, "\n"), strings.Join(hs, ","), owner(f, args, output))
+	pre = append(pre, fmt.Sprintf("let ids = std::sync::Arc::new(std::sync::Mutex::new(vec![0i64; %d]));", len(streams)))
+	fmt.Fprintf(b, "pub fn %s(%s) -> Operation<%s> {\n%s\nOperation::submit_handles(options, vec![%s], None, vec![%s], ids.clone(), move |options, inst, fresh| %s)\n}\n",
+		name, strings.Join(ps, ","), result, strings.Join(pre, "\n"), strings.Join(hs, ","), strings.Join(streams, ","), owner(f, args, output))
 }

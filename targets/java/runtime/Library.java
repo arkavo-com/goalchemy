@@ -71,7 +71,8 @@ public final class Library {
         Object globals;final Native.State nativeState=new Native.State();
         final java.util.IdentityHashMap<Object,Object[]> objects=new java.util.IdentityHashMap<>();
         int live;boolean poisoned,retired;
-        void retireNow(){if(retired)return;retired=true;globals=null;objects.clear();try{nativeState.retire();}catch(Throwable e){}}
+        final java.util.LinkedHashMap<String,Callback.Provider> streams=new java.util.LinkedHashMap<>();long nextStream;
+        void retireNow(){if(retired)return;retired=true;globals=null;objects.clear();streams.clear();try{nativeState.retire();}catch(Throwable e){}}
     }
     /** The host's reference to one source object of an instance. */
     public static final class Handle {
@@ -112,6 +113,7 @@ public final class Library {
         final Operation<T> op; final java.util.function.BiFunction<StdContextErr.Context,Boolean,TaskSpawn.Frame> entry;
         final State state;final java.util.function.BiFunction<Instance,Object[],T> capture;final Callback.Registration[] callbacks;
         final Handle[] handles;final Handle closing;final Handle self;
+        Callback.Provider[] streams=new Callback.Provider[0];long[] ids=new long[0];
         Job(Operation<T> op,java.util.function.BiFunction<StdContextErr.Context,Boolean,TaskSpawn.Frame> entry,State state,
             java.util.function.BiFunction<Instance,Object[],T> capture,Callback.Registration[] callbacks,Handle[] handles,Handle closing) {
             this.op=op;this.entry=entry;this.state=state;this.capture=capture;this.callbacks=callbacks;this.handles=handles;this.closing=closing;
@@ -140,7 +142,7 @@ public final class Library {
                 value=TaskSpawn.driveLibrary(()-> {
                     owns[0]=true;
                     if(isFresh)state.reset.run();else state.load.accept(owner.globals);
-                    Native.install(owner.nativeState);Callback.install(callbacks);
+                    Native.install(owner.nativeState);Callback.install(registry(owner,callbacks,streams,ids));
                     ctx[0]=(StdContextErr.Context)StdContextWithCancel.stdContextWithCancel(StdContextErr.BACKGROUND)[0];
                     return entry.apply(ctx[0],isFresh);
                 },rv-> {
@@ -204,13 +206,95 @@ public final class Library {
     public static <T> Operation<T> submit(Options options,State state,Handle[] handles,
                                          java.util.function.BiFunction<StdContextErr.Context,Boolean,TaskSpawn.Frame> entry,
                                          java.util.function.BiFunction<Instance,Object[],T> capture,Handle closing) {
+        return submit(options,state,handles,entry,capture,closing,new Callback.Provider[0],new long[0]);
+    }
+    /** streams serve host std/io arguments; each is registered on the
+     * instance under a fresh id, written to ids before entry runs. */
+    public static <T> Operation<T> submit(Options options,State state,Handle[] handles,
+                                         java.util.function.BiFunction<StdContextErr.Context,Boolean,TaskSpawn.Frame> entry,
+                                         java.util.function.BiFunction<Instance,Object[],T> capture,Handle closing,
+                                         Callback.Provider[] streams,long[] ids) {
+        if(STREAM_THREAD.get())return failed(new Failure("reentrant"));
         try {
             Callback.Registration[] callbacks=Callback.snapshot(options==null?null:options.callbacks);
             Operation<T> op=new Operation<>();Job<T> job=new Job<>(op,entry,state,capture,callbacks,handles,closing);op.job=job;
+            job.streams=streams;job.ids=ids;
             if(job.self!=null&&job.self.closed)throw new Failure("closed");
             enqueue(job);
             return op;
         } catch(Failure e) {return failed(e);}
+    }
+    private static Callback.Registration[] registry(Instance inst,Callback.Registration[] callbacks,Callback.Provider[] streams,long[] ids){
+        for(int i=0;i<streams.length;i++){
+            if(streams[i]==null)continue;
+            ids[i]=++inst.nextStream;inst.streams.put("goalchemy.stream."+inst.nextStream,streams[i]);
+        }
+        if(inst.streams.isEmpty())return callbacks;
+        var all=new java.util.ArrayList<>(java.util.Arrays.asList(callbacks));
+        for(var e:inst.streams.entrySet())all.add(new Callback.Registration(e.getKey(),e.getValue()));
+        return all.toArray(Callback.Registration[]::new);
+    }
+    static final ThreadLocal<Boolean> STREAM_THREAD=ThreadLocal.withInitial(()->false);
+    /** Adapts a host stream to the provider serving one std/io parameter:
+     * InputStream, OutputStream, SeekableByteChannel (seekable) or byte[]
+     * (seekable). Each operation runs on its own thread with copied buffers;
+     * end of stream becomes io.EOF. Returns null for a null stream. */
+    public static Callback.Provider stream(Object v,String kind){
+        if(v==null)return null;
+        Object s=v instanceof byte[] b?new java.nio.channels.SeekableByteChannel(){
+            final byte[] data=b.clone();long pos;boolean open=true;
+            public int read(java.nio.ByteBuffer dst){if(pos>=data.length)return -1;int n=(int)Math.min(dst.remaining(),data.length-pos);dst.put(data,(int)pos,n);pos+=n;return n;}
+            public int write(java.nio.ByteBuffer src){throw new java.nio.channels.NonWritableChannelException();}
+            public long position(){return pos;}
+            public java.nio.channels.SeekableByteChannel position(long p){pos=p;return this;}
+            public long size(){return data.length;}
+            public java.nio.channels.SeekableByteChannel truncate(long size){throw new java.nio.channels.NonWritableChannelException();}
+            public boolean isOpen(){return open;}
+            public void close(){open=false;}
+        }:v;
+        boolean reads=s instanceof java.io.InputStream||s instanceof java.nio.channels.ReadableByteChannel;
+        boolean writes=s instanceof java.io.OutputStream||s instanceof java.nio.channels.WritableByteChannel;
+        boolean seeks=s instanceof java.nio.channels.SeekableByteChannel;
+        if((kind.contains("Read")&&!reads)||(kind.contains("Write")&&!writes)||(kind.contains("Seek")&&!seeks))throw invalid();
+        Object stream=s;
+        return request->{
+            request.retain();
+            Thread.ofPlatform().daemon().name("goalchemy-stream").start(()->{
+                STREAM_THREAD.set(true);
+                byte[] reply;
+                try{reply=serve(stream,request.input());}
+                catch(Throwable e){String m=e.getMessage()==null?e.toString():e.getMessage();byte[] t=m.getBytes(java.nio.charset.StandardCharsets.UTF_8);reply=new byte[1+t.length];reply[0]=2;System.arraycopy(t,0,reply,1,t.length);}
+                finally{STREAM_THREAD.set(false);}
+                request.resolve(reply);
+            });
+        };
+    }
+    private static long streamInt(byte[] b,int at){long v=0;for(int i=0;i<8;i++)v=v<<8|(b[at+i]&0xff);return v;}
+    private static byte[] streamReply(long v){byte[] b=new byte[9];for(int i=8;i>=1;i--){b[i]=(byte)v;v>>=8;}return b;}
+    private static byte[] serve(Object s,byte[] req)throws java.io.IOException{
+        switch(req[0]){
+        case 'r':{
+            int n=(int)streamInt(req,1);if(n<0||n>=128<<10)throw new java.io.IOException("hostio: malformed stream request");
+            byte[] buf=new byte[1+n];int k;
+            if(s instanceof java.io.InputStream in)k=n==0?0:in.read(buf,1,n);
+            else k=((java.nio.channels.ReadableByteChannel)s).read(java.nio.ByteBuffer.wrap(buf,1,n));
+            if(k<0)return new byte[]{1};
+            return java.util.Arrays.copyOf(buf,1+k);
+        }
+        case 'w':{
+            int n=req.length-1;
+            if(s instanceof java.io.OutputStream out){out.write(req,1,n);out.flush();}
+            else{var buf=java.nio.ByteBuffer.wrap(req,1,n);var ch=(java.nio.channels.WritableByteChannel)s;while(buf.hasRemaining())ch.write(buf);}
+            return streamReply(n);
+        }
+        case 's':{
+            var ch=(java.nio.channels.SeekableByteChannel)s;long off=streamInt(req,1);
+            long base=switch(req[9]){case 0->0;case 1->ch.position();case 2->ch.size();default->throw new java.io.IOException("Seek: invalid whence");};
+            long pos=base+off;if(pos<0)throw new java.io.IOException("Seek: negative position");ch.position(pos);return streamReply(pos);
+        }
+        case 'c':((java.io.Closeable)s).close();return new byte[]{0};
+        }
+        throw new java.io.IOException("hostio: malformed stream request");
     }
     private static void enqueue(Job<?> job){
         synchronized(queue) {

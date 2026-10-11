@@ -67,7 +67,7 @@ static gxc_value gxc_list_out(gxc_kind kind,size_t n) {
 static void gxc_name(gxc_value *v,size_t i,const char *name) {
  size_t n=strlen(name); v->names[i]=gxc_alloc(n+1); memcpy(v->names[i],name,n+1);
 }
-typedef struct gxc_instance {gx_V *globals,*objects;gxc_handle **handles;size_t count,cap,live;bool poisoned;uint64_t domain;} gxc_instance;
+typedef struct gxc_instance {gx_V *globals,*objects;gxc_handle **handles;size_t count,cap,live;bool poisoned;uint64_t domain;gxc_stream *streams;size_t nstreams;} gxc_instance;
 struct gxc_handle {gxc_instance *inst;size_t slot;const char *type;int close_entry;atomic_bool closed,cancel;bool released;};
 static gxc_instance *gxc_inst;
 static bool gxc_fresh,gxc_keep;
@@ -94,7 +94,7 @@ static gxc_value gxc_wrap(gx_V v,const char *type,int close_entry){
 static void gxc_retire(gxc_instance *in){
  if(gx_native_domain_release&&in->domain)gx_native_domain_release(in->domain);
  for(size_t i=0;i<in->count;i++)if(in->handles[i])in->handles[i]->inst=NULL;
- GC_FREE(in->globals);GC_FREE(in->objects);free(in->handles);free(in);
+ GC_FREE(in->globals);GC_FREE(in->objects);free(in->handles);free(in->streams);free(in);
 }
 /* Requires the serial lock. Returns true when the instance retired. */
 static bool gxc_release(gxc_handle *h){
@@ -103,6 +103,43 @@ static bool gxc_release(gxc_handle *h){
  if(--in->live)return false;
  gxc_retire(in);return true;
 }
+static int64_t gxc_stream_ids[256];
+static gxc_options gxc_merged;
+static const gxc_options *gxc_user;
+static void gxc_put(uint8_t *b,int64_t v){for(int i=7;i>=0;i--){b[i]=(uint8_t)v;v>>=8;}}
+static int64_t gxc_get(const uint8_t *b){int64_t v=0;for(int i=0;i<8;i++)v=(int64_t)((uint64_t)v<<8|b[i]);return v;}
+/* Serves hostio requests on a worker; the owner thread waits meanwhile. */
+static int gxc_serve(const gxc_stream *s,const uint8_t *req,size_t n,gxc_value *response){
+ char message[256]={0};int64_t r=-1;size_t len=1;uint8_t *out=NULL;
+ if(n==9&&req[0]=='r'&&s->read){int64_t want=gxc_get(req+1);if(want>=0&&want<128*1024){out=calloc(1,(size_t)want+1);if(out){r=s->read(s->state,out+1,(size_t)want,message);if(r>=0&&r<=want){len=1+(size_t)r;out[0]=r==0&&want>0?1:0;}else if(r>=0){r=-1;strcpy(message,"hostio: invalid read count");}}}}
+ else if(n>=1&&req[0]=='w'&&s->write){out=calloc(1,9);if(out){r=s->write(s->state,req+1,n-1,message);if(r>=0){len=9;gxc_put(out+1,r);}}}
+ else if(n==10&&req[0]=='s'&&s->seek){out=calloc(1,9);if(out){r=s->seek(s->state,gxc_get(req+1),req[9],message);if(r>=0){len=9;gxc_put(out+1,r);}}}
+ else if(n==1&&req[0]=='c'){out=calloc(1,1);r=s->close?s->close(s->state,message):0;}
+ else strcpy(message,"hostio: malformed stream request");
+ if(r<0){free(out);message[255]=0;len=1+strlen(message);out=malloc(len);if(!out)return 3;out[0]=2;memcpy(out+1,message,len-1);}
+ if(!out)return 3;
+ *response=(gxc_value){.kind=GXC_BYTES,.bytes=out,.length=len};return 0;
+}
+static int gxc_dispatch(void *state,const uint8_t *name,size_t name_length,const uint8_t *payload,size_t payload_length,const atomic_bool *canceled,gxc_value *response){
+ static const char prefix[]="goalchemy.stream.";gxc_instance *in=state;
+ if(name_length>sizeof prefix-1&&!memcmp(name,prefix,sizeof prefix-1)){
+  size_t id=0;for(size_t i=sizeof prefix-1;i<name_length;i++){if(name[i]<'0'||name[i]>'9')return 1;id=id*10+(name[i]-'0');}
+  if(!id||id>in->nstreams)return 1;
+  gxc_stream_thread=true;int rc=gxc_serve(&in->streams[id-1],payload,payload_length,response);gxc_stream_thread=false;return rc;
+ }
+ if(!gxc_user||!gxc_user->provider)return 1;
+ return gxc_user->provider(gxc_user->provider_state,name,name_length,payload,payload_length,canceled,response);
+}
+/* Registers the call's streams on its instance and routes callbacks. */
+static bool gxc_streams(const gxc_value *args,size_t count,const gxc_options **opts){
+ for(size_t i=0;i<count&&i<256;i++){gxc_stream_ids[i]=0;if(args[i].kind!=GXC_STREAM)continue;
+  gxc_stream *grown=realloc(gxc_inst->streams,(gxc_inst->nstreams+1)*sizeof(*grown));if(!grown)return false;
+  gxc_inst->streams=grown;grown[gxc_inst->nstreams++]=*args[i].stream;gxc_stream_ids[i]=(int64_t)gxc_inst->nstreams;}
+ if(!gxc_inst->nstreams)return true;
+ gxc_user=*opts;gxc_merged=*opts?**opts:(gxc_options){0};gxc_merged.provider=gxc_dispatch;gxc_merged.provider_state=gxc_inst;
+ *opts=&gxc_merged;return true;
+}
+static gx_V gxc_stream_arg(size_t i,gx_V (*adapt)(gx_V),gx_V zero){return gxc_stream_ids[i]?adapt(gx_int(gxc_stream_ids[i])):zero;}
 static void gxc_poll(void) {
  if((gxc_opts && gxc_opts->canceled && atomic_load(gxc_opts->canceled))||(gxc_self&&atomic_load(&gxc_self->cancel)))
   gx_cancel_ctx(gxc_context,gx_context_canceled());
@@ -235,7 +272,7 @@ static void gxc_poll(void) {
 	}
 	for _, en := range entries {
 		for _, t := range params(en) {
-			if !cContext(t) && abi.Handle(t) == nil {
+			if !cContext(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				convert(t)
 			}
 		}
@@ -282,6 +319,9 @@ static void gxc_poll(void) {
 				as = append(as, "gxc_context")
 			} else if abi.Handle(t) != nil {
 				as = append(as, fmt.Sprintf("gxc_obj(&gxc_args[%d])", index))
+				index++
+			} else if k := ir.StreamKind(t); k != "" {
+				as = append(as, fmt.Sprintf("gxc_stream_arg(%d,f_%s,%s)", index, e.names.Symbol(e.p.StreamAdapter(k).Sym), e.zero(t)))
 				index++
 			} else {
 				as = append(as, fmt.Sprintf("gxc_in_%s(&gxc_args[%d])", e.names.Type(t.U(), ""), index))
@@ -331,7 +371,8 @@ static void gxc_poll(void) {
  }
 }
 /* Runs one entry; requires the serial lock and validated handles. */
-static int gxc_run(int which,const gxc_value *args,const gxc_options *opts,gxc_value *result,gxc_error *error){
+static int gxc_run(int which,const gxc_value *args,size_t count,const gxc_options *opts,gxc_value *result,gxc_error *error){
+ const gxc_options *user=opts;if(!gxc_streams(args,count,&opts)){error->kind=3;return 3;}
  gxc_args=args;gxc_opts=opts;gxc_active_options=opts;gxc_result=result;gxc_failure=error;gxc_export=which;
  gxc_output_bytes=0;gxc_output_nodes=0;gxc_output_depth=0;gxc_keep=false;gxc_left=0;
  uint8_t *report=NULL;size_t n=0;
@@ -339,7 +380,8 @@ static int gxc_run(int which,const gxc_value *args,const gxc_options *opts,gxc_v
  gxc_allocation_release(rc!=0);
  if(rc) {int kind=error->kind?error->kind:rc;memset(result,0,sizeof(*result));memset(error,0,sizeof(*error));error->kind=kind;error->message=(gxc_value){.kind=GXC_BYTES,.bytes=report,.length=n};}
  else free(report);
- if(!rc&&!gxc_fresh&&error->kind==1&&((opts&&opts->canceled&&atomic_load(opts->canceled))||(gxc_self&&atomic_load(&gxc_self->cancel)))){gxc_error_free(error);memset(result,0,sizeof(*result));error->kind=6;}
+ gxc_user=NULL;
+ if(!rc&&!gxc_fresh&&error->kind==1&&((user&&user->canceled&&atomic_load(user->canceled))||(gxc_self&&atomic_load(&gxc_self->cancel)))){gxc_error_free(error);memset(result,0,sizeof(*result));error->kind=6;}
  if(!rc&&gxc_keep&&gxc_left){char m[96];snprintf(m,sizeof m,"%zu goroutine(s) still running when a handle call returned were abandoned",gxc_left);gxc_warn(m);}
  gxc_context=gx_nil();gxc_args=NULL;gxc_opts=NULL;gxc_active_options=NULL;gxc_result=NULL;gxc_failure=NULL;
  return rc;
@@ -355,9 +397,10 @@ static int gxc_serial_lock(const gxc_options *opts,gxc_handle *self){
 int goalchemy_invoke(const char *name,const gxc_value *args,size_t count,const gxc_options *opts,gxc_value *result,gxc_error *error) {
  if(!result || !error) return 5;
  memset(result,0,sizeof(*result)); memset(error,0,sizeof(*error));
+ if(gxc_stream_thread) return error->kind=10;
  if(gxc_callback_thread) return error->kind=3;
  if(!name || count>256 || (count && !args)) return error->kind=5;
- int which=-1; size_t expected=0; const char *recv=NULL; const char *types[256]={0};
+ int which=-1; size_t expected=0; const char *recv=NULL; const char *types[256]={0}; const char *streams[256]={0};
 `)
 	for k, en := range entries {
 		if en.close {
@@ -376,6 +419,9 @@ int goalchemy_invoke(const char *name,const gxc_value *args,size_t count,const g
 			if h := abi.Handle(t); h != nil {
 				types = append(types, fmt.Sprintf("types[%d]=%q;", n, h.Name))
 			}
+			if k := ir.StreamKind(t); k != "" {
+				types = append(types, fmt.Sprintf("streams[%d]=%q;", n, k))
+			}
 			n++
 		}
 		r := "NULL"
@@ -390,7 +436,11 @@ int goalchemy_invoke(const char *name,const gxc_value *args,size_t count,const g
   if(args[i].kind==GXC_NIL) {if(i==0&&recv)return error->kind=5;continue;}
   if(args[i].kind!=GXC_HANDLE||!args[i].handle||strcmp(args[i].handle->type,types[i])) return error->kind=5;
   if(!self) self=args[i].handle;
- } else if(args[i].kind==GXC_HANDLE) return error->kind=5;
+ } else if(streams[i]) {
+  if(args[i].kind==GXC_NIL) continue;
+  const gxc_stream *s=args[i].stream;
+  if(args[i].kind!=GXC_STREAM||!s||(strstr(streams[i],"Read")&&!s->read)||(strstr(streams[i],"Write")&&!s->write)||(strstr(streams[i],"Seek")&&!s->seek)) return error->kind=5;
+ } else if(args[i].kind==GXC_HANDLE||args[i].kind==GXC_STREAM) return error->kind=5;
  if(self&&atomic_load(&self->closed)) return error->kind=7;
  gxc_value *snapshot=calloc(count?count:1,sizeof(*snapshot)); if(!snapshot) return error->kind=3;
  int rc=0; for(size_t i=0;i<count;i++) {rc=gxc_value_copy(&snapshot[i],&args[i]);if(rc)break;}
@@ -411,7 +461,7 @@ int goalchemy_invoke(const char *name,const gxc_value *args,size_t count,const g
    if(!in){in=calloc(1,sizeof(*in));if(!in)rc=3;}
    if(!rc){
     gxc_inst=in;gxc_self=self;
-    rc=gxc_run(which,snapshot,opts,result,error);
+    rc=gxc_run(which,snapshot,count,opts,result,error);
     if(!gxc_fresh&&(rc==2||rc==3||rc==4))in->poisoned=true;
     if(gxc_fresh&&(rc||!gxc_keep))free(in);
     gxc_inst=NULL;gxc_self=NULL;
@@ -437,7 +487,7 @@ int gxc_handle_close(gxc_handle *h,gxc_error *error){
    gxc_value recv={.kind=GXC_HANDLE,.handle=h},result={0};
    atomic_store(&h->cancel,false);
    gxc_fresh=false;gxc_inst=in;gxc_self=NULL;
-   rc=gxc_run(h->close_entry,&recv,NULL,&result,error);
+   rc=gxc_run(h->close_entry,&recv,1,NULL,&result,error);
    if(rc==2||rc==3||rc==4)in->poisoned=true;
    gxc_inst=NULL;gxc_value_free(&result);
   }

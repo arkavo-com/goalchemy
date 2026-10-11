@@ -42,7 +42,8 @@ public static class Library
         internal object globals;internal readonly Native.State nativeState=new();
         internal readonly Dictionary<object,(Handle handle,WeakReference<object> wrapper)> objects=new(System.Collections.Generic.ReferenceEqualityComparer.Instance);
         internal int live;internal bool poisoned,retired;
-        internal void RetireNow(){if(retired)return;retired=true;globals=null;objects.Clear();try{nativeState.retire();}catch(Exception){}}
+        internal readonly Dictionary<string,Callback.Provider> streams=new();internal long nextStream;
+        internal void RetireNow(){if(retired)return;retired=true;globals=null;objects.Clear();streams.Clear();try{nativeState.retire();}catch(Exception){}}
     }
     /// The host's reference to one source object of an instance.
     public sealed class Handle
@@ -82,6 +83,7 @@ public static class Library
     {
         readonly Operation<T> op; readonly Func<GoContext,bool,Frame> entry; readonly State state; readonly Func<Instance,object[],T> capture; readonly Callback.Registration[] callbacks;
         readonly Handle[] handles;readonly Handle closing;readonly Handle self;
+        internal Callback.Provider[] streams=Array.Empty<Callback.Provider>();internal long[] ids=Array.Empty<long>();
         internal System.Threading.CancellationTokenRegistration cancellation;
         internal Job(Operation<T> op,Func<GoContext,bool,Frame> entry,State state,Func<Instance,object[],T> capture,Callback.Registration[] callbacks,Handle[] handles,Handle closing)
         {
@@ -112,7 +114,7 @@ public static class Library
                 if(self!=null){self.active=this;self.cancelActive=()=>op.Cancel();if(self.closed)throw new Failure("closed");}
                 value=R.driveLibrary(() => {
                         owns=true;if(fresh)state.reset();else state.load(owner.globals);
-                        Native.install(owner.nativeState);Callback.install(callbacks);ctx=(GoContext)R.stdContextWithCancel(R.BACKGROUND)[0];return entry(ctx,fresh);
+                        Native.install(owner.nativeState);Callback.install(Registry(owner,callbacks,streams,ids));ctx=(GoContext)R.stdContextWithCancel(R.BACKGROUND)[0];return entry(ctx,fresh);
                     },
                     rv => {
                         if(op.stopped)throw new Failure("canceled");
@@ -153,11 +155,15 @@ public static class Library
     public static Operation<T> submit<T>(Options options,Func<GoContext,Frame> entry,Action reset,Func<object[],T> capture)
         =>submit<T>(options,new State(reset,reset,()=>null,_=>{}),Array.Empty<Handle>(),(ctx,fresh)=>entry(ctx),(inst,rv)=>capture(rv),null);
     public static Operation<T> submit<T>(Options options,State state,Handle[] handles,Func<GoContext,bool,Frame> entry,Func<Instance,object[],T> capture,Handle closing)
+        =>submit<T>(options,state,handles,entry,capture,closing,Array.Empty<Callback.Provider>(),Array.Empty<long>());
+    /// streams serve host std/io arguments; each is registered on the instance under a fresh id, written to ids before entry runs.
+    public static Operation<T> submit<T>(Options options,State state,Handle[] handles,Func<GoContext,bool,Frame> entry,Func<Instance,object[],T> capture,Handle closing,Callback.Provider[] streams,long[] ids)
     {
+        if(streamThread)return failed<T>(new Failure("reentrant"));
         Job<T> job=null;
         try
         {
-            var callbacks=Callback.snapshot(options?.Callbacks); var op=new Operation<T>();job=new Job<T>(op,entry,state,capture,callbacks,handles,closing);op.job=job;
+            var callbacks=Callback.snapshot(options?.Callbacks); var op=new Operation<T>();job=new Job<T>(op,entry,state,capture,callbacks,handles,closing);op.job=job;job.streams=streams;job.ids=ids;
             if(job.Self!=null&&job.Self.closed)throw new Failure("closed");
             job.Register(options?.Cancellation ?? default);
             Enqueue(job);
@@ -165,6 +171,45 @@ public static class Library
         }
         catch(Failure e){try{job?.ReleaseRegistration();}catch(Exception cleanup){return failed<T>(new Failure("host_fault",null,cleanup));}return failed<T>(e);}
         catch(Exception e){try{job?.ReleaseRegistration();}catch(Exception cleanup){e=cleanup;}return failed<T>(new Failure("host_fault",null,e));}
+    }
+    static Callback.Registration[] Registry(Instance inst,Callback.Registration[] callbacks,Callback.Provider[] streams,long[] ids)
+    {
+        for(int i=0;i<streams.Length;i++){if(streams[i]==null)continue;ids[i]=++inst.nextStream;inst.streams["goalchemy.stream."+inst.nextStream]=streams[i];}
+        if(inst.streams.Count==0)return callbacks;
+        var all=new List<Callback.Registration>(callbacks);foreach(var e in inst.streams)all.Add(new Callback.Registration(e.Key,e.Value));return all.ToArray();
+    }
+    [ThreadStatic] static bool streamThread;
+    /// Adapts a host System.IO.Stream, or byte[] (read-only, seekable), to the provider serving one std/io parameter.
+    /// Each operation runs on its own thread with copied buffers; end of stream becomes io.EOF. Returns null for null.
+    public static Callback.Provider stream(object v,string kind)
+    {
+        if(v==null)return null;
+        var s=v is byte[] b?new System.IO.MemoryStream((byte[])b.Clone(),false):v as System.IO.Stream;
+        if(s==null||(kind.Contains("Read")&&!s.CanRead)||(kind.Contains("Write")&&!s.CanWrite)||(kind.Contains("Seek")&&!s.CanSeek))throw invalid();
+        return request=>{
+            request.Retain();
+            var worker=new System.Threading.Thread(()=>{
+                streamThread=true;byte[] reply;
+                try{reply=Serve(s,request.Input);}
+                catch(Exception e){var m=System.Text.Encoding.UTF8.GetBytes(e.Message);reply=new byte[1+m.Length];reply[0]=2;m.CopyTo(reply,1);}
+                finally{streamThread=false;}
+                request.Resolve(reply);
+            }){IsBackground=true,Name="goalchemy-stream"};
+            worker.Start();
+        };
+    }
+    static long StreamInt(byte[] b,int at){long v=0;for(int i=0;i<8;i++)v=v<<8|b[at+i];return v;}
+    static byte[] StreamReply(long v){var b=new byte[9];for(int i=8;i>=1;i--){b[i]=(byte)v;v>>=8;}return b;}
+    static byte[] Serve(System.IO.Stream s,byte[] req)
+    {
+        switch((char)req[0])
+        {
+        case 'r':{long n=StreamInt(req,1);if(n<0||n>=128<<10)throw new System.IO.IOException("hostio: malformed stream request");var buf=new byte[1+n];int k=n==0?0:s.Read(buf,1,(int)n);if(k==0&&n>0)return new byte[]{1};Array.Resize(ref buf,1+k);return buf;}
+        case 'w':{s.Write(req,1,req.Length-1);s.Flush();return StreamReply(req.Length-1);}
+        case 's':{long off=StreamInt(req,1);var origin=req[9] switch{0=>System.IO.SeekOrigin.Begin,1=>System.IO.SeekOrigin.Current,2=>System.IO.SeekOrigin.End,_=>throw new System.IO.IOException("Seek: invalid whence")};return StreamReply(s.Seek(off,origin));}
+        case 'c':s.Dispose();return new byte[]{0};
+        }
+        throw new System.IO.IOException("hostio: malformed stream request");
     }
     static void Enqueue(IJob job)
     {
