@@ -51,6 +51,58 @@ impl std::io::Write for Capped {
     }
 }
 
+pub struct HttpTls {
+    identity: Option<reqwest::Identity>,
+    roots: Vec<reqwest::Certificate>,
+    insecure: bool,
+}
+
+/// Parses DoWith options. Err(false) is an invalid request and Err(true) a
+/// credential or root CA that does not parse.
+pub fn http_tls(options: &[Vec<u8>]) -> Result<Option<HttpTls>, bool> {
+    if options.is_empty() {
+        return Ok(None);
+    }
+    if options.len() % 2 != 0 {
+        return Err(false);
+    }
+    let mut values: Vec<(&[u8], &[u8])> = Vec::new();
+    let mut total = 0usize;
+    for p in options.chunks(2) {
+        total = total.saturating_add(p[0].len() + p[1].len());
+        let known = [&b"client-cert"[..], b"client-key", b"root-cas", b"insecure-skip-verify"].contains(&p[0].as_slice());
+        if total > 1 << 20 || !known || values.iter().any(|(n, _)| *n == p[0].as_slice()) {
+            return Err(false);
+        }
+        values.push((&p[0], &p[1]));
+    }
+    let get = |name: &[u8]| values.iter().find(|(n, _)| *n == name).map(|(_, v)| *v);
+    let skip = get(b"insecure-skip-verify");
+    if get(b"client-cert").is_some() != get(b"client-key").is_some() || skip.is_some_and(|v| v != b"true" && v != b"false") {
+        return Err(false);
+    }
+    let identity = match (get(b"client-cert"), get(b"client-key")) {
+        (Some(cert), Some(key)) => {
+            let mut pem = cert.to_vec();
+            pem.push(b'\n');
+            pem.extend_from_slice(key);
+            Some(reqwest::Identity::from_pem(&pem).map_err(|_| true)?)
+        }
+        _ => None,
+    };
+    let roots = match get(b"root-cas") {
+        Some(pem) => {
+            let roots = reqwest::Certificate::from_pem_bundle(pem).map_err(|_| true)?;
+            if roots.is_empty() {
+                return Err(true);
+            }
+            roots
+        }
+        None => Vec::new(),
+    };
+    Ok(Some(HttpTls { identity, roots, insecure: skip == Some(&b"true"[..]) }))
+}
+
 pub fn lib_http_do(
     t: &Rc<Task>,
     context: V,
@@ -60,6 +112,21 @@ pub fn lib_http_do(
     input: V,
     max: V,
     timeout: V,
+) {
+    http_do(t, context, method, url, headers, input, max, timeout, Vec::new())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn http_do(
+    t: &Rc<Task>,
+    context: V,
+    method: V,
+    url: V,
+    headers: V,
+    input: V,
+    max: V,
+    timeout: V,
+    options: Vec<Vec<u8>>,
 ) {
     let invalid = || std_errors_new(s(b"http: invalid request or limit"));
     if context.is_nil() {
@@ -162,10 +229,19 @@ pub fn lib_http_do(
                 reqwest::header::HeaderValue::from_static("gzip"),
             ));
         }
-        Ok((method, url, pairs, body, max.i() as usize, automatic))
+        let tls = match http_tls(&options) {
+            Ok(tls) => tls,
+            Err(false) => return Err("invalid".into()),
+            Err(true) => return Err("tls".into()),
+        };
+        Ok((method, url, pairs, body, max.i() as usize, automatic, tls))
     })();
-    let (method, url, pairs, body, max, automatic) = match snapshot {
+    let (method, url, pairs, body, max, automatic, tls) = match snapshot {
         Ok(v) => v,
+        Err(e) if e == "tls" => {
+            t.set_rv(http_zero(std_errors_new(s(b"http: invalid TLS option"))));
+            return;
+        }
         Err(_) => {
             t.set_rv(http_zero(invalid()));
             return;
@@ -193,7 +269,10 @@ pub fn lib_http_do(
             .build()
             .unwrap_or_else(|e| host_fault(&format!("HTTP runtime acquisition: {e}")));
         let result=runtime.block_on(async move{
- let client=reqwest::Client::builder().http1_only().http1_max_headers(1024).redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never()).pool_max_idle_per_host(0).timeout(Duration::from_nanos(remaining as u64)).build().unwrap_or_else(|e|host_fault(&format!("HTTP client acquisition: {e}")));
+ let mut builder=reqwest::Client::builder().http1_only().http1_max_headers(1024).redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never()).pool_max_idle_per_host(0).timeout(Duration::from_nanos(remaining as u64));
+ let configured=tls.is_some();
+ if let Some(tls)=tls{if let Some(identity)=tls.identity{builder=builder.identity(identity)}if !tls.roots.is_empty(){builder=builder.tls_certs_merge(tls.roots)}builder=builder.tls_danger_accept_invalid_certs(tls.insecure)}
+ let client=match builder.build(){Ok(client)=>client,Err(_) if configured=>return Err("http: invalid TLS option"),Err(e)=>host_fault(&format!("HTTP client acquisition: {e}"))};
  let work=async move{
  let mut request=client.request(if method=="GET"{reqwest::Method::GET}else{reqwest::Method::POST},url);for (n,v) in pairs{request=request.header(n,v)}
  let mut response=request.body(body).send().await.map_err(|_|"http: transport failure")?;

@@ -9,6 +9,7 @@
 #include <openssl/core_names.h>
 #include <openssl/err.h>
 #include <openssl/x509.h>
+#include <openssl/ssl.h>
 #include <curl/curl.h>
 #include <stdatomic.h>
 #include <ctype.h>
@@ -111,7 +112,7 @@ int gcn_ecdh(void *private,void *public,uint8_t *out,size_t *size) {
 uint32_t gcn_crc32(const uint8_t *bytes,size_t n) {uLong crc=crc32(0L,Z_NULL,0);while(n){uInt chunk=n>UINT_MAX ? UINT_MAX:(uInt)n;crc=crc32(crc,bytes,chunk);bytes+=chunk;n-=chunk;}return (uint32_t)crc;}
 
 struct gcn_header { char *name;char *value;size_t sequence; };
-struct gcn_http { atomic_int canceled;uint8_t *body;size_t length,limit;struct gcn_header *headers;size_t count,header_bytes;int status;const char *error;int auto_gzip,decoded,line_status,z_active,z_done;z_stream z; };
+struct gcn_http { atomic_int canceled;uint8_t *body;size_t length,limit;struct gcn_header *headers;size_t count,header_bytes;int status;const char *error;int auto_gzip,decoded,line_status,z_active,z_done;z_stream z;uint8_t *cert,*key,*roots;size_t cert_len,key_len,roots_len;int insecure; };
 gcn_http *gcn_http_create(void){gcn_http *http=calloc(1,sizeof(*http));if(http)atomic_init(&http->canceled,0);return http;}
 void gcn_http_cancel(gcn_http *http){if(http)atomic_store(&http->canceled,1);}
 static int http_progress(void *data,curl_off_t a,curl_off_t b,curl_off_t c,curl_off_t d){(void)a;(void)b;(void)c;(void)d;return atomic_load(&((gcn_http *)data)->canceled);}
@@ -164,12 +165,39 @@ static size_t http_header(char *data,size_t size,size_t count,void *opaque){
     http->headers=headers;headers[http->count]=(struct gcn_header){name,value,http->count};http->count++;return n;
 }
 static int header_compare(const void *a,const void *b){const struct gcn_header *x=a,*y=b;int cmp=strcmp(x->name,y->name);return cmp ? cmp:x->sequence<y->sequence ? -1:x->sequence>y->sequence;}
+static int http_certs(const uint8_t *data,size_t n,X509 **first){
+    BIO *bio=BIO_new_mem_buf(data,(int)n);if(!bio)return -1;int count=0;X509 *cert;
+    while((cert=PEM_read_bio_X509(bio,NULL,NULL,NULL))){if(first && !count)*first=cert;else X509_free(cert);count++;}
+    ERR_clear_error();BIO_free(bio);return count;
+}
+static uint8_t *http_copy(const uint8_t *data,size_t n){uint8_t *p=malloc(n?n:1);if(p && n)memcpy(p,data,n);return p;}
+/* Stores transport options: 1 valid, 0 a certificate, key or root CA that does not parse, -1 allocation failure. */
+int gcn_http_tls(gcn_http *http,const uint8_t *cert,size_t cert_len,const uint8_t *key,size_t key_len,const uint8_t *roots,size_t roots_len,int insecure){
+    http->insecure=insecure;
+    if(roots){int n=http_certs(roots,roots_len,NULL);if(n<0)return -1;if(!n)return 0;if(!(http->roots=http_copy(roots,roots_len)))return -1;http->roots_len=roots_len;}
+    if(cert){
+        X509 *leaf=NULL;int n=http_certs(cert,cert_len,&leaf);if(n<0)return -1;if(!n)return 0;
+        BIO *bio=BIO_new_mem_buf(key,(int)key_len);if(!bio){X509_free(leaf);return -1;}
+        EVP_PKEY *pkey=PEM_read_bio_PrivateKey(bio,NULL,NULL,NULL);int ok=pkey && X509_check_private_key(leaf,pkey)==1;EVP_PKEY_free(pkey);X509_free(leaf);BIO_free(bio);ERR_clear_error();
+        if(!ok)return 0;
+        if(!(http->cert=http_copy(cert,cert_len)) || !(http->key=http_copy(key,key_len)))return -1;http->cert_len=cert_len;http->key_len=key_len;
+    }
+    return 1;
+}
+static CURLcode http_ssl_ctx(CURL *curl,void *ssl_ctx,void *opaque){
+    (void)curl;gcn_http *http=opaque;BIO *bio=BIO_new_mem_buf(http->roots,(int)http->roots_len);if(!bio)return CURLE_OUT_OF_MEMORY;
+    X509_STORE *store=SSL_CTX_get_cert_store((SSL_CTX *)ssl_ctx);X509 *cert;CURLcode code=CURLE_OK;
+    while((cert=PEM_read_bio_X509(bio,NULL,NULL,NULL))){if(!X509_STORE_add_cert(store,cert)){unsigned long e=ERR_peek_last_error();if(ERR_GET_REASON(e)!=X509_R_CERT_ALREADY_IN_HASH_TABLE)code=CURLE_SSL_CACERT_BADFILE;}X509_free(cert);}
+    ERR_clear_error();BIO_free(bio);return code;
+}
 int gcn_http_run(gcn_http *http,const char *method,const char *url,const char *const *headers,size_t header_count,const uint8_t *body,size_t body_size,size_t limit,int64_t timeout){
     CURL *curl=curl_easy_init();struct curl_slist *list=NULL;int ok=0,auto_gzip=1,seen_encoding=0,seen_range=0;if(!curl){http->error="http: transport initialization failed";return 0;}http->limit=limit;
     for(size_t i=0;i<header_count;i+=2){size_t n=strlen(headers[i])+strlen(headers[i+1])+3;char *header=malloc(n);if(!header){http->error="http: allocation failed";goto done;}snprintf(header,n,"%s: %s",headers[i],headers[i+1]);struct curl_slist *next=curl_slist_append(list,header);free(header);if(!next){http->error="http: allocation failed";goto done;}list=next;if(!strcasecmp(headers[i],"accept-encoding") && !seen_encoding++ && *headers[i+1])auto_gzip=0;if(!strcasecmp(headers[i],"range") && !seen_range++ && *headers[i+1])auto_gzip=0;}
     curl_easy_setopt(curl,CURLOPT_URL,url);curl_easy_setopt(curl,CURLOPT_HTTPHEADER,list);curl_easy_setopt(curl,CURLOPT_NOSIGNAL,1L);
     curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,0L);curl_easy_setopt(curl,CURLOPT_MAXREDIRS,0L);curl_easy_setopt(curl,CURLOPT_TIMEOUT_MS,(long)timeout);
-    curl_easy_setopt(curl,CURLOPT_SSL_VERIFYPEER,1L);curl_easy_setopt(curl,CURLOPT_SSL_VERIFYHOST,2L);curl_easy_setopt(curl,CURLOPT_PROTOCOLS,CURLPROTO_HTTP|CURLPROTO_HTTPS);
+    curl_easy_setopt(curl,CURLOPT_SSL_VERIFYPEER,http->insecure ? 0L:1L);curl_easy_setopt(curl,CURLOPT_SSL_VERIFYHOST,http->insecure ? 0L:2L);
+    if(http->cert){struct curl_blob cert={http->cert,http->cert_len,CURL_BLOB_COPY},key={http->key,http->key_len,CURL_BLOB_COPY};curl_easy_setopt(curl,CURLOPT_SSLCERT_BLOB,&cert);curl_easy_setopt(curl,CURLOPT_SSLCERTTYPE,"PEM");curl_easy_setopt(curl,CURLOPT_SSLKEY_BLOB,&key);curl_easy_setopt(curl,CURLOPT_SSLKEYTYPE,"PEM");}
+    if(http->roots){curl_easy_setopt(curl,CURLOPT_SSL_CTX_FUNCTION,http_ssl_ctx);curl_easy_setopt(curl,CURLOPT_SSL_CTX_DATA,http);}curl_easy_setopt(curl,CURLOPT_PROTOCOLS,CURLPROTO_HTTP|CURLPROTO_HTTPS);
     curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,http_body);curl_easy_setopt(curl,CURLOPT_WRITEDATA,http);curl_easy_setopt(curl,CURLOPT_HEADERFUNCTION,http_header);curl_easy_setopt(curl,CURLOPT_HEADERDATA,http);
     curl_easy_setopt(curl,CURLOPT_XFERINFOFUNCTION,http_progress);curl_easy_setopt(curl,CURLOPT_XFERINFODATA,http);curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);
     http->auto_gzip=auto_gzip;curl_easy_setopt(curl,CURLOPT_HTTP_CONTENT_DECODING,0L);
@@ -190,4 +218,4 @@ size_t gcn_http_headers(gcn_http *http){return http->count;}
 const char *gcn_http_header_name(gcn_http *http,size_t index){return http->headers[index].name;}
 const char *gcn_http_header_value(gcn_http *http,size_t index){return http->headers[index].value;}
 const char *gcn_http_error(gcn_http *http){return http->error ? http->error:"http: transport failure";}
-void gcn_http_release(gcn_http *http){if(http){http_gzip_end(http);http_clear_headers(http);free(http->body);free(http);}}
+void gcn_http_release(gcn_http *http){if(http){http_gzip_end(http);http_clear_headers(http);free(http->body);free(http->cert);if(http->key){OPENSSL_cleanse(http->key,http->key_len);free(http->key);}free(http->roots);free(http);}}

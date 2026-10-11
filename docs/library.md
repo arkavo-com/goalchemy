@@ -539,6 +539,9 @@ type Client struct {
 	Headers          []string
 	TimeoutMillis    int64
 	MaxResponseBytes int
+	// Transport holds lib/http.DoWith options, such as a client certificate
+	// or extra root CAs.
+	Transport []string
 }
 ```
 
@@ -6729,6 +6732,7 @@ Package http provides bounded HTTP exchanges, retaining TLS verification and ret
 | Function | c | csharp | go | java | python | rust | swift | typescript |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
 | `Do` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `DoWith` | yes | yes | yes | yes | yes | yes | yes | yes |
 
 ### Do
 
@@ -6743,6 +6747,20 @@ One bounded HTTP GET or POST exchange that keeps TLS verification and does not f
 - **Bounds**: GET/POST only; GET has empty body. URL<=8192 bytes, request/reply body<=64MiB, header bytes<=64KiB, timeoutMillis=1..300000. Header input alternates name/value; odd length, invalid tokens, control bytes and framing/hop/proxy headers are rejected.
 - **Errors**: Transport, context cancellation/deadline and limit failures return zero status/nil headers/nil body and error. Non-2xx and redirects return ordinary responses.
 - **Contract**: `lib.http.do` 1.1.0
+
+### DoWith
+
+```go
+func DoWith(ctx context.Context, method, rawURL string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64, options []string) (int, []string, []byte, error)
+```
+
+Do with transport options for client certificates, extra root CAs and explicit insecure verification.
+
+- **Gate**: `cooperative` (may suspend the calling task)
+- **Determinism**: nondeterministic
+- **Bounds**: GET/POST only; GET has empty body. URL<=8192 bytes, request/reply body<=64MiB, header bytes<=64KiB, timeoutMillis=1..300000. Header input alternates name/value; odd length, invalid tokens, control bytes and framing/hop/proxy headers are rejected. Options alternate name/value with total name and value bytes <=1MiB; names are client-cert, client-key, root-cas and insecure-skip-verify, each at most once; client-cert and client-key come together; insecure-skip-verify is "true" or "false". Odd length, unknown or repeated names and other values are invalid requests.
+- **Errors**: Transport, context cancellation/deadline and limit failures return zero status/nil headers/nil body and error. Non-2xx and redirects return ordinary responses. Certificates, keys or root CAs that do not parse, or a key that does not match its certificate, return "http: invalid TLS option" where the host checks them before connecting; otherwise the handshake fails as a transport error. Hosts that cannot honour options (browsers) return an unsupported error for any option.
+- **Contract**: `lib.http.do_with` 1.0.0
 
 ## log
 

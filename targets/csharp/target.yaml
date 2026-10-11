@@ -148,5 +148,6 @@ functions:
   - {id: lib.os.write_file, contract_version: 1.0.0, symbol: R.libOsWriteFile, implementation: runtime/LibOsWriteFile.cs, requires: [lib.os.read_file]}
   - {id: lib.callback.request, contract_version: 1.0.0, symbol: R.libCallbackRequest, implementation: runtime/LibCallbackRequest.cs, requires: [std.context.err], harness: "host: R.libCallbackRequest(t,{0},{1},{2})"}
   - {id: lib.http.do, contract_version: 1.1.0, symbol: R.libHttpDo, implementation: runtime/LibHttpDo.cs, requires: [std.context.err], harness: "host: R.libHttpDo(t,{0},{1},{2},{3},{4},{5},{6})"}
+  - {id: lib.http.do_with, contract_version: 1.0.0, symbol: R.libHttpDoWith, implementation: runtime/LibHttpDoWith.cs, requires: [lib.http.do], harness: "host: R.libHttpDoWith(t,{0},{1},{2},{3},{4},{5},{6},{7})"}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: R.libChecksumCRC32IEEE, implementation: runtime/LibChecksumCRC32IEEE.cs, harness: "R.libChecksumCRC32IEEE({0})"}

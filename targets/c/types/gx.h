@@ -496,6 +496,8 @@ char *gx_os_path(gx_V name, int64_t *status);
 bool gx_log_enabled(int64_t level);
 void gx_log_emit(int64_t level, int64_t unix_nano, gx_V message, gx_V attrs, gx_V text);
 void gx_lib_http_do(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);
+void gx_http_do(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);
+void gx_lib_http_do_with(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);
 void gx_lib_callback_request(gx_Task *,gx_V,gx_V,gx_V);
 
 /* Contract functions: one implementation file each. */

@@ -1323,6 +1323,33 @@ var cases = map[string]func(h *H) []any{
 		r3 := rt.As[error](rv[3])
 		return []any{EncInt(r0), EncSlice(r1, func(e string) any { return EncString(e) }), EncSlice(r2, func(e byte) any { return EncInt(e) }), EncError(r3)}
 	},
+	"lib.http.do_with/boundary_example": func(h *H) []any {
+		v_ctx := rt.StdContextBackground()
+		_ = v_ctx
+		v_method := DecString(h.Let("method"))
+		_ = v_method
+		v_url := DecString(h.Let("url"))
+		_ = v_url
+		v_headers := DecSlice(h.Let("headers"), func(r json.RawMessage) string { return DecString(r) })
+		_ = v_headers
+		v_body := DecSlice(h.Let("body"), func(r json.RawMessage) byte { return DecInt[byte](r) })
+		_ = v_body
+		v_max_response_bytes := DecInt[int](h.Let("max_response_bytes"))
+		_ = v_max_response_bytes
+		v_timeout_millis := DecInt[int64](h.Let("timeout_millis"))
+		_ = v_timeout_millis
+		v_options := DecSlice(h.Let("options"), func(r json.RawMessage) string { return DecString(r) })
+		_ = v_options
+		rv := Await(func(t *rt.Task) {
+			rt.LibHTTPDoWith(t, v_ctx, v_method, v_url, v_headers, v_body, v_max_response_bytes, v_timeout_millis, v_options)
+		})
+		_ = rv
+		r0 := rt.As[int](rv[0])
+		r1 := rt.As[[]string](rv[1])
+		r2 := rt.As[[]byte](rv[2])
+		r3 := rt.As[error](rv[3])
+		return []any{EncInt(r0), EncSlice(r1, func(e string) any { return EncString(e) }), EncSlice(r2, func(e byte) any { return EncInt(e) }), EncError(r3)}
+	},
 	"lib.task.all/empty": func(h *H) []any {
 		v_fns := DecSlice(h.Let("fns"), func(r json.RawMessage) func() { return nil })
 		_ = v_fns

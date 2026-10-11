@@ -268,7 +268,7 @@ The split, and the core runtime layer behind both, is explained in [the runtime 
 | `github.com/eugenioenko/goalchemy/lib/task` | `All` (cooperative gate) |
 | `github.com/eugenioenko/goalchemy/lib/crypto` | `Key`, SHA-256, HMAC-SHA256, HKDF-SHA256, AES-256-GCM, RSA OAEP (2048, 3072 and 4096-bit), RS256/384/512, ES256/384/512, P-256/P-384/P-521 ECDH, key generation, PEM and JWK |
 | `github.com/eugenioenko/goalchemy/lib/encoding` | `Base64Encode`, `Base64Decode`, `Base64URLEncode`, `Base64URLDecode` |
-| `github.com/eugenioenko/goalchemy/lib/http` | `Do`, a bounded GET or POST exchange |
+| `github.com/eugenioenko/goalchemy/lib/http` | `Do`, a bounded GET or POST exchange, and `DoWith`, the same with [transport options](#http-transport-options) |
 | `github.com/eugenioenko/goalchemy/lib/clock` | `Unix` and `UnixNano`, host wall-clock seconds and nanoseconds |
 | `github.com/eugenioenko/goalchemy/lib/log` | `Enabled` and `Emit`, the host log sink behind `std/log/slog` |
 | `github.com/eugenioenko/goalchemy/lib/os` | `ReadFile` and `WriteFile` with portable status codes, the host file system behind `std/os` |
@@ -391,6 +391,32 @@ adapters; exported asynchronous libraries remain gated. See
 [host lifecycle and target-port requirements](host-operations.md).
 
 `github.com/eugenioenko/goalchemy/lib/task` provides `task.All(fns ...func())`. It runs each function as a task, in argument order and one at a time, and returns when all have finished. With the Go toolchain the same package runs the functions as goroutines.
+
+### HTTP transport options
+
+`http.DoWith` takes the arguments of `http.Do` plus options as alternating
+names and values:
+
+| Option | Value |
+| --- | --- |
+| `http.ClientCert` and `http.ClientKey` | PEM client certificate (chain) and unencrypted private key (PKCS#8, PKCS#1 or SEC1), offered when the server asks for one (mTLS). Both or neither. |
+| `http.RootCAs` | PEM certificates trusted in addition to the system roots |
+| `http.InsecureSkipVerify` | `"true"` disables server certificate and host name verification; `"false"` is the default |
+
+Server certificates are verified unless `InsecureSkipVerify` is `"true"`.
+Odd, unknown or repeated options fail as invalid requests; certificates or
+keys that do not parse fail with `http: invalid TLS option`.
+
+| Target | Transport |
+| --- | --- |
+| Go | `crypto/tls` in `net/http` |
+| TypeScript (Node) | `node:https` `cert`, `key` and `ca` (with `tls.rootCertificates`) |
+| TypeScript (browser) | Not supported: any option fails with `http: TLS options are not supported in browsers` |
+| Python | `ssl.SSLContext` (`load_cert_chain` reads the credentials from a private temporary directory) |
+| Java | `SSLContext` from in-memory key and trust stores in `java.net.http.HttpClient` |
+| C# | `SocketsHttpHandler.SslOptions` with a custom-root chain check |
+| Rust | reqwest with rustls: `Identity`, merged root certificates |
+| C and Swift | libcurl certificate blobs, roots added to the OpenSSL store |
 
 ## Behavior Go leaves open
 

@@ -10,10 +10,18 @@ import (
 // LibHTTPDo snapshots mutable inputs before yielding and calls the actual
 // bounded native transport on a worker. Only the owner applies its result.
 func LibHTTPDo(t *Task, c Context, method, url string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64) {
+	libHTTPDo(t, c, method, url, headers, body, maxResponseBytes, timeoutMillis, nil)
+}
+
+func libHTTPDo(t *Task, c Context, method, url string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64, options []string) {
 	s := sched
 	// Reject coarse input bounds before allocating snapshots. The native
 	// implementation remains authoritative for all transport/URL/header checks.
-	invalidBounds := len(body) > nativehttp.MaxBytes || maxResponseBytes < 0 || maxResponseBytes > nativehttp.MaxBytes || timeoutMillis < 1 || timeoutMillis > 300000 || len(headers)%2 != 0 || len(headers) > nativehttp.MaxHeaderBytes/2
+	optionBytes := 0
+	for _, o := range options {
+		optionBytes += len(o)
+	}
+	invalidBounds := optionBytes > nativehttp.MaxOptionBytes || len(body) > nativehttp.MaxBytes || maxResponseBytes < 0 || maxResponseBytes > nativehttp.MaxBytes || timeoutMillis < 1 || timeoutMillis > 300000 || len(headers)%2 != 0 || len(headers) > nativehttp.MaxHeaderBytes/2
 	if !invalidBounds {
 		total := len(headers) * 2 // four framing bytes for each name/value pair
 		for _, h := range headers {
@@ -25,7 +33,7 @@ func LibHTTPDo(t *Task, c Context, method, url string, headers []string, body []
 		}
 	}
 	if c.c == nil || (c.c != background && c.c.owner != s) || invalidBounds {
-		r0, r1, r2, r3 := nativehttp.Do(nil, method, url, headers, body, maxResponseBytes, timeoutMillis)
+		r0, r1, r2, r3 := nativehttp.DoWith(nil, method, url, headers, body, maxResponseBytes, timeoutMillis, options)
 		t.RV = []any{r0, r1, r2, r3}
 		return
 	}
@@ -33,6 +41,7 @@ func LibHTTPDo(t *Task, c Context, method, url string, headers []string, body []
 		panic(HostFault{Value: "HTTP requires host-clock scheduler"})
 	}
 	op := prepareHTTP(s, t, c, method, url, headers, body, maxResponseBytes, timeoutMillis)
+	op.options = append([]string(nil), options...)
 	s.launchHost(op.token, op.run)
 }
 
@@ -42,6 +51,7 @@ type httpOperation struct {
 	cancel      context.CancelFunc
 	method, url string
 	headers     []string
+	options     []string
 	body        []byte
 	max         int
 	timeout     int64
@@ -82,6 +92,6 @@ func prepareHTTP(s *scheduler, t *Task, c Context, method, url string, headers [
 }
 func (op *httpOperation) run() []any {
 	defer op.cancel()
-	r0, r1, r2, r3 := nativehttp.Do(op.ctx, op.method, op.url, op.headers, op.body, op.max, op.timeout)
+	r0, r1, r2, r3 := nativehttp.DoWith(op.ctx, op.method, op.url, op.headers, op.body, op.max, op.timeout, op.options)
 	return []any{r0, r1, r2, r3}
 }

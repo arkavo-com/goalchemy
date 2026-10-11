@@ -1,7 +1,8 @@
 // Actual browser execution of a generated library that uses lib/http against
 // gzip responses. The browser's fetch decodes, so Go's raw bytes for a caller's
 // Accept-Encoding, truncation errors and multi-member streams (Chromium keeps
-// only the first member) are unavailable; the rest must match Go.
+// only the first member) are unavailable; the rest must match Go. Browsers
+// cannot set client certificates or trust, so DoWith options fail.
 import { createServer } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { resolve } from 'node:path';
@@ -15,6 +16,7 @@ const suite = `import * as g from 'goalchemy-generated';
 export async function run(base){
   const out={};
   for (const [name,accept] of [['/single',false],['/large',false],['/empty',false],['/explicit',true]]) out[name]=await g.Show(base,name,accept);
+  out['/tls']=await g.ShowTLS(base);
   return out;
 }`;
 const result = await build({ stdin: { resolveDir: generated, contents: suite }, bundle: true, platform: 'browser', format: 'esm', write: false });
@@ -52,10 +54,11 @@ try {
     '/large': 'error: http: response body exceeds limit',
     '/empty': '200  encoding=gzip',
     '/explicit': 'error: http: Accept-Encoding is not supported in browsers',
+    '/tls': 'error: http: TLS options are not supported in browsers',
   };
   if (failures.length || JSON.stringify(got) !== JSON.stringify(want))
     throw new Error('browser gzip failures: ' + failures + '; got ' + JSON.stringify(got));
-  console.log('PASS Chromium ' + await browser.version() + ': lib/http gzip decoding, header stripping, decoded limit and Accept-Encoding rejection');
+  console.log('PASS Chromium ' + await browser.version() + ': lib/http gzip decoding, header stripping, decoded limit, Accept-Encoding and TLS option rejection');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

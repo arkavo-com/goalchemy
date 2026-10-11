@@ -1,6 +1,7 @@
 // Node HTTP adapter for lib/http, excluded from every portable runtime index.
 import { request as plainRequest } from "node:http";
 import { request as tlsRequest } from "node:https";
+import { rootCertificates, createSecureContext } from "node:tls";
 import { createGunzip } from "node:zlib";
 import { bodyless, canonicalHeader, installHttpHost, type HttpOutcome } from "./http.ts";
 
@@ -20,8 +21,20 @@ installHttpHost({
     for (const [n, v] of request.headers) if (!automatic || n.toLowerCase() !== "accept-encoding") headers.push(n, v);
     if (automatic) headers.push("Accept-Encoding", "gzip");
     if (request.method === "POST") headers.push("Content-Length", String(request.body.length));
-    const send = request.url.startsWith("https:") ? tlsRequest : plainRequest;
-    const req = send(request.url, { method: request.method, headers, agent: false, maxHeaderSize: 81920, signal: request.signal }, res => {
+    const secure = request.url.startsWith("https:");
+    const options: Record<string, unknown> = { method: request.method, headers, agent: false, maxHeaderSize: 81920, signal: request.signal };
+    if (request.tls !== null) {
+      const { cert, key, ca, insecure } = request.tls;
+      try {
+        const extra = ca === undefined ? undefined : [...rootCertificates, ca];
+        createSecureContext({ cert, key, ca: extra });
+        if (secure) Object.assign(options, { cert, key, ca: extra, rejectUnauthorized: !insecure });
+      } catch {
+        finish({ error: "http: invalid TLS option" });
+        return;
+      }
+    }
+    const req = (secure ? tlsRequest : plainRequest)(request.url, options, (res: any) => {
       const raw = res.rawHeaders;
       const status = res.statusCode ?? 0;
       const decoded = automatic && !bodyless(status, first(raw, "content-length")) && (first(raw, "content-encoding") ?? "").toLowerCase() === "gzip";

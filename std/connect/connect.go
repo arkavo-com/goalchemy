@@ -104,6 +104,9 @@ type Client struct {
 	Headers          []string
 	TimeoutMillis    int64
 	MaxResponseBytes int
+	// Transport holds lib/http.DoWith options, such as a client certificate
+	// or extra root CAs.
+	Transport []string
 }
 
 // DefaultTimeoutMillis bounds calls of a client whose TimeoutMillis is zero.
@@ -256,7 +259,7 @@ func (c *Client) CallUnary(ctx context.Context, procedure string, req, resp prot
 		"Connect-Timeout-Ms", strconv.FormatInt(timeout, 10)}
 	h = append(h, c.Headers...)
 	h = append(h, headers...)
-	status, meta, reply, err := http.Do(ctx, "POST", c.BaseURL+procedure, h, body, limit, timeout)
+	status, meta, reply, err := http.DoWith(ctx, "POST", c.BaseURL+procedure, h, body, limit, timeout, c.Transport)
 	if err != nil {
 		return nil, transportError(ctx, err)
 	}

@@ -35,7 +35,7 @@ while let line = readLine() {
     }
     let args = spec.arguments.map { values[$0]! }
     let owner = GOwner(
-      host: spec.contract == "lib.http.do" || spec.contract == "lib.callback.request"
+      host: spec.contract.hasPrefix("lib.http.") || spec.contract == "lib.callback.request"
         || spec.contract.hasPrefix("lib.crypto."))
     owner.harness = true
     let result = try owner.run(GCodec.execute(spec, args))

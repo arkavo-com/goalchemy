@@ -1460,9 +1460,20 @@ final class HarnessGen extends Codec {
     }
 
     static List<Object> case_195(Harness.H h) {
-        var v_level = decInt(h.let("level"), "i64");
-        var r0 = LibLogEnabled.libLogEnabled(v_level);
-        return Arrays.asList(new Object[] {encBool(r0)});
+        var v_ctx = StdContextBackground.stdContextBackground();
+        var v_method = decString(h.let("method"));
+        var v_url = decString(h.let("url"));
+        var v_headers = decSlice(h.let("headers"), r -> decString(r), () -> "");
+        var v_body = decBytes(h.let("body"));
+        var v_max_response_bytes = decInt(h.let("max_response_bytes"), "i64");
+        var v_timeout_millis = decInt(h.let("timeout_millis"), "i64");
+        var v_options = decSlice(h.let("options"), r -> decString(r), () -> "");
+        Object[] rv = host(t -> { LibHttpDoWith.libHttpDoWith(t,v_ctx,v_method,v_url,v_headers,v_body,v_max_response_bytes,v_timeout_millis,v_options); });
+        var r0 = rv[0];
+        var r1 = rv[1];
+        var r2 = rv[2];
+        var r3 = rv[3];
+        return Arrays.asList(new Object[] {encInt(r0, "i64"), encSlice(r1, e -> encString(e)), encSlice(r2, e -> encInt(e, "u8")), encError(r3)});
     }
 
     static List<Object> case_196(Harness.H h) {
@@ -1484,39 +1495,45 @@ final class HarnessGen extends Codec {
     }
 
     static List<Object> case_199(Harness.H h) {
+        var v_level = decInt(h.let("level"), "i64");
+        var r0 = LibLogEnabled.libLogEnabled(v_level);
+        return Arrays.asList(new Object[] {encBool(r0)});
+    }
+
+    static List<Object> case_200(Harness.H h) {
         var v_fns = decSlice(h.let("fns"), r -> (Fn) null, () -> null);
         Object[] rv = TaskSpawn.runIsolated(t -> { LibTaskAll.libTaskAll(t, v_fns); });
         return Arrays.asList(new Object[] {});
     }
 
-    static List<Object> case_200(Harness.H h) {
+    static List<Object> case_201(Harness.H h) {
         var r0 = StdContextBackground.stdContextBackground();
         return Arrays.asList(new Object[] {encZero(r0)});
     }
 
-    static List<Object> case_201(Harness.H h) {
+    static List<Object> case_202(Harness.H h) {
         var r0 = StdContextCanceled.stdContextCanceled();
         return Arrays.asList(new Object[] {encError(r0)});
     }
 
-    static List<Object> case_202(Harness.H h) {
+    static List<Object> case_203(Harness.H h) {
         var r0 = StdContextDeadlineExceeded.stdContextDeadlineExceeded();
         return Arrays.asList(new Object[] {encError(r0)});
     }
 
-    static List<Object> case_203(Harness.H h) {
+    static List<Object> case_204(Harness.H h) {
         var v_ctx = StdContextBackground.stdContextBackground();
         var r0 = StdContextDone.stdContextContextDone(v_ctx);
         return Arrays.asList(new Object[] {encChan(r0, e -> encZero(e))});
     }
 
-    static List<Object> case_204(Harness.H h) {
+    static List<Object> case_205(Harness.H h) {
         var v_ctx = StdContextBackground.stdContextBackground();
         var r0 = StdContextErr.stdContextContextErr(v_ctx);
         return Arrays.asList(new Object[] {encError(r0)});
     }
 
-    static List<Object> case_205(Harness.H h) {
+    static List<Object> case_206(Harness.H h) {
         var v_parent = StdContextBackground.stdContextBackground();
         Object[] rv = (Object[]) (StdContextWithCancel.stdContextWithCancel(v_parent));
         var r0 = rv[0];
@@ -1524,20 +1541,13 @@ final class HarnessGen extends Codec {
         return Arrays.asList(new Object[] {encZero(r0), encZero(r1)});
     }
 
-    static List<Object> case_206(Harness.H h) {
+    static List<Object> case_207(Harness.H h) {
         var v_parent = StdContextBackground.stdContextBackground();
         var v_d = decInt(h.let("d"), "i64");
         Object[] rv = (Object[]) (StdContextWithTimeout.stdContextWithTimeout(v_parent, v_d));
         var r0 = rv[0];
         var r1 = rv[1];
         return Arrays.asList(new Object[] {encZero(r0), encZero(r1)});
-    }
-
-    static List<Object> case_207(Harness.H h) {
-        var v_err = decError(h.let("err"));
-        var v_target = decError(h.let("target"));
-        var r0 = StdErrorsIs.stdErrorsIs(v_err, v_target);
-        return Arrays.asList(new Object[] {encBool(r0)});
     }
 
     static List<Object> case_208(Harness.H h) {
@@ -1549,44 +1559,44 @@ final class HarnessGen extends Codec {
 
     static List<Object> case_209(Harness.H h) {
         var v_err = decError(h.let("err"));
-        var v_target = v_err;
+        var v_target = decError(h.let("target"));
         var r0 = StdErrorsIs.stdErrorsIs(v_err, v_target);
         return Arrays.asList(new Object[] {encBool(r0)});
     }
 
     static List<Object> case_210(Harness.H h) {
+        var v_err = decError(h.let("err"));
+        var v_target = v_err;
+        var r0 = StdErrorsIs.stdErrorsIs(v_err, v_target);
+        return Arrays.asList(new Object[] {encBool(r0)});
+    }
+
+    static List<Object> case_211(Harness.H h) {
         var v_text = decString(h.let("text"));
         var r0 = StdErrorsNew.stdErrorsNew(v_text);
         return Arrays.asList(new Object[] {encError(r0)});
     }
 
-    static List<Object> case_211(Harness.H h) {
+    static List<Object> case_212(Harness.H h) {
         var v_err = decError(h.let("err"));
         var r0 = StdErrorsUnwrap.stdErrorsUnwrap(v_err);
         return Arrays.asList(new Object[] {encError(r0)});
     }
 
-    static List<Object> case_212(Harness.H h) {
-        Object[] rv = TaskSpawn.runIsolated(t -> { StdRuntimeGosched.stdRuntimeGosched(t); });
-        return Arrays.asList(new Object[] {});
-    }
-
     static List<Object> case_213(Harness.H h) {
-        var v_m = new StdSyncMutexLock.Mutex();
-        Object[] rv = TaskSpawn.runIsolated(t -> { StdSyncMutexLock.stdSyncMutexLock(t, v_m); });
+        Object[] rv = TaskSpawn.runIsolated(t -> { StdRuntimeGosched.stdRuntimeGosched(t); });
         return Arrays.asList(new Object[] {});
     }
 
     static List<Object> case_214(Harness.H h) {
         var v_m = new StdSyncMutexLock.Mutex();
-        Object[] rv = TaskSpawn.runIsolated(t -> { StdSyncMutexLock.stdSyncMutexLock(t, v_m); StdSyncMutexUnlock.stdSyncMutexUnlock(v_m); });
+        Object[] rv = TaskSpawn.runIsolated(t -> { StdSyncMutexLock.stdSyncMutexLock(t, v_m); });
         return Arrays.asList(new Object[] {});
     }
 
     static List<Object> case_215(Harness.H h) {
-        var v_wg = new StdSyncWaitgroupAdd.WaitGroup();
-        var v_delta = decInt(h.let("delta"), "i64");
-        StdSyncWaitgroupAdd.stdSyncWaitgroupAdd(v_wg, v_delta);
+        var v_m = new StdSyncMutexLock.Mutex();
+        Object[] rv = TaskSpawn.runIsolated(t -> { StdSyncMutexLock.stdSyncMutexLock(t, v_m); StdSyncMutexUnlock.stdSyncMutexUnlock(v_m); });
         return Arrays.asList(new Object[] {});
     }
 
@@ -1599,17 +1609,24 @@ final class HarnessGen extends Codec {
 
     static List<Object> case_217(Harness.H h) {
         var v_wg = new StdSyncWaitgroupAdd.WaitGroup();
-        StdSyncWaitgroupDone.stdSyncWaitgroupDone(v_wg);
+        var v_delta = decInt(h.let("delta"), "i64");
+        StdSyncWaitgroupAdd.stdSyncWaitgroupAdd(v_wg, v_delta);
         return Arrays.asList(new Object[] {});
     }
 
     static List<Object> case_218(Harness.H h) {
         var v_wg = new StdSyncWaitgroupAdd.WaitGroup();
-        Object[] rv = TaskSpawn.runIsolated(t -> { StdSyncWaitgroupWait.stdSyncWaitgroupWait(t, v_wg); });
+        StdSyncWaitgroupDone.stdSyncWaitgroupDone(v_wg);
         return Arrays.asList(new Object[] {});
     }
 
     static List<Object> case_219(Harness.H h) {
+        var v_wg = new StdSyncWaitgroupAdd.WaitGroup();
+        Object[] rv = TaskSpawn.runIsolated(t -> { StdSyncWaitgroupWait.stdSyncWaitgroupWait(t, v_wg); });
+        return Arrays.asList(new Object[] {});
+    }
+
+    static List<Object> case_220(Harness.H h) {
         var v_d = decInt(h.let("d"), "i64");
         Object[] rv = TaskSpawn.runIsolated(t -> { StdTimeSleep.stdTimeSleep(t, v_d); });
         return Arrays.asList(new Object[] {});
@@ -1813,30 +1830,31 @@ final class HarnessGen extends Codec {
         CASES.put("lib.encoding.base64_url_decode/boundary_example", HarnessGen::case_192);
         CASES.put("lib.encoding.base64_url_encode/boundary_example", HarnessGen::case_193);
         CASES.put("lib.http.do/boundary_example", HarnessGen::case_194);
-        CASES.put("lib.log.enabled/debug_disabled_by_default", HarnessGen::case_195);
-        CASES.put("lib.log.enabled/error_enabled_by_default", HarnessGen::case_196);
-        CASES.put("lib.log.enabled/info_disabled_by_default", HarnessGen::case_197);
-        CASES.put("lib.log.enabled/warn_enabled_by_default", HarnessGen::case_198);
-        CASES.put("lib.task.all/empty", HarnessGen::case_199);
-        CASES.put("std.context.background/root", HarnessGen::case_200);
-        CASES.put("std.context.canceled/message", HarnessGen::case_201);
-        CASES.put("std.context.deadline_exceeded/message", HarnessGen::case_202);
-        CASES.put("std.context.done/background", HarnessGen::case_203);
-        CASES.put("std.context.err/background", HarnessGen::case_204);
-        CASES.put("std.context.with_cancel/child", HarnessGen::case_205);
-        CASES.put("std.context.with_timeout/child", HarnessGen::case_206);
-        CASES.put("std.errors.is/distinct", HarnessGen::case_207);
-        CASES.put("std.errors.is/nils", HarnessGen::case_208);
-        CASES.put("std.errors.is/same", HarnessGen::case_209);
-        CASES.put("std.errors.new/message", HarnessGen::case_210);
-        CASES.put("std.errors.unwrap/plain", HarnessGen::case_211);
-        CASES.put("std.runtime.gosched/alone", HarnessGen::case_212);
-        CASES.put("std.sync.mutex.lock/unlocked", HarnessGen::case_213);
-        CASES.put("std.sync.mutex.unlock/lock_then_unlock", HarnessGen::case_214);
-        CASES.put("std.sync.waitgroup.add/negative", HarnessGen::case_215);
-        CASES.put("std.sync.waitgroup.add/positive", HarnessGen::case_216);
-        CASES.put("std.sync.waitgroup.done/underflow", HarnessGen::case_217);
-        CASES.put("std.sync.waitgroup.wait/zero_returns", HarnessGen::case_218);
-        CASES.put("std.time.sleep/zero", HarnessGen::case_219);
+        CASES.put("lib.http.do_with/boundary_example", HarnessGen::case_195);
+        CASES.put("lib.log.enabled/debug_disabled_by_default", HarnessGen::case_196);
+        CASES.put("lib.log.enabled/error_enabled_by_default", HarnessGen::case_197);
+        CASES.put("lib.log.enabled/info_disabled_by_default", HarnessGen::case_198);
+        CASES.put("lib.log.enabled/warn_enabled_by_default", HarnessGen::case_199);
+        CASES.put("lib.task.all/empty", HarnessGen::case_200);
+        CASES.put("std.context.background/root", HarnessGen::case_201);
+        CASES.put("std.context.canceled/message", HarnessGen::case_202);
+        CASES.put("std.context.deadline_exceeded/message", HarnessGen::case_203);
+        CASES.put("std.context.done/background", HarnessGen::case_204);
+        CASES.put("std.context.err/background", HarnessGen::case_205);
+        CASES.put("std.context.with_cancel/child", HarnessGen::case_206);
+        CASES.put("std.context.with_timeout/child", HarnessGen::case_207);
+        CASES.put("std.errors.is/distinct", HarnessGen::case_208);
+        CASES.put("std.errors.is/nils", HarnessGen::case_209);
+        CASES.put("std.errors.is/same", HarnessGen::case_210);
+        CASES.put("std.errors.new/message", HarnessGen::case_211);
+        CASES.put("std.errors.unwrap/plain", HarnessGen::case_212);
+        CASES.put("std.runtime.gosched/alone", HarnessGen::case_213);
+        CASES.put("std.sync.mutex.lock/unlocked", HarnessGen::case_214);
+        CASES.put("std.sync.mutex.unlock/lock_then_unlock", HarnessGen::case_215);
+        CASES.put("std.sync.waitgroup.add/negative", HarnessGen::case_216);
+        CASES.put("std.sync.waitgroup.add/positive", HarnessGen::case_217);
+        CASES.put("std.sync.waitgroup.done/underflow", HarnessGen::case_218);
+        CASES.put("std.sync.waitgroup.wait/zero_returns", HarnessGen::case_219);
+        CASES.put("std.time.sleep/zero", HarnessGen::case_220);
     }
 }

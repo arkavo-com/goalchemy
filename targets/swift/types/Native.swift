@@ -131,7 +131,7 @@ enum GNative {
           task.owner.spawn(child)
         }
         return .park
-      case "lib.http.do": return try GHTTP.start(args, task)
+      case "lib.http.do", "lib.http.do_with": return try GHTTP.start(args, task)
       case "lib.callback.request": return try GCallback.start(args, task)
       default:
         if contract.hasPrefix("lib.crypto.") { return try GCrypto.start(contract, args, task) }
