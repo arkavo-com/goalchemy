@@ -1,0 +1,6 @@
+id: r008
+summary: The Python frame results list dropped the closing parenthesis of a cloned named struct result, emitting invalid syntax.
+found_by: opentdf-sdk Python package import of std/log/slog Value.Resolve
+compiler: 0.6.0
+toolchain: go1.25.14
+targets: [python]

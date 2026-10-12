@@ -760,7 +760,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 	fe.indent = "    "
 	fe.w("def results(self):")
 	fe.w("    fr = self")
-	fe.w("    return [%s]", strings.TrimSuffix(strings.TrimPrefix(fe.resultsList(), "("), ")"))
+	fe.w("    return [%s]", fe.resultsList())
 	fe.w("")
 	fe.w("def step(self, t):")
 	fe.w("    fr = self")
