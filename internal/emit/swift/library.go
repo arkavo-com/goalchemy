@@ -105,8 +105,11 @@ func (e *emitter) library() (string, error) {
 		case ir.KSlice:
 			return "[" + typ(u.Elem) + "]?"
 		case ir.KStruct:
+			// Module-qualified, so a field named like its type (Options.TokenExchange
+			// of type TokenExchange) does not shadow the type in the struct's
+			// initializer and default values.
 			if n := names[u]; n != "" {
-				return swiftPublic(n)
+				return "GoalchemyGenerated." + swiftPublic(n)
 			}
 			n := fmt.Sprintf("Value%d", u.ID)
 			for used[n] || reserved[n] {
@@ -114,7 +117,7 @@ func (e *emitter) library() (string, error) {
 			}
 			used[n] = true
 			names[u] = n
-			return swiftPublic(n)
+			return "GoalchemyGenerated." + swiftPublic(n)
 		}
 		if cryptoKey(t) {
 			return "GoalchemyKey?"
@@ -149,7 +152,8 @@ func (e *emitter) library() (string, error) {
 		}
 		seen[u] = true
 		if u.Kind == ir.KStruct {
-			n := typ(t)
+			typ(t)
+			n := swiftPublic(names[u])
 			for _, f := range u.Fields {
 				convert(f.Type)
 			}

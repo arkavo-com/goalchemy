@@ -128,6 +128,20 @@ func TestReservedPublicNamesRenamed(t *testing.T) {
 	}
 }
 
+func TestFieldNamedLikeItsTypeQualified(t *testing.T) {
+	result := buildSwift(t, "package boundary\ntype Inner struct { V int }\ntype Outer struct { Inner Inner; Items []Inner }\nfunc Export(o Outer) (Outer, error) { return o, nil }")
+	o, err := swiftemit.Emit(result.IR, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	library := generatedSource(o)
+	for _, want := range []string{"public struct `Outer` {", "public var `Inner`: GoalchemyGenerated.`Inner`", "`Inner`: GoalchemyGenerated.`Inner` = GoalchemyGenerated.`Inner`()", "public var `Items`: [GoalchemyGenerated.`Inner`]?"} {
+		if !bytes.Contains(library, []byte(want)) {
+			t.Fatalf("missing %q in generated library", want)
+		}
+	}
+}
+
 func TestReservedHandleNameRenamed(t *testing.T) {
 	result := buildSwift(t, "package boundary\ntype Task struct { n int64 }\nfunc New() *Task { return &Task{} }\nfunc (c *Task) Add(d int64) int64 { c.n += d; return c.n }")
 	o, err := swiftemit.Emit(result.IR, nil)
