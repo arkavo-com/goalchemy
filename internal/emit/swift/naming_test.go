@@ -142,6 +142,18 @@ func TestFieldNamedLikeItsTypeQualified(t *testing.T) {
 	}
 }
 
+func TestSourceErrorWithoutExportedFields(t *testing.T) {
+	result := buildSwift(t, "package boundary\ntype Blank struct{}\nfunc (b *Blank) Error() string { return \"blank\" }\nfunc Export(fail bool) error { if fail { return &Blank{} }; return nil }")
+	o, err := swiftemit.Emit(result.IR, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	library := generatedSource(o)
+	if !bytes.Contains(library, []byte("GoalchemyFailure(\"source\", \"source error\", [:])")) || bytes.Contains(library, []byte("[\n\n        ])")) {
+		t.Fatal("a source error type without exported fields must cross as an empty dictionary literal")
+	}
+}
+
 func TestReservedHandleNameRenamed(t *testing.T) {
 	result := buildSwift(t, "package boundary\ntype Task struct { n int64 }\nfunc New() *Task { return &Task{} }\nfunc (c *Task) Add(d int64) int64 { c.n += d; return c.n }")
 	o, err := swiftemit.Emit(result.IR, nil)

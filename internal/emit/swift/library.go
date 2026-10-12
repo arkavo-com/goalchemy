@@ -283,12 +283,16 @@ func (e *emitter) library() (string, error) {
 	}
 	b.WriteString("private func gSourceError(_ value: GValue) throws -> GoalchemyFailure? {\n    if case .nilValue = value { return nil }\n    guard case .interface(let box) = value else { return GoalchemyFailure(\"source\", \"source error\") }\n")
 	for _, t := range errorTypes {
-		fmt.Fprintf(&b, "    if box.type == %d, case .pointer(let cell) = box.value {\n        let v = try gOutput%d(cell.value)\n        return GoalchemyFailure(\"source\", \"source error\", [\n", t.ID, t.U().Elem.U().ID)
+		fmt.Fprintf(&b, "    if box.type == %d, case .pointer(let cell) = box.value {\n        let v = try gOutput%d(cell.value)\n", t.ID, t.U().Elem.U().ID)
 		var fs []string
 		for _, f := range t.U().Elem.U().Fields {
 			fs = append(fs, fmt.Sprintf("            %s: v.%s as Any", quote(f.Name), swiftPublic(f.Name)))
 		}
-		b.WriteString(strings.Join(fs, ",\n") + "\n        ])\n    }\n")
+		if len(fs) == 0 {
+			b.WriteString("        _ = v\n        return GoalchemyFailure(\"source\", \"source error\", [:])\n    }\n")
+		} else {
+			b.WriteString("        return GoalchemyFailure(\"source\", \"source error\", [\n" + strings.Join(fs, ",\n") + "\n        ])\n    }\n")
+		}
 	}
 	b.WriteString("    return GoalchemyFailure(\"source\", String(decoding: GFormat(value), as: UTF8.self))\n}\nprivate func gLibraryReset() {\n    _ = gTypeRegistration\n    gSetupMethods()\n")
 	for _, g := range e.p.Globals {
