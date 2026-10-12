@@ -1,0 +1,6 @@
+id: r009
+summary: TypeScript and Python cloned the iterator's struct key and value after map_next returned false, faulting on an empty map.
+found_by: opentdf-sdk TypeScript KAS key cache lookup on an empty cache
+compiler: 0.6.0
+toolchain: go1.25.14
+targets: [typescript, python]
