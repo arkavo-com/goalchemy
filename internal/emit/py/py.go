@@ -1121,10 +1121,10 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		mt := i.Iter.Type.Elem.U()
 		w("%s = rt.map_next(%s)", fe.val(i.Ok), fe.val(i.Iter))
 		if i.Key != nil {
-			w("%s = %s", fe.val(i.Key), e.cloneExpr(mt.Key, fe.val(i.Iter)+".k"))
+			w("if %s: %s = %s", fe.val(i.Ok), fe.val(i.Key), e.cloneExpr(mt.Key, fe.val(i.Iter)+".k"))
 		}
 		if i.Val != nil {
-			w("%s = %s", fe.val(i.Val), e.cloneExpr(mt.Elem, fe.val(i.Iter)+".v"))
+			w("if %s: %s = %s", fe.val(i.Ok), fe.val(i.Val), e.cloneExpr(mt.Elem, fe.val(i.Iter)+".v"))
 		}
 	case *ir.Print:
 		e.use("core.print")
