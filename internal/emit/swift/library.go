@@ -60,21 +60,25 @@ func (e *emitter) library() (string, error) {
 	if err != nil {
 		return "", &LibraryBoundaryError{err.Error()}
 	}
-	handleElems := map[*ir.Type]bool{}
-	for _, h := range abi.Handles {
-		if used[h.Name] || reserved[h.Name] {
-			return "", boundary("Swift public name collision: %s", h.Name)
+	// A public name that Swift, Foundation or the runtime already uses gets a
+	// trailing underscore, as Rust renames a method named Self to Self_.
+	public := func(name string) string {
+		for used[name] || reserved[name] {
+			name += "_"
 		}
-		used[h.Name] = true
+		used[name] = true
+		return name
+	}
+	handleElems := map[*ir.Type]bool{}
+	handleNames := map[*ir.Handle]string{}
+	e.handleNames = handleNames
+	for _, h := range abi.Handles {
+		handleNames[h] = public(h.Name)
 		handleElems[h.Elem] = true
 	}
 	for _, t := range e.p.Types.All {
 		if t.Kind == ir.KNamed && roots[t.Pkg] && token.IsExported(t.Obj) && t.U().Kind == ir.KStruct && !handleElems[t] && libraryValue(t, map[*ir.Type]bool{}) {
-			if used[t.Obj] || reserved[t.Obj] {
-				return "", boundary("Swift public name collision: %s", t.Obj)
-			}
-			used[t.Obj] = true
-			names[t.U()] = t.Obj
+			names[t.U()] = public(t.Obj)
 		}
 	}
 	var typ func(*ir.Type) string
@@ -351,7 +355,7 @@ func (e *emitter) library() (string, error) {
 		}
 	}
 	for _, h := range abi.Handles {
-		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close() when\n/// done; deinit releases it without running Close.\npublic final class %s {\n    let handle: GHandle\n    init(_ handle: GHandle) { self.handle = handle }\n    deinit { GLibrary.finalize(handle) }\n", h.Name, swiftPublic(h.Name))
+		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close() when\n/// done; deinit releases it without running Close.\npublic final class %s {\n    let handle: GHandle\n    init(_ handle: GHandle) { self.handle = handle }\n    deinit { GLibrary.finalize(handle) }\n", h.Name, swiftPublic(handleNames[h]))
 		start := "nil"
 		if h.Close != nil {
 			start = fmt.Sprintf("{ args, context, objects in %s([objects[0]], []) }", e.names.Symbol(h.Close.Sym))
@@ -384,7 +388,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	ptyp := func(t *ir.Type) string {
 		if h := abi.Handle(t); h != nil {
 			// Qualified: inside a handle class a method may shadow the type name.
-			return "GoalchemyGenerated." + swiftPublic(h.Name) + "?"
+			return "GoalchemyGenerated." + swiftPublic(e.handleNames[h]) + "?"
 		}
 		if ir.StreamKind(t) != "" {
 			return "GoalchemySourceStream?"
@@ -456,7 +460,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	}
 	out := func(i int) string {
 		if h := abi.Handle(results[i]); h != nil {
-			return fmt.Sprintf("GLibrary.wrap(instance, rv[%d], %q, GoalchemyGenerated.%s.init)", i, h.Name, swiftPublic(h.Name))
+			return fmt.Sprintf("GLibrary.wrap(instance, rv[%d], %q, GoalchemyGenerated.%s.init)", i, h.Name, swiftPublic(e.handleNames[h]))
 		}
 		if k := ir.StreamKind(results[i]); k != "" {
 			return fmt.Sprintf("{ if case .nilValue = rv[%d] { return nil }; return GLibrary.wrap(instance, .pointer(GCell(rv[%d])), \"io.%s\", { GoalchemySourceStream($0, gStreamOps%s) }) }()", i, i, k, k)

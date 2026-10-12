@@ -87,7 +87,10 @@ API. These collisions produce a library-boundary diagnostic in both modes,
 rather than invalid target code. For example, Rust rejects public structs named
 `V`, `LibraryError`, or `Vec`, and exported functions named `Some`, `None`, `Ok`,
 or `Err`; Python rejects exported functions named `None`, `True`, or `False`.
-These names remain usable internally when the source language permits them.
+Swift instead renames a colliding public struct or handle with a trailing
+underscore (`Error` becomes `Error_`), since Swift and Foundation reserve
+common type names such as `Error`, `Data` and `Task`. These names remain
+usable internally when the source language permits them.
 
 Readable names help inspect generated source; they do not reconstruct Go's
 original control flow or replace source maps. Some targets still store values

@@ -106,29 +106,41 @@ func TestNamingModes(t *testing.T) {
 	}
 }
 
-func TestLibraryBoundaryDiagnostics(t *testing.T) {
+func TestReservedPublicNamesRenamed(t *testing.T) {
 	for _, compact := range []bool{false, true} {
-		for _, name := range []string{"String", "Array", "Result", "Data", "Task", "GoalchemyKey", "GBuffer", "GCryptoKey", "DispatchTime"} {
+		for _, name := range []string{"Error", "String", "Array", "Result", "Data", "Task", "GoalchemyKey", "GBuffer", "GCryptoKey", "DispatchTime"} {
 			t.Run(fmt.Sprintf("compact=%v/%s", compact, name), func(t *testing.T) {
 				result := buildSwift(t, "package boundary\ntype "+name+" struct { Value int };func Export(v "+name+")("+name+",error){return v,nil}")
 				result.IR.CompactNames = compact
-				_, err := swiftemit.Emit(result.IR, nil)
-				if _, ok := err.(*swiftemit.LibraryBoundaryError); !ok {
-					t.Fatalf("reserved name must fail boundary validation: %v", err)
+				o, err := swiftemit.Emit(result.IR, nil)
+				if err != nil {
+					t.Fatalf("reserved public name must be renamed, not rejected: %v", err)
 				}
-				ds := driver.EmitWithOptions("swift", result, t.TempDir(), driver.EmitOptions{CompactNames: compact})
-				found := false
-				for _, d := range ds {
-					found = found || d.Code == "GCE007"
+				library := generatedSource(o)
+				if !bytes.Contains(library, []byte("public struct `"+name+"_` {")) || !bytes.Contains(library, []byte("public func `Export`(_ a0: `"+name+"_`")) {
+					t.Fatalf("missing renamed public struct %s_ in generated library", name)
 				}
-				if !found {
-					t.Fatalf("missing GCE007: %v", ds)
+				if ds := driver.EmitWithOptions("swift", result, t.TempDir(), driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+					t.Fatalf("unexpected diagnostics: %v", ds)
 				}
 			})
 		}
 	}
 }
 
+func TestReservedHandleNameRenamed(t *testing.T) {
+	result := buildSwift(t, "package boundary\ntype Task struct { n int64 }\nfunc New() *Task { return &Task{} }\nfunc (c *Task) Add(d int64) int64 { c.n += d; return c.n }")
+	o, err := swiftemit.Emit(result.IR, nil)
+	if err != nil {
+		t.Fatalf("reserved handle name must be renamed, not rejected: %v", err)
+	}
+	library := generatedSource(o)
+	for _, want := range []string{"public final class `Task_` {", "GoalchemyGenerated.`Task_`?", "\"Task\", GoalchemyGenerated.`Task_`.init"} {
+		if !bytes.Contains(library, []byte(want)) {
+			t.Fatalf("missing %q in generated library", want)
+		}
+	}
+}
 func TestBulkByteEmission(t *testing.T) {
 	result := buildSwift(t, `package bytes
  type Octet uint8
