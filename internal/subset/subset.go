@@ -148,6 +148,7 @@ var replacement = map[string]string{
 	"sync": "lib", "context": "lib", "runtime": "lib", "errors": "std", "fmt": "std",
 	"strconv": "std", "strings": "std", "bytes": "std", "sort": "std", "unicode": "std",
 	"unicode/utf8": "std", "io": "std", "encoding/hex": "std", "encoding/binary": "std", "log/slog": "std", "os": "std",
+	"net": "std", "net/url": "std",
 }
 
 func (c *checker) decl(d ast.Decl) {

@@ -260,6 +260,8 @@ The split, and the core runtime layer behind both, is explained in [the runtime 
 | `github.com/eugenioenko/goalchemy/std/http` | `Do`, `Request`, `Response`: an HTTP request whose body is an `io.Reader` and whose response body is an `io.ReadCloser`, [streamed](#streamed-http-bodies) (cooperative gate) |
 | `github.com/eugenioenko/goalchemy/std/connect` | `Client`, `NewClient`, `CallUnary`, `Error`, `ErrorDetail`, `Code` and its constants, `CodeOf`: unary Connect calls with the JSON codec, used by [generated service clients](protobuf.md#services) (cooperative gate) |
 | `github.com/eugenioenko/goalchemy/std/time` | `Time`, `Duration`, `Now`, `Sleep` (cooperative gate), `Unix`, `Date`, `Since`, `Until`, `Add`/`Sub`/`AddDate`, `Truncate`/`Round`, `Format`/`Parse` for `RFC3339` and `RFC3339Nano`, `ParseDuration` (UTC only; see below) |
+| `github.com/eugenioenko/goalchemy/std/net/url` | `Parse`, `ParseRequestURI`, `URL` with `String`, `Hostname`, `Port`, `Query`, `IsAbs`, `JoinPath`, `ResolveReference`, `Parse`, `EscapedPath`, `RequestURI`, `Redacted`, `Clone` and `MarshalBinary`/`UnmarshalBinary`; `JoinPath`, `PathEscape`/`PathUnescape`, `QueryEscape`/`QueryUnescape`, `Values` (`Get`, `Set`, `Add`, `Del`, `Has`, `Encode`, `Clone`), `ParseQuery`, `User`, `UserPassword`, `Userinfo`, `Error`, `EscapeError`, `InvalidHostError` (see below) |
+| `github.com/eugenioenko/goalchemy/std/net` | `JoinHostPort`, `SplitHostPort`, `AddrError`; no dialing, listening or name resolution |
 | `github.com/eugenioenko/goalchemy/std/errors` | `New`, `Is`, `As`, `Unwrap`, `Join`, `ErrUnsupported`, including `Unwrap() []error` trees |
 | `github.com/eugenioenko/goalchemy/std/fmt` | `Sprintf`, `Sprint`, `Sprintln`, `Errorf` with one or more `%w`, `Append`/`Appendf`/`Appendln`, `Stringer`, `GoStringer`, `Formatter`, `State`, `FormatString` (see below) |
 | `github.com/eugenioenko/goalchemy/std/os` | `ReadFile`, `WriteFile`, `PathError`, `FileMode`, `ErrNotExist`, `ErrExist`, `ErrPermission`, `ErrInvalid`, `MaxFileBytes` (see below) |
@@ -286,6 +288,12 @@ The [runtime library reference](library.md) documents every function. For `lib/`
 - `Format` and `AppendFormat` accept only `RFC3339` and `RFC3339Nano` and panic on any other layout. `Parse` returns an error for any other layout. For these two layouts, `Parse` accepts and rejects the same inputs as Go, with the same error text.
 - `Now` has no monotonic reading, so `Since`, `Until` and `Sub` follow host clock adjustments. `Now` precision is the host clock's: milliseconds on TypeScript, microseconds or better elsewhere.
 - `Sleep` takes a `std/time.Duration` and delegates to `lib/time.Sleep`. `lib/time.Duration`, used by `lib/context.WithTimeout`, is a separate type; convert with `libtime.Duration(d)`.
+
+`std/net/url` is a port of the reference toolchain's `net/url`, with the same parsing rules, escaping, results and error text, checked against it by Go unit tests:
+
+- Parsing follows the defaults Go applies to a module declaring `go 1.25`, the Goalchemy source baseline: a host with several colons, such as `https://example.com:80:`, is accepted (GODEBUG `urlstrictcolons=0`), and `ParseQuery` rejects more than 10000 parameters.
+- Bracketed IPv6 hosts are validated as `net/netip.ParseAddr` does, with its error text, without depending on `net/netip`.
+- `Error.Err` values carry Go's messages. Errors Go builds with `fmt.Errorf` are `errors.New` values here, and the `invalid host:` error still unwraps to its cause.
 
 `std/fmt` and `std/errors` work without reflection:
 
