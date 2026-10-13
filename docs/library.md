@@ -37,6 +37,8 @@ Why two importable roots:
 | [io](#stdio) | `github.com/eugenioenko/goalchemy/std/io` | Package io provides basic interfaces to I/O primitives and helpers that combine them, matching Go's io package. |
 | [io/hostio](#stdiohostio) | `github.com/eugenioenko/goalchemy/std/io/hostio` | Package hostio adapts host streams passed to library exports as std/io interfaces. |
 | [log/slog](#stdlogslog) | `github.com/eugenioenko/goalchemy/std/log/slog` | Package slog provides structured logging with Go's log/slog API. |
+| [net](#stdnet) | `github.com/eugenioenko/goalchemy/std/net` | Package net provides the host and port helpers of Go's net package: JoinHostPort, SplitHostPort and AddrError. |
+| [net/url](#stdneturl) | `github.com/eugenioenko/goalchemy/std/net/url` | Package url parses URLs and implements query escaping, following Go's net/url: the same parsing rules, escaping and error messages. |
 | [os](#stdos) | `github.com/eugenioenko/goalchemy/std/os` | Package os reads and writes whole files on the host file system. |
 | [sort](#stdsort) | `github.com/eugenioenko/goalchemy/std/sort` | Package sort sorts collections through the Len, Less, and Swap methods. |
 | [strconv](#stdstrconv) | `github.com/eugenioenko/goalchemy/std/strconv` | Package strconv converts between integers, Booleans, and their string forms, and formats floating-point numbers. |
@@ -4170,6 +4172,462 @@ func (v Value) Uint64() uint64
 ```
 
 Uint64 returns v's value as a uint64. It panics if v is not an unsigned integer.
+
+
+## std/net
+
+```go
+import "github.com/eugenioenko/goalchemy/std/net"
+```
+
+Package net provides the host and port helpers of Go's net package: JoinHostPort, SplitHostPort and AddrError. Dialing, listening and name resolution are not provided.
+
+### JoinHostPort
+
+```go
+func JoinHostPort(host, port string) string
+```
+
+JoinHostPort combines host and port into a network address of the form "host:port". If host contains a colon, as found in literal IPv6 addresses, then JoinHostPort returns "[host]:port".
+
+### SplitHostPort
+
+```go
+func SplitHostPort(hostport string) (host, port string, err error)
+```
+
+SplitHostPort splits a network address of the form "host:port", "host%zone:port", "[host]:port" or "[host%zone]:port" into host or host%zone and port. A literal IPv6 address in hostport must be enclosed in square brackets, as in "[::1]:80", "[::1%lo0]:80".
+
+### type AddrError
+
+```go
+type AddrError struct {
+	Err  string
+	Addr string
+}
+```
+
+AddrError reports an error with an address, as net.AddrError does.
+
+### AddrError.Error
+
+```go
+func (e *AddrError) Error() string
+```
+
+### AddrError.Temporary
+
+```go
+func (e *AddrError) Temporary() bool
+```
+
+### AddrError.Timeout
+
+```go
+func (e *AddrError) Timeout() bool
+```
+
+
+## std/net/url
+
+```go
+import "github.com/eugenioenko/goalchemy/std/net/url"
+```
+
+Package url parses URLs and implements query escaping, following Go's net/url: the same parsing rules, escaping and error messages. Bracketed IPv6 hosts are validated as net/netip does. Behavior matches Go's defaults for a module declaring go 1.25: urlstrictcolons=0, so hosts with several colons are accepted, and ParseQuery accepts at most 10000 parameters.
+
+### JoinPath
+
+```go
+func JoinPath(base string, elem ...string) (result string, err error)
+```
+
+JoinPath returns a URL string with the provided path elements joined to the existing path of base and the resulting path cleaned of any ./ or ../ elements. Path elements must already be in escaped form, as produced by PathEscape.
+
+### PathEscape
+
+```go
+func PathEscape(s string) string
+```
+
+PathEscape escapes the string so it can be safely placed inside a URL path segment, replacing special characters (including /) with %XX sequences as needed.
+
+### PathUnescape
+
+```go
+func PathUnescape(s string) (string, error)
+```
+
+PathUnescape does the inverse transformation of PathEscape, converting each 3-byte encoded substring of the form "%AB" into the hex-decoded byte 0xAB. It returns an error if any % is not followed by two hexadecimal digits. PathUnescape is identical to QueryUnescape except that it does not unescape '+' to ' ' (space).
+
+### QueryEscape
+
+```go
+func QueryEscape(s string) string
+```
+
+QueryEscape escapes the string so it can be safely placed inside a URL query.
+
+### QueryUnescape
+
+```go
+func QueryUnescape(s string) (string, error)
+```
+
+QueryUnescape does the inverse transformation of QueryEscape, converting each 3-byte encoded substring of the form "%AB" into the hex-decoded byte 0xAB. It returns an error if any % is not followed by two hexadecimal digits.
+
+### type Error
+
+```go
+type Error struct {
+	Op  string
+	URL string
+	Err error
+}
+```
+
+Error reports an error and the operation and URL that caused it.
+
+### Error.Error
+
+```go
+func (e *Error) Error() string
+```
+
+### Error.Temporary
+
+```go
+func (e *Error) Temporary() bool
+```
+
+Temporary reports whether Err reports a temporary condition.
+
+### Error.Timeout
+
+```go
+func (e *Error) Timeout() bool
+```
+
+Timeout reports whether Err reports a timeout.
+
+### Error.Unwrap
+
+```go
+func (e *Error) Unwrap() error
+```
+
+### type EscapeError
+
+```go
+type EscapeError string
+```
+
+EscapeError reports an invalid %-escape.
+
+### EscapeError.Error
+
+```go
+func (e EscapeError) Error() string
+```
+
+### type InvalidHostError
+
+```go
+type InvalidHostError string
+```
+
+InvalidHostError reports an invalid character in a host name.
+
+### InvalidHostError.Error
+
+```go
+func (e InvalidHostError) Error() string
+```
+
+### type URL
+
+```go
+type URL struct {
+	Scheme      string
+	Opaque      string
+	User        *Userinfo
+	Host        string
+	Path        string
+	Fragment    string
+	RawQuery    string
+	RawPath     string
+	RawFragment string
+	ForceQuery  bool
+	OmitHost    bool
+}
+```
+
+A URL represents a parsed URL (technically, a URI reference). The general form represented is: [scheme:][//[userinfo@]host][/]path[?query][#fragment] URLs that do not start with a slash after the scheme are interpreted as: scheme:opaque[?query][#fragment] Path and Fragment are stored in decoded form; RawPath and RawFragment hold their original encoding when it differs from the default one.
+
+### Parse
+
+```go
+func Parse(rawURL string) (*URL, error)
+```
+
+Parse parses a raw url into a URL structure. The url may be relative (a path, without a host) or absolute (starting with a scheme). Trying to parse a hostname and path without a scheme is invalid but may not necessarily return an error, due to parsing ambiguities.
+
+### ParseRequestURI
+
+```go
+func ParseRequestURI(rawURL string) (*URL, error)
+```
+
+ParseRequestURI parses a raw url into a URL structure. It assumes that url was received in an HTTP request, so the url is interpreted only as an absolute URI or an absolute path. The string url is assumed not to have a #fragment suffix.
+
+### URL.AppendBinary
+
+```go
+func (u *URL) AppendBinary(b []byte) ([]byte, error)
+```
+
+AppendBinary appends the String form of u to b.
+
+### URL.Clone
+
+```go
+func (u *URL) Clone() *URL
+```
+
+Clone creates a deep copy of the fields of the subject URL.
+
+### URL.EscapedFragment
+
+```go
+func (u *URL) EscapedFragment() string
+```
+
+EscapedFragment returns the escaped form of u.Fragment. In general there are multiple possible escaped forms of any fragment. EscapedFragment returns u.RawFragment when it is a valid escaping of u.Fragment. Otherwise EscapedFragment ignores u.RawFragment and computes an escaped form on its own.
+
+### URL.EscapedPath
+
+```go
+func (u *URL) EscapedPath() string
+```
+
+EscapedPath returns the escaped form of u.Path. In general there are multiple possible escaped forms of any path. EscapedPath returns u.RawPath when it is a valid escaping of u.Path. Otherwise EscapedPath ignores u.RawPath and computes an escaped form on its own.
+
+### URL.Hostname
+
+```go
+func (u *URL) Hostname() string
+```
+
+Hostname returns u.Host, stripping any valid port number if present. If the result is enclosed in square brackets, as literal IPv6 addresses are, the square brackets are removed from the result.
+
+### URL.IsAbs
+
+```go
+func (u *URL) IsAbs() bool
+```
+
+IsAbs reports whether the URL is absolute. Absolute means that it has a non-empty scheme.
+
+### URL.JoinPath
+
+```go
+func (u *URL) JoinPath(elem ...string) *URL
+```
+
+JoinPath returns a new URL with the provided path elements joined to any existing path and the resulting path cleaned of any ./ or ../ elements. Any sequences of multiple / characters will be reduced to a single /. Path elements must already be in escaped form, as produced by PathEscape.
+
+### URL.MarshalBinary
+
+```go
+func (u *URL) MarshalBinary() (text []byte, err error)
+```
+
+MarshalBinary returns the String form of u.
+
+### URL.Parse
+
+```go
+func (u *URL) Parse(ref string) (*URL, error)
+```
+
+Parse parses a URL in the context of the receiver. The provided URL may be relative or absolute. Parse returns nil, err on parse failure, otherwise its return value is the same as ResolveReference.
+
+### URL.Port
+
+```go
+func (u *URL) Port() string
+```
+
+Port returns the port part of u.Host, without the leading colon. If u.Host doesn't contain a valid numeric port, Port returns an empty string.
+
+### URL.Query
+
+```go
+func (u *URL) Query() Values
+```
+
+Query parses RawQuery and returns the corresponding values. It silently discards malformed value pairs. To check errors use ParseQuery.
+
+### URL.Redacted
+
+```go
+func (u *URL) Redacted() string
+```
+
+Redacted is like String but replaces any password with "xxxxx". Only the password in u.User is redacted.
+
+### URL.RequestURI
+
+```go
+func (u *URL) RequestURI() string
+```
+
+RequestURI returns the encoded path?query or opaque?query string that would be used in an HTTP request for u.
+
+### URL.ResolveReference
+
+```go
+func (u *URL) ResolveReference(ref *URL) *URL
+```
+
+ResolveReference resolves a URI reference to an absolute URI from an absolute base URI u, per RFC 3986 Section 5.2. The URI reference may be relative or absolute. ResolveReference always returns a new URL instance, even if the returned URL is identical to either the base or reference. If ref is an absolute URL, then ResolveReference ignores base and returns a copy of ref.
+
+### URL.String
+
+```go
+func (u *URL) String() string
+```
+
+String reassembles the URL into a valid URL string. The general form of the result is one of: scheme:opaque?query#fragment scheme://userinfo@host/path?query#fragment If u.Opaque is non-empty, String uses the first form; otherwise it uses the second form. Any non-ASCII characters in host are escaped. To obtain the path, String uses u.EscapedPath().
+
+### URL.UnmarshalBinary
+
+```go
+func (u *URL) UnmarshalBinary(text []byte) error
+```
+
+UnmarshalBinary parses text with Parse and stores the result in u.
+
+### type Userinfo
+
+```go
+type Userinfo struct {
+}
+```
+
+The Userinfo type is an immutable encapsulation of username and password details for a URL.
+
+### User
+
+```go
+func User(username string) *Userinfo
+```
+
+User returns a Userinfo containing the provided username and no password set.
+
+### UserPassword
+
+```go
+func UserPassword(username, password string) *Userinfo
+```
+
+UserPassword returns a Userinfo containing the provided username and password.
+
+### Userinfo.Password
+
+```go
+func (u *Userinfo) Password() (string, bool)
+```
+
+Password returns the password in case it is set, and whether it is set.
+
+### Userinfo.String
+
+```go
+func (u *Userinfo) String() string
+```
+
+String returns the encoded userinfo information in the standard form of "username[:password]".
+
+### Userinfo.Username
+
+```go
+func (u *Userinfo) Username() string
+```
+
+Username returns the username.
+
+### type Values
+
+```go
+type Values map[string][]string
+```
+
+Values maps a string key to a list of values. It is typically used for query parameters and form values. The keys in a Values map are case-sensitive.
+
+### ParseQuery
+
+```go
+func ParseQuery(query string) (Values, error)
+```
+
+ParseQuery parses the URL-encoded query string and returns a map listing the values specified for each key. ParseQuery always returns a non-nil map containing all the valid query parameters found; err describes the first decoding error encountered, if any. Query is expected to be a list of key=value settings separated by ampersands. A setting without an equals sign is interpreted as a key set to an empty value. Settings containing a non-URL-encoded semicolon are considered invalid. More than 10000 settings are rejected.
+
+### Values.Add
+
+```go
+func (v Values) Add(key, value string)
+```
+
+Add adds the value to key. It appends to any existing values associated with key.
+
+### Values.Clone
+
+```go
+func (vs Values) Clone() Values
+```
+
+Clone creates a deep copy of the subject Values.
+
+### Values.Del
+
+```go
+func (v Values) Del(key string)
+```
+
+Del deletes the values associated with key.
+
+### Values.Encode
+
+```go
+func (v Values) Encode() string
+```
+
+Encode encodes the values into “URL encoded” form ("bar=baz&foo=quux") sorted by key.
+
+### Values.Get
+
+```go
+func (v Values) Get(key string) string
+```
+
+Get gets the first value associated with the given key. If there are no values associated with the key, Get returns the empty string. To access multiple values, use the map directly.
+
+### Values.Has
+
+```go
+func (v Values) Has(key string) bool
+```
+
+Has checks whether a given key is set.
+
+### Values.Set
+
+```go
+func (v Values) Set(key, value string)
+```
+
+Set sets the key to value. It replaces any existing values.
 
 
 ## std/os
