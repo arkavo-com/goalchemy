@@ -24,10 +24,11 @@ type Output struct {
 }
 
 type emitter struct {
-	p         *ir.Program
-	names     *naming.Names
-	contracts map[string]bool
-	symbols   map[string]string
+	p           *ir.Program
+	names       *naming.Names
+	handleNames map[*ir.Handle]string
+	contracts   map[string]bool
+	symbols     map[string]string
 }
 
 func quote(s string) string { return strconv.Quote(s) }

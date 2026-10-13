@@ -25,7 +25,10 @@ func (c *Counter) Close() error          { return nil } // optional
 | C | `gxc_handle *` in `GXC_HANDLE` values; methods are `goalchemy_invoke("Counter.Add", ...)` with the receiver first | `gxc_handle_close`, `gxc_handle_free` |
 | Swift | `final class Counter` with methods returning `Operation` | `close()`; `deinit` releases |
 
-Rust renames a method named `Self` to `Self_`. Error kinds for closed,
+Rust renames a method named `Self` to `Self_`. Swift appends `_` to a public
+struct or handle name that Swift, Foundation or the runtime already uses
+(`Error` becomes `Error_`, `Task` becomes `Task_`); the handle's source type
+name is unchanged. Error kinds for closed,
 poisoned and mixed handles are `closed`, `poisoned` and `instance_mismatch`
 (Rust `ErrorKind::Closed`, `Poisoned`, `InstanceMismatch`; C kinds 7, 8, 9).
 
