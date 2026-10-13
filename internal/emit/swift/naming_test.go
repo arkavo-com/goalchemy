@@ -117,7 +117,7 @@ func TestReservedPublicNamesRenamed(t *testing.T) {
 					t.Fatalf("reserved public name must be renamed, not rejected: %v", err)
 				}
 				library := generatedSource(o)
-				if !bytes.Contains(library, []byte("public struct `"+name+"_` {")) || !bytes.Contains(library, []byte("public func `Export`(_ a0: `"+name+"_`")) {
+				if !bytes.Contains(library, []byte("public struct `"+name+"_` {")) || !bytes.Contains(library, []byte("public func `Export`(_ a0: GoalchemyGenerated.`"+name+"_`")) {
 					t.Fatalf("missing renamed public struct %s_ in generated library", name)
 				}
 				if ds := driver.EmitWithOptions("swift", result, t.TempDir(), driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
