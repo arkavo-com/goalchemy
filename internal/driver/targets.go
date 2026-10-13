@@ -413,7 +413,7 @@ ref=$(ls -d "$root"/packs/Microsoft.NETCore.App.Ref/8.*/ref/net8.0 | tail -n 1)
 mkdir -p bin
 refs=""
 for f in "$ref"/*.dll; do refs="$refs -r:$f"; done
-"$dotnet" "$csc" -nologo -noconfig -nostdlib -nowarn:CS0162,CS0164,CS0168,CS0219,CS1718,CS8981 -langversion:12 -nullable:disable \
+"$dotnet" "$csc" -nologo -noconfig -nostdlib -nowarn:CS0162,CS0164,CS0168,CS0219,CS1717,CS1718,CS8981 -langversion:12 -nullable:disable \
   -optimize+ -out:bin/main.dll $refs Main.cs rt/types/*.cs rt/runtime/*.cs >&2
 cat > bin/main.runtimeconfig.json <<'JSON'
 {"runtimeOptions": {"tfm": "net8.0", "framework": {"name": "Microsoft.NETCore.App", "version": "8.0.0"}}}
@@ -428,7 +428,7 @@ const csharpProject = `<Project Sdk="Microsoft.NET.Sdk">
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <NoWarn>CS0162;CS0164;CS0168;CS0219;CS1718;CS8981</NoWarn>
+    <NoWarn>CS0162;CS0164;CS0168;CS0219;CS1717;CS1718;CS8981</NoWarn>
   </PropertyGroup>
 </Project>
 `

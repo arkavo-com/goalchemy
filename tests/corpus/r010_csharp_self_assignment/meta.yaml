@@ -1,0 +1,6 @@
+id: r010
+summary: C# reported warning CS1717 on standard error when a function returned its named result by name.
+found_by: std/net/url parseQuery returning its named err result
+compiler: 0.6.2
+toolchain: go1.27.1
+targets: [csharp]
