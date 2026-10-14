@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 
 	"connectrpc.com/connect"
 	authorizationv2 "github.com/opentdf/platform/protocol/go/authorization/v2"
@@ -47,7 +48,7 @@ func classification() *policy.Attribute {
 	}
 }
 
-func (attributesServer) GetAttribute(_ context.Context, req *connect.Request[attributes.GetAttributeRequest]) (*connect.Response[attributes.GetAttributeResponse], error) {
+func (attributesServer) GetAttribute(ctx context.Context, req *connect.Request[attributes.GetAttributeRequest]) (*connect.Response[attributes.GetAttributeResponse], error) {
 	key := req.Msg.GetFqn()
 	if key == "" {
 		key = req.Msg.GetAttributeId()
@@ -56,6 +57,8 @@ func (attributesServer) GetAttribute(_ context.Context, req *connect.Request[att
 	case "a1", "https://example.com/attr/classification":
 		resp := connect.NewResponse(&attributes.GetAttributeResponse{Attribute: classification()})
 		resp.Header().Set("X-Echo", req.Header().Get("X-Probe")+"|"+req.Header().Get("X-Call"))
+		_, deadline := ctx.Deadline()
+		resp.Header().Set("X-Deadline", strconv.FormatBool(deadline))
 		return resp, nil
 	case "forbidden":
 		err := connect.NewError(connect.CodePermissionDenied, errors.New("caller may not read this attribute"))
