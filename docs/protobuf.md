@@ -90,7 +90,7 @@ if connect.CodeOf(err) == connect.CodeNotFound {
 Each method also has a `<Service><Method>Procedure` constant, and
 `Client.CallUnary` calls any procedure with per-call headers and returns the
 response headers. Requests are POSTed as `application/json` with
-`Connect-Protocol-Version: 1` and `Connect-Timeout-Ms`. Failures are
+`Connect-Protocol-Version: 1`. Failures are
 `*connect.Error` values with the code, message, details (type URL, binary
 value and JSON debug form) and response headers that connect-go reports for
 the same response, including the HTTP-status fallbacks for non-Connect
@@ -98,9 +98,14 @@ error bodies. A context that is already cancelled or past its deadline
 yields `canceled` or `deadline_exceeded`; other transport failures are
 `unavailable`.
 
-`Client.TimeoutMillis` (default 30 s) bounds each call and is sent as the
-Connect deadline; `Client.MaxResponseBytes` (default 16 MiB) bounds the
-reply.
+`Client.TimeoutMillis` (default 30 s) bounds each call locally, and a
+context deadline can shorten it; `Client.MaxResponseBytes` (default 16 MiB)
+bounds the reply. The timeout is not sent unless `Client.SendTimeout` is
+true, in which case it goes to the server as `Connect-Timeout-Ms`.
+connect-go sends that header only when the context has a deadline, and the
+subset cannot read a context's deadline, so it is off by default: a server
+whose CORS allow-list lacks `Connect-Timeout-Ms`, such as a stock OpenTDF
+platform, would otherwise fail every browser call at the preflight.
 
 `Client.HTTPClient` replaces the transport, like connect-go's `HTTPClient`
 and interceptors: set it to add credentials, DPoP proofs or an allowlist, or
