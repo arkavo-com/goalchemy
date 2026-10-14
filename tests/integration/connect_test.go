@@ -24,6 +24,7 @@ import (
 	"github.com/eugenioenko/goalchemy/std/encoding/protojson"
 	"github.com/eugenioenko/goalchemy/std/errors"
 	"github.com/eugenioenko/goalchemy/lib/http"
+	"github.com/eugenioenko/goalchemy/lib/time"
 	authorizationv2 "connectprobe/gen/authorization/v2"
 	"connectprobe/gen/entity"
 	"connectprobe/gen/policy"
@@ -145,6 +146,19 @@ func main() {
 		&attributes.GetAttributeRequest{Identifier: &attributes.GetAttributeRequest_AttributeId{AttributeId: "a1"}},
 		&attributes.GetAttributeResponse{}, []string{"X-Call", "call-2"})
 	println("echo", header(meta, "X-Echo"), err == nil)
+	println("server-deadline", header(meta, "X-Deadline"))
+	bounded, stop := context.WithTimeout(ctx, 20*time.Second)
+	meta, err = client.CallUnary(bounded, attributes.AttributesServiceGetAttributeProcedure,
+		&attributes.GetAttributeRequest{Identifier: &attributes.GetAttributeRequest_AttributeId{AttributeId: "a1"}},
+		&attributes.GetAttributeResponse{}, nil)
+	stop()
+	println("context-deadline", header(meta, "X-Deadline"), err == nil)
+	client.SendTimeout = true
+	meta, err = client.CallUnary(ctx, attributes.AttributesServiceGetAttributeProcedure,
+		&attributes.GetAttributeRequest{Identifier: &attributes.GetAttributeRequest_AttributeId{AttributeId: "a1"}},
+		&attributes.GetAttributeResponse{}, nil)
+	println("send-timeout", header(meta, "X-Deadline"), err == nil)
+	client.SendTimeout = false
 
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
@@ -242,6 +256,9 @@ func TestConnectClients(t *testing.T) {
 		"/raw/proto error internal internal: invalid content-type: \"application/proto\"; expecting \"application/json\" reason= 0\n",
 		"/no.such.Service/Method error unimplemented unimplemented: 404 Not Found reason= 0\n",
 		"echo probe-1|call-2 true\n",
+		"server-deadline false\n",
+		"context-deadline false true\n",
+		"send-timeout true true\n",
 		"cancelled canceled\n",
 		"via-get-missing error not_found not_found: attribute not found: missing reason= 1\n",
 		"via-calls 9\n",

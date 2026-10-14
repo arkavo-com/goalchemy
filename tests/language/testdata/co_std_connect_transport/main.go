@@ -4,6 +4,7 @@ package main
 
 import (
 	"github.com/eugenioenko/goalchemy/lib/context"
+	"github.com/eugenioenko/goalchemy/lib/time"
 	"github.com/eugenioenko/goalchemy/std/connect"
 	"github.com/eugenioenko/goalchemy/std/encoding/hex"
 	"github.com/eugenioenko/goalchemy/std/encoding/jsonvalue"
@@ -118,6 +119,24 @@ func main() {
 	resp := &Echo{}
 	_, err := client.CallUnary(ctx, "/test.EchoService/Ok", &Echo{}, resp, nil)
 	show("defaults", resp, nil, err)
+
+	bounded, stop := context.WithTimeout(ctx, 5*time.Second)
+	_, err = client.CallUnary(bounded, "/test.EchoService/Ok", &Echo{}, &Echo{}, nil)
+	stop()
+	show("deadline", &Echo{}, nil, err)
+	client.SendTimeout = true
+	_, err = client.CallUnary(ctx, "/test.EchoService/Ok", &Echo{}, &Echo{}, nil)
+	show("send-default", &Echo{}, nil, err)
+	client.TimeoutMillis = 2500
+	_, err = client.CallUnary(ctx, "/test.EchoService/Ok", &Echo{}, &Echo{}, nil)
+	show("send-timeout", &Echo{}, nil, err)
+	for _, millis := range []int64{9999999999, 10000000000, -1} {
+		client.TimeoutMillis = millis
+		_, err = client.CallUnary(ctx, "/test.EchoService/Ok", &Echo{}, &Echo{}, nil)
+		show("send-"+strconv.FormatInt(millis, 10), &Echo{}, nil, err)
+	}
+	client.SendTimeout = false
+	client.TimeoutMillis = 0
 
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
