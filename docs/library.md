@@ -543,8 +543,10 @@ type Client struct {
 	TimeoutMillis    int64
 	MaxResponseBytes int
 	// Transport holds lib/http.DoWith options, such as a client certificate
-	// or extra root CAs.
+	// or extra root CAs. It is ignored when HTTPClient is set.
 	Transport []string
+	// HTTPClient, when set, sends every call instead of lib/http.DoWith.
+	HTTPClient HTTPClient
 }
 ```
 
@@ -641,6 +643,16 @@ type ErrorDetail struct {
 ```
 
 ErrorDetail is one entry of an error's details: a protobuf message packed as its type URL and binary encoding, with an optional JSON debug form.
+
+### type HTTPClient
+
+```go
+type HTTPClient interface {
+	Do(ctx context.Context, method, url string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64) (int, []string, []byte, error)
+}
+```
+
+HTTPClient sends one bounded HTTP exchange with the arguments and results of lib/http.Do: headers alternate names and values, and a non-2xx status is a result, not an error. It is connect-go's HTTPClient, the place to add authentication, DPoP proofs or an allowlist.
 
 
 ## std/encoding/binary

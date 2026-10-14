@@ -581,9 +581,6 @@ func TestProto3Optional(t *testing.T) {
 // TestPlatformBuilds generates every message and unary client of the
 // platform descriptors, including messages without fields, and builds them.
 func TestPlatformBuilds(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds the whole platform")
-	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
