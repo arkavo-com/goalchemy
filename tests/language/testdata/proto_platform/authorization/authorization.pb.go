@@ -910,6 +910,110 @@ func (m *GetDecisionsResponse) MarshalJSON() ([]byte, error) { return protojson.
 
 func (m *GetDecisionsResponse) UnmarshalJSON(b []byte) error { return protojson.Unmarshal(b, m) }
 
+type GetEntitlementsRequest struct {
+	Entities                   []*Entity
+	Scope                      *ResourceAttribute
+	WithComprehensiveHierarchy *bool
+}
+
+func (m *GetEntitlementsRequest) GetEntities() []*Entity {
+	if m != nil {
+		return m.Entities
+	}
+	return nil
+}
+
+func (m *GetEntitlementsRequest) GetScope() *ResourceAttribute {
+	if m != nil {
+		return m.Scope
+	}
+	return nil
+}
+
+func (m *GetEntitlementsRequest) GetWithComprehensiveHierarchy() *bool {
+	if m != nil {
+		return m.WithComprehensiveHierarchy
+	}
+	return nil
+}
+
+func (m *GetEntitlementsRequest) EncodeProtoJSON(e *protojson.Encoder) {
+	e.BeginObject()
+	if m != nil {
+		if len(m.Entities) > 0 {
+			e.Key("entities")
+			e.BeginArray()
+			for _, v := range m.Entities {
+				e.Message(v)
+			}
+			e.EndArray()
+		}
+		if m.Scope != nil {
+			e.Key("scope")
+			e.Message(m.Scope)
+		}
+		if m.WithComprehensiveHierarchy != nil {
+			e.Key("withComprehensiveHierarchy")
+			e.Bool(*m.WithComprehensiveHierarchy)
+		}
+	}
+	e.EndObject()
+}
+
+func (m *GetEntitlementsRequest) DecodeProtoJSON(d *protojson.Decoder, v jsonvalue.Value) {
+	if !d.Object(v, "authorization.GetEntitlementsRequest") {
+		return
+	}
+	seenWithComprehensiveHierarchy := false
+	for _, k := range v.Keys() {
+		f := v.Get(k)
+		switch k {
+		case "entities":
+			if f.IsNull() {
+				break
+			}
+			if !d.Array(f, "entities") {
+				return
+			}
+			for i := 0; i < f.Len(); i++ {
+				el := f.Index(i)
+				if el.IsNull() {
+					d.NullElement("entities")
+					return
+				}
+				x := &Entity{}
+				x.DecodeProtoJSON(d, el)
+				m.Entities = append(m.Entities, x)
+			}
+		case "scope":
+			if f.IsNull() {
+				break
+			}
+			x := &ResourceAttribute{}
+			x.DecodeProtoJSON(d, f)
+			m.Scope = x
+		case "withComprehensiveHierarchy", "with_comprehensive_hierarchy":
+			if seenWithComprehensiveHierarchy {
+				d.Duplicate(k)
+				return
+			}
+			seenWithComprehensiveHierarchy = true
+			if f.IsNull() {
+				break
+			}
+			x := d.Bool(f, "withComprehensiveHierarchy")
+			m.WithComprehensiveHierarchy = &x
+		}
+		if d.Err() != nil {
+			return
+		}
+	}
+}
+
+func (m *GetEntitlementsRequest) MarshalJSON() ([]byte, error) { return protojson.Marshal(m) }
+
+func (m *GetEntitlementsRequest) UnmarshalJSON(b []byte) error { return protojson.Unmarshal(b, m) }
+
 type ResourceAttribute struct {
 	ResourceAttributesId string
 	AttributeValueFqns   []string
@@ -1007,6 +1111,7 @@ func init() {
 		"authorization.DecisionResponse",
 		"authorization.GetDecisionsRequest",
 		"authorization.GetDecisionsResponse",
+		"authorization.GetEntitlementsRequest",
 		"authorization.ResourceAttribute",
 	}, func(name string) protojson.Message {
 		switch name {
@@ -1024,6 +1129,8 @@ func init() {
 			return &GetDecisionsRequest{}
 		case "authorization.GetDecisionsResponse":
 			return &GetDecisionsResponse{}
+		case "authorization.GetEntitlementsRequest":
+			return &GetEntitlementsRequest{}
 		case "authorization.ResourceAttribute":
 			return &ResourceAttribute{}
 		}

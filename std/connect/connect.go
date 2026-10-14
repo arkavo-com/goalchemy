@@ -97,6 +97,14 @@ func CodeOf(err error) Code {
 	return CodeUnknown
 }
 
+// HTTPClient sends one bounded HTTP exchange with the arguments and results
+// of lib/http.Do: headers alternate names and values, and a non-2xx status
+// is a result, not an error. It is connect-go's HTTPClient, the place to add
+// authentication, DPoP proofs or an allowlist.
+type HTTPClient interface {
+	Do(ctx context.Context, method, url string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64) (int, []string, []byte, error)
+}
+
 // Client calls one Connect server. Headers are sent with every call as
 // alternating names and values.
 type Client struct {
@@ -105,8 +113,10 @@ type Client struct {
 	TimeoutMillis    int64
 	MaxResponseBytes int
 	// Transport holds lib/http.DoWith options, such as a client certificate
-	// or extra root CAs.
+	// or extra root CAs. It is ignored when HTTPClient is set.
 	Transport []string
+	// HTTPClient, when set, sends every call instead of lib/http.DoWith.
+	HTTPClient HTTPClient
 }
 
 // DefaultTimeoutMillis bounds calls of a client whose TimeoutMillis is zero.
@@ -259,7 +269,14 @@ func (c *Client) CallUnary(ctx context.Context, procedure string, req, resp prot
 		"Connect-Timeout-Ms", strconv.FormatInt(timeout, 10)}
 	h = append(h, c.Headers...)
 	h = append(h, headers...)
-	status, meta, reply, err := http.DoWith(ctx, "POST", c.BaseURL+procedure, h, body, limit, timeout, c.Transport)
+	var status int
+	var meta []string
+	var reply []byte
+	if c.HTTPClient != nil {
+		status, meta, reply, err = c.HTTPClient.Do(ctx, "POST", c.BaseURL+procedure, h, body, limit, timeout)
+	} else {
+		status, meta, reply, err = http.DoWith(ctx, "POST", c.BaseURL+procedure, h, body, limit, timeout, c.Transport)
+	}
 	if err != nil {
 		return nil, transportError(ctx, err)
 	}

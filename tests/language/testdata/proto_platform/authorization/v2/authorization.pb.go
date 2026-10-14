@@ -688,6 +688,83 @@ func (m *GetDecisionResponse) MarshalJSON() ([]byte, error) { return protojson.M
 
 func (m *GetDecisionResponse) UnmarshalJSON(b []byte) error { return protojson.Unmarshal(b, m) }
 
+type GetEntitlementsRequest struct {
+	EntityIdentifier           *EntityIdentifier
+	WithComprehensiveHierarchy *bool
+}
+
+func (m *GetEntitlementsRequest) GetEntityIdentifier() *EntityIdentifier {
+	if m != nil {
+		return m.EntityIdentifier
+	}
+	return nil
+}
+
+func (m *GetEntitlementsRequest) GetWithComprehensiveHierarchy() *bool {
+	if m != nil {
+		return m.WithComprehensiveHierarchy
+	}
+	return nil
+}
+
+func (m *GetEntitlementsRequest) EncodeProtoJSON(e *protojson.Encoder) {
+	e.BeginObject()
+	if m != nil {
+		if m.EntityIdentifier != nil {
+			e.Key("entityIdentifier")
+			e.Message(m.EntityIdentifier)
+		}
+		if m.WithComprehensiveHierarchy != nil {
+			e.Key("withComprehensiveHierarchy")
+			e.Bool(*m.WithComprehensiveHierarchy)
+		}
+	}
+	e.EndObject()
+}
+
+func (m *GetEntitlementsRequest) DecodeProtoJSON(d *protojson.Decoder, v jsonvalue.Value) {
+	if !d.Object(v, "authorization.v2.GetEntitlementsRequest") {
+		return
+	}
+	seenEntityIdentifier := false
+	seenWithComprehensiveHierarchy := false
+	for _, k := range v.Keys() {
+		f := v.Get(k)
+		switch k {
+		case "entityIdentifier", "entity_identifier":
+			if seenEntityIdentifier {
+				d.Duplicate(k)
+				return
+			}
+			seenEntityIdentifier = true
+			if f.IsNull() {
+				break
+			}
+			x := &EntityIdentifier{}
+			x.DecodeProtoJSON(d, f)
+			m.EntityIdentifier = x
+		case "withComprehensiveHierarchy", "with_comprehensive_hierarchy":
+			if seenWithComprehensiveHierarchy {
+				d.Duplicate(k)
+				return
+			}
+			seenWithComprehensiveHierarchy = true
+			if f.IsNull() {
+				break
+			}
+			x := d.Bool(f, "withComprehensiveHierarchy")
+			m.WithComprehensiveHierarchy = &x
+		}
+		if d.Err() != nil {
+			return
+		}
+	}
+}
+
+func (m *GetEntitlementsRequest) MarshalJSON() ([]byte, error) { return protojson.Marshal(m) }
+
+func (m *GetEntitlementsRequest) UnmarshalJSON(b []byte) error { return protojson.Unmarshal(b, m) }
+
 func init() {
 	protojson.Register([]string{
 		"authorization.v2.EntityIdentifier",
@@ -696,6 +773,7 @@ func init() {
 		"authorization.v2.ResourceDecision",
 		"authorization.v2.GetDecisionRequest",
 		"authorization.v2.GetDecisionResponse",
+		"authorization.v2.GetEntitlementsRequest",
 	}, func(name string) protojson.Message {
 		switch name {
 		case "authorization.v2.EntityIdentifier":
@@ -710,6 +788,8 @@ func init() {
 			return &GetDecisionRequest{}
 		case "authorization.v2.GetDecisionResponse":
 			return &GetDecisionResponse{}
+		case "authorization.v2.GetEntitlementsRequest":
+			return &GetEntitlementsRequest{}
 		}
 		return nil
 	})

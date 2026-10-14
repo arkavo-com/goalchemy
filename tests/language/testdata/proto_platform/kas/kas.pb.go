@@ -8,6 +8,22 @@ import (
 	protojson "github.com/eugenioenko/goalchemy/std/encoding/protojson"
 )
 
+type InfoRequest struct {
+}
+
+func (m *InfoRequest) EncodeProtoJSON(e *protojson.Encoder) {
+	e.BeginObject()
+	e.EndObject()
+}
+
+func (m *InfoRequest) DecodeProtoJSON(d *protojson.Decoder, v jsonvalue.Value) {
+	d.Object(v, "kas.InfoRequest")
+}
+
+func (m *InfoRequest) MarshalJSON() ([]byte, error) { return protojson.Marshal(m) }
+
+func (m *InfoRequest) UnmarshalJSON(b []byte) error { return protojson.Unmarshal(b, m) }
+
 type PolicyBinding struct {
 	Algorithm string
 	Hash      string
@@ -1341,6 +1357,7 @@ func (m *RewrapResponse) UnmarshalJSON(b []byte) error { return protojson.Unmars
 
 func init() {
 	protojson.Register([]string{
+		"kas.InfoRequest",
 		"kas.PolicyBinding",
 		"kas.KeyAccess",
 		"kas.UnsignedRewrapRequest",
@@ -1355,6 +1372,8 @@ func init() {
 		"kas.RewrapResponse",
 	}, func(name string) protojson.Message {
 		switch name {
+		case "kas.InfoRequest":
+			return &InfoRequest{}
 		case "kas.PolicyBinding":
 			return &PolicyBinding{}
 		case "kas.KeyAccess":

@@ -23,6 +23,7 @@ import (
 	"github.com/eugenioenko/goalchemy/std/encoding/jsonvalue"
 	"github.com/eugenioenko/goalchemy/std/encoding/protojson"
 	"github.com/eugenioenko/goalchemy/std/errors"
+	"github.com/eugenioenko/goalchemy/lib/http"
 	authorizationv2 "connectprobe/gen/authorization/v2"
 	"connectprobe/gen/entity"
 	"connectprobe/gen/policy"
@@ -38,6 +39,15 @@ func header(h []string, name string) string {
 		}
 	}
 	return ""
+}
+
+type passthrough struct {
+	calls int
+}
+
+func (p *passthrough) Do(ctx context.Context, method, url string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64) (int, []string, []byte, error) {
+	p.calls++
+	return http.Do(ctx, method, url, headers, body, maxResponseBytes, timeoutMillis)
 }
 
 func show(label string, m protojson.Message, err error) {
@@ -115,11 +125,21 @@ func main() {
 	deny, err = authz.GetDecision(ctx, &authorizationv2.GetDecisionRequest{})
 	show("decision-missing", deny, err)
 
+	via := connect.NewClient(base)
+	via.Headers = client.Headers
+	pass := &passthrough{}
+	via.HTTPClient = pass
 	for _, path := range []string{"/raw/unavailable", "/raw/badjson", "/raw/nocode", "/raw/unknowncode", "/raw/html", "/raw/proto", "/raw/garbage", "/no.such.Service/Method"} {
 		resp := &attributes.GetAttributeResponse{}
 		_, err := client.CallUnary(ctx, path, &attributes.GetAttributeRequest{}, resp, nil)
 		show(path, resp, err)
+		resp = &attributes.GetAttributeResponse{}
+		_, err = via.CallUnary(ctx, path, &attributes.GetAttributeRequest{}, resp, nil)
+		show("via"+path, resp, err)
 	}
+	got, err = attributes.NewAttributesServiceClient(via).GetAttribute(ctx, &attributes.GetAttributeRequest{Identifier: &attributes.GetAttributeRequest_Fqn{Fqn: "missing"}})
+	show("via-get-missing", got, err)
+	println("via-calls", pass.calls)
 
 	meta, err := client.CallUnary(ctx, attributes.AttributesServiceGetAttributeProcedure,
 		&attributes.GetAttributeRequest{Identifier: &attributes.GetAttributeRequest_AttributeId{AttributeId: "a1"}},
@@ -223,9 +243,14 @@ func TestConnectClients(t *testing.T) {
 		"/no.such.Service/Method error unimplemented unimplemented: 404 Not Found reason= 0\n",
 		"echo probe-1|call-2 true\n",
 		"cancelled canceled\n",
+		"via-get-missing error not_found not_found: attribute not found: missing reason= 1\n",
+		"via-calls 9\n",
 	} {
 		if !strings.Contains(want.Stderr, line) {
 			t.Errorf("native output lacks %q:\n%s", line, want.Stderr)
+		}
+		if strings.HasPrefix(line, "/") && !strings.Contains(want.Stderr, "via"+line) {
+			t.Errorf("native output through HTTPClient lacks %q:\n%s", "via"+line, want.Stderr)
 		}
 	}
 	targets := []string{"go", "typescript", "python", "java", "csharp", "rust", "c", "swift"}

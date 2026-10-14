@@ -40,7 +40,8 @@ interface for the oneof field.
 | Proto | Go |
 | --- | --- |
 | scalar | `bool`, `int32`, `int64`, `uint32`, `uint64`, `float32`, `float64`, `string`, `[]byte` |
-| `optional` scalar | pointer to the scalar |
+| `optional` scalar or enum | pointer to the scalar (`*bool`), encoded whenever set, even to zero; `GetX` returns the pointer |
+| `optional` message | pointer to the generated struct, as without `optional` |
 | enum | named `int32` with `_name` and `_value` maps and `String` |
 | message | pointer to the generated struct |
 | `repeated T`, `map<K, V>` | `[]T`, `map[K]V` |
@@ -101,6 +102,27 @@ yields `canceled` or `deadline_exceeded`; other transport failures are
 Connect deadline; `Client.MaxResponseBytes` (default 16 MiB) bounds the
 reply.
 
+`Client.HTTPClient` replaces the transport, like connect-go's `HTTPClient`
+and interceptors: set it to add credentials, DPoP proofs or an allowlist, or
+to record calls in tests. Its `Do` has the arguments and results of
+`lib/http.Do`; it receives the method, the full URL, the Connect and client
+headers, the JSON body and the client's response bound and timeout, and a
+non-2xx status is a result rather than an error. Its response is decoded
+exactly as a `lib/http` response, so status and Connect error mapping is the
+same either way. When it is nil, calls go through `lib/http.DoWith` with the
+`Client.Transport` options.
+
+```go
+type authTransport struct{ token string }
+
+func (t *authTransport) Do(ctx context.Context, method, url string, headers []string, body []byte, maxResponseBytes int, timeoutMillis int64) (int, []string, []byte, error) {
+	headers = append(append([]string(nil), headers...), "Authorization", "Bearer "+t.token)
+	return http.Do(ctx, method, url, headers, body, maxResponseBytes, timeoutMillis)
+}
+
+client.HTTPClient = &authTransport{token: token}
+```
+
 ## Differences from `google.golang.org/protobuf/encoding/protojson`
 
 Output is `protojson.Marshal`'s with insignificant whitespace removed, and
@@ -113,4 +135,5 @@ against protojson on every target, using the OpenTDF platform's messages.
   well-known types are decoded and re-encoded as protojson does.
 - **Error messages** use protojson's wording where practical but do not
   include byte offsets.
-- Extensions, groups and proto2 defaults are not supported.
+- Extensions, groups and proto2 defaults are not supported. proto3
+  `optional` is supported, and the plugin declares it to `protoc`.
