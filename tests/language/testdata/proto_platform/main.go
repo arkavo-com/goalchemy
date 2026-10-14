@@ -57,6 +57,12 @@ func message(typ string) protojson.Message {
 		return &common.Metadata{}
 	case "entity.Entity":
 		return &entity.Entity{}
+	case "kas.InfoRequest":
+		return &kas.InfoRequest{}
+	case "authorization.GetEntitlementsRequest":
+		return &authorization.GetEntitlementsRequest{}
+	case "authorization.v2.GetEntitlementsRequest":
+		return &authorizationv2.GetEntitlementsRequest{}
 	}
 	panic("unknown type " + typ)
 }

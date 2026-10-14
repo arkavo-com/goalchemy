@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/pluginpb"
 )
 
 const (
@@ -112,6 +113,7 @@ const nullValue = "google.protobuf.NullValue"
 
 // Run generates every requested file.
 func Run(plugin *protogen.Plugin, opts Options) error {
+	plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 	g := &generator{plugin: plugin, opts: opts}
 	if err := g.selectTypes(); err != nil {
 		return err
@@ -371,7 +373,9 @@ func isList(f *protogen.Field) bool { return f.Desc.IsList() }
 
 func isMap(f *protogen.Field) bool { return f.Desc.IsMap() }
 
-func optional(f *protogen.Field) bool { return f.Desc.HasOptionalKeyword() }
+func optional(f *protogen.Field) bool {
+	return f.Desc.HasOptionalKeyword() && f.Desc.Kind() != protoreflect.MessageKind && f.Desc.Kind() != protoreflect.GroupKind
+}
 
 // scalar returns the Go type of a non-message, non-enum field kind.
 func scalar(k protoreflect.Kind) string {
@@ -630,6 +634,11 @@ func (fg *fileGen) encode(m *protogen.Message) {
 	fg.P()
 	fg.P("func (m *", m.GoIdent.GoName, ") EncodeProtoJSON(e *", fg.q(protojsonPkg, "Encoder"), ") {")
 	fg.P("e.BeginObject()")
+	if len(m.Fields) == 0 {
+		fg.P("e.EndObject()")
+		fg.P("}")
+		return
+	}
 	fg.P("if m != nil {")
 	for _, f := range m.Fields {
 		jsonName := f.Desc.JSONName()
@@ -788,6 +797,11 @@ func nullable(f *protogen.Field) bool {
 func (fg *fileGen) decode(m *protogen.Message) {
 	fg.P()
 	fg.P("func (m *", m.GoIdent.GoName, ") DecodeProtoJSON(d *", fg.q(protojsonPkg, "Decoder"), ", v ", fg.q(jsonvaluePkg, "Value"), ") {")
+	if len(m.Fields) == 0 {
+		fg.P("d.Object(v, ", fmt.Sprintf("%q", m.Desc.FullName()), ")")
+		fg.P("}")
+		return
+	}
 	fg.P("if !d.Object(v, ", fmt.Sprintf("%q", m.Desc.FullName()), ") {")
 	fg.P("return")
 	fg.P("}")

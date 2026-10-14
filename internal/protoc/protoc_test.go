@@ -101,10 +101,11 @@ var fixtureTypes = []string{
 	"authorization.GetDecisionsResponse",
 }
 
-var corpusExtraTypes = []string{"policy.Attribute", "policy.Value", "common.Metadata", "entity.Entity", "kas.KeyAccess", "kas.PolicyRewrapResult"}
+var corpusExtraTypes = []string{"policy.Attribute", "policy.Value", "common.Metadata", "entity.Entity", "kas.KeyAccess", "kas.PolicyRewrapResult",
+	"kas.InfoRequest", "authorization.GetEntitlementsRequest", "authorization.v2.GetEntitlementsRequest"}
 
 func fixtureParam() string {
-	return "go_import_prefix=" + fixtureImport + ",include=" + strings.Join(fixtureTypes, ";")
+	return "go_import_prefix=" + fixtureImport + ",include=" + strings.Join(append(append([]string{}, fixtureTypes...), corpusExtraTypes...), ";")
 }
 
 // checkGenerated compares files with the committed tree under dir, or
@@ -441,6 +442,17 @@ var lenientCases = []struct{ typ, input string }{
 	{"policy.attributes.ListAttributesResponse", `{"pagination":{"total":"1e1"}}`},
 	{"policy.attributes.ListAttributesResponse", `{"pagination":{"total":" 1"}}`},
 	{"policy.attributes.ListAttributesResponse", `{"pagination":{"total":2147483648}}`},
+	{"kas.InfoRequest", `{}`},
+	{"kas.InfoRequest", `{"unknown":1,"other":{"x":[null]}}`},
+	{"kas.InfoRequest", `[]`},
+	{"kas.InfoRequest", `null`},
+	{"authorization.v2.GetEntitlementsRequest", `{"withComprehensiveHierarchy":false}`},
+	{"authorization.v2.GetEntitlementsRequest", `{"with_comprehensive_hierarchy":true}`},
+	{"authorization.v2.GetEntitlementsRequest", `{"withComprehensiveHierarchy":null}`},
+	{"authorization.v2.GetEntitlementsRequest", `{"withComprehensiveHierarchy":"false"}`},
+	{"authorization.GetEntitlementsRequest", `{"scope":{},"withComprehensiveHierarchy":false}`},
+	{"authorization.GetEntitlementsRequest", `{"scope":null,"entities":[{"id":"e"}]}`},
+	{"authorization.GetEntitlementsRequest", `{"scope":{"attributeValueFqns":["a"]}}`},
 }
 
 func protojsonString(t testing.TB, types *dynamicpb.Types, m proto.Message) string {
@@ -528,5 +540,69 @@ func TestPlatformMatchesProtojson(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "failures 0\n") {
 		t.Fatalf("generated code differs from protojson:\n%s", out)
+	}
+}
+
+// TestProto3Optional checks that the plugin declares proto3 optional support,
+// so protoc accepts such files, and that optional scalars are pointers while
+// optional messages stay plain message pointers.
+func TestProto3Optional(t *testing.T) {
+	set := loadSet(t)
+	req := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: platformFiles(set),
+		Parameter:      proto.String("go_import_prefix=example.com/gen,include=authorization.GetEntitlementsRequest"),
+		ProtoFile:      set.File,
+	}
+	var opts Options
+	plugin, err := protogen.Options{ParamFunc: opts.Set}.New(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(plugin, opts); err != nil {
+		t.Fatal(err)
+	}
+	resp := plugin.Response()
+	if resp.GetSupportedFeatures()&uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL) == 0 {
+		t.Errorf("supported features %d lack FEATURE_PROTO3_OPTIONAL", resp.GetSupportedFeatures())
+	}
+	src := ""
+	for _, f := range resp.File {
+		if f.GetName() == "authorization/authorization.pb.go" {
+			src = f.GetContent()
+		}
+	}
+	for _, want := range []string{"\tScope                      *ResourceAttribute\n", "\tWithComprehensiveHierarchy *bool\n"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("generated GetEntitlementsRequest lacks %q:\n%s", want, src)
+		}
+	}
+}
+
+// TestPlatformBuilds generates every message and unary client of the
+// platform descriptors, including messages without fields, and builds them.
+func TestPlatformBuilds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the whole platform")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	files := generate(t, loadSet(t), "go_import_prefix=platformbuild/gen")
+	files["../go.mod"] = fmt.Sprintf("module platformbuild\n\ngo 1.25\nrequire github.com/eugenioenko/goalchemy v0.0.0\nreplace github.com/eugenioenko/goalchemy => %s\n", strconv.Quote(root))
+	for name, content := range files {
+		path := filepath.Join(dir, "gen", filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("go", "vet", "./...")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
 	}
 }
