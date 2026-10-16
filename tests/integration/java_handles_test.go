@@ -73,9 +73,9 @@ public final class HandlesConsumer {
   c.close();
   var p=get(Generated.NewCoord(1,2,null));
   check(get(p.Total(null))==3&&get(p.Shift(5,null))==6&&get(p.Total(null))==3,"value receiver must not change the handle");
-  var m=get(p.Moved(10,null));
-  check(m.X==11&&m.Y==2&&get(p.Total(null))==3,"value result is a copy");
-  check(get(p.Less(m,null))&&!get(p.Less(get(p.Moved(-1,null)),null)),"value parameter of the handle type");
+  var moved=get(p.Moved(10,null));
+  check(moved.X==11&&moved.Y==2&&get(p.Total(null))==3,"value result is a copy");
+  check(get(p.Less(moved,null))&&!get(p.Less(get(p.Moved(-1,null)),null)),"value parameter of the handle type");
   check(get(p.Move(1,null))==2&&get(p.Total(null))==4,"pointer receiver changes the handle");
   p.close();
   check(kind(get(Generated.NewCoord(-1,0,null)).closeAsync()).equals("source"),"value receiver Close");
