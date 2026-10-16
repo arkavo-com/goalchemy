@@ -64,6 +64,19 @@ assert get(g.Sum(None, None)) == -1, 'nil handle arguments'
 assert kind(g.Sum(object(), None)) == 'invalid_argument', 'foreign object'
 for h in (a, b, other): get(h.close())
 
+# Value receivers run on a copy of the handle's object.
+c = get(g.New(b'a'))
+assert get(c.Name()) == b'a', 'value receiver on a handle with private state'
+get(c.close())
+p = get(g.NewCoord(1, 2))
+assert get(p.Total()) == 3 and get(p.Shift(5)) == 6 and get(p.Total()) == 3, 'value receiver must not change the handle'
+m = get(p.Moved(10))
+assert m == {'X': 11, 'Y': 2} and get(p.Total()) == 3, m
+assert get(p.Less(m)) is True and get(p.Less(get(p.Moved(-1)))) is False, 'value parameter of the handle type'
+assert get(p.Move(1)) == 2 and get(p.Total()) == 4, 'pointer receiver changes the handle'
+get(p.close())
+assert kind(get(g.NewCoord(-1, 0)).close()) == 'source', 'value receiver Close'
+
 # Calls from several host threads are serialized; instances are independent.
 a = get(g.New(b'a')); b = get(g.New(b'b'))
 errors = []

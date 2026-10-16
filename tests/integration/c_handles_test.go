@@ -50,6 +50,8 @@ static gxc_handle *make(const char *name){gxc_value a=str(name),r;CHECK(call("Ne
 static int64_t add(gxc_handle *h,int64_t d){gxc_value a[2]={hv(h),num(d)},r;CHECK(call("Counter.Add",a,2,&r)==0,"Add");return r.integer;}
 static int64_t field(gxc_handle *h,const char *name){gxc_value a=hv(h),r;CHECK(call("Counter.Snap",&a,1,&r)==0,"Snap");int64_t v=gxc_field(&r,name)->integer;gxc_value_free(&r);return v;}
 static gxc_handle *one(const char *name,gxc_handle *h){gxc_value a=hv(h),r;CHECK(call(name,&a,1,&r)==0,name);return r.kind==GXC_HANDLE?r.handle:NULL;}
+static int64_t total(gxc_handle *p){gxc_value a=hv(p),r;CHECK(call("Coord.Total",&a,1,&r)==0,"Total");return r.integer;}
+static int64_t with(const char *name,gxc_handle *p,int64_t d){gxc_value a[2]={hv(p),num(d)},r;CHECK(call(name,a,2,&r)==0,name);return r.integer;}
 static void *worker(void *arg){for(int i=0;i<50;i++)add(arg,1);return NULL;}
 typedef struct {gxc_handle *h;int64_t ms;int kind;} pending;
 static void *wait_call(void *arg){pending *p=arg;gxc_value a[2]={hv(p->h),num(p->ms)},r;p->kind=call("Counter.Wait",a,2,&r);return NULL;}
@@ -84,6 +86,18 @@ int main(void){
  {gxc_value args[2]={{0},{0}};CHECK(call("Sum",args,2,&r)==0&&r.integer==-1,"nil arguments");}
  {gxc_value args[2]={hv(a),str("x")};CHECK(call("Sum",args,2,&r)==5,"invalid handle argument");}
  gxc_handle_free(a);gxc_handle_free(b);gxc_handle_free(other);
+ c=make("a");
+ {gxc_value s=hv(c);CHECK(call("Counter.Name",&s,1,&r)==0&&r.length==1&&r.bytes[0]=='a',"value receiver on a handle with private state");gxc_value_free(&r);}
+ gxc_handle_close(c,NULL);gxc_handle_free(c);
+ {gxc_value xy[2]={num(1),num(2)};CHECK(call("NewCoord",xy,2,&r)==0&&r.kind==GXC_HANDLE,"NewCoord");}
+ gxc_handle *p=r.handle;
+ CHECK(total(p)==3&&with("Coord.Shift",p,5)==6&&total(p)==3,"value receiver must not change the handle");
+ {gxc_value a[2]={hv(p),num(10)},m;CHECK(call("Coord.Moved",a,2,&m)==0&&gxc_field(&m,"X")->integer==11&&gxc_field(&m,"Y")->integer==2&&total(p)==3,"value result is a copy");
+  gxc_value l[2]={hv(p),m};CHECK(call("Coord.Less",l,2,&r)==0&&r.kind==GXC_BOOL&&r.integer==1,"value parameter of the handle type");gxc_value_free(&m);}
+ {gxc_value a[2]={hv(p),num(-1)},m;CHECK(call("Coord.Moved",a,2,&m)==0,"Moved");gxc_value l[2]={hv(p),m};CHECK(call("Coord.Less",l,2,&r)==0&&r.integer==0,"value parameter not less");gxc_value_free(&m);}
+ CHECK(with("Coord.Move",p,1)==2&&total(p)==4,"pointer receiver changes the handle");
+ CHECK(gxc_handle_close(p,NULL)==0,"close coord");gxc_handle_free(p);
+ {gxc_value xy[2]={num(-1),num(0)};CHECK(call("NewCoord",xy,2,&r)==0,"NewCoord");gxc_error e;CHECK(gxc_handle_close(r.handle,&e)==1,"value receiver Close");gxc_error_free(&e);gxc_handle_free(r.handle);}
  gxc_handle *x=make("x"),*y=make("y");pthread_t threads[8];
  for(int i=0;i<8;i++)pthread_create(&threads[i],NULL,worker,i%2?y:x);
  for(int i=0;i<8;i++)pthread_join(threads[i],NULL);

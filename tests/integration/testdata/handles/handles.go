@@ -1,5 +1,6 @@
 // Package handles exercises exported handles: persistent instances, derived
-// handles, identity, Close, poisoning, cancellation and native resources.
+// handles, identity, Close, poisoning, cancellation, native resources and
+// value receivers.
 package handles
 
 import (
@@ -74,6 +75,9 @@ func (c *Counter) Add(d int) (int, error) {
 	return c.n, nil
 }
 
+// Name has a value receiver.
+func (c Counter) Name() string { return c.name }
+
 func (c *Counter) Snap() Snapshot {
 	return Snapshot{c.name, c.n, inits, created, closes, errors.Is(c.last, ErrNegative)}
 }
@@ -130,3 +134,37 @@ func (h *Child) Bump() int {
 }
 
 func (h *Child) Parent() *Counter { return h.parent }
+
+// Coord is a handle whose value-receiver methods run on a copy of the coord.
+type Coord struct{ X, Y int }
+
+// NewCoord starts an instance that owns a coord.
+func NewCoord(x, y int) *Coord { return &Coord{x, y} }
+
+func (p Coord) Total() int { return p.X + p.Y }
+
+// Shift moves its copy, not the handle's coord.
+func (p Coord) Shift(d int) int {
+	p.X += d
+	return p.X
+}
+
+// Moved returns a moved copy.
+func (p Coord) Moved(d int) Coord {
+	p.X += d
+	return p
+}
+
+func (p Coord) Less(o Coord) bool { return p.X < o.X || p.X == o.X && p.Y < o.Y }
+
+func (p *Coord) Move(d int) int {
+	p.X += d
+	return p.X
+}
+
+func (p Coord) Close() error {
+	if p.X < 0 {
+		return errors.New("negative coord")
+	}
+	return nil
+}

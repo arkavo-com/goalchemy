@@ -67,6 +67,18 @@ public static class HandlesConsumer {
   Check(Kind(G.Sum(a,other,null))=="instance_mismatch","mixed instances");
   Check(Get(G.Sum(null,null,null))==-1,"nil handle arguments");
   a.Dispose();b.Dispose();other.Dispose();
+  // Value receivers run on a copy of the handle's object.
+  c=Make("a");
+  Check(Get(c.Name(null))=="a","value receiver on a handle with private state");
+  c.Dispose();
+  var p=Get(G.NewCoord(1,2,null));
+  Check(Get(p.Total(null))==3&&Get(p.Shift(5,null))==6&&Get(p.Total(null))==3,"value receiver must not change the handle");
+  var m=Get(p.Moved(10,null));
+  Check(m.X==11&&m.Y==2&&Get(p.Total(null))==3,"value result is a copy");
+  Check(Get(p.Less(m,null))&&!Get(p.Less(Get(p.Moved(-1,null)),null)),"value parameter of the handle type");
+  Check(Get(p.Move(1,null))==2&&Get(p.Total(null))==4,"pointer receiver changes the handle");
+  p.Dispose();
+  Check(Kind(Get(G.NewCoord(-1,0,null)).CloseAsync())=="source","value receiver Close");
   // Calls from several host threads are serialized; instances are independent.
   var x=Make("x");var y=Make("y");
   Parallel.For(0,8,new ParallelOptions{MaxDegreeOfParallelism=8},i=>{var h=i%2==0?x:y;for(int j=0;j<50;j++)Get(h.Add(1,null));});

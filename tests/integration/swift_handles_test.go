@@ -68,6 +68,18 @@ s = try! b.Snap().wait(); check(s.Created == 2 && s.Inits == 1, "sibling joins t
 check(kind(Sum(a, other)) == "instance_mismatch", "mixed instances")
 check(try! Sum(nil, nil).wait() == -1, "nil handle arguments")
 try! a.close(); try! b.close(); try! other.close()
+// Value receivers run on a copy of the handle's object.
+c = make("a")
+check(try! c!.Name().wait().description == "a", "value receiver on a handle with private state")
+try! c!.close()
+let p = try! NewCoord(1, 2).wait()!
+check((try! p.Total().wait()) == 3 && (try! p.Shift(5).wait()) == 6 && (try! p.Total().wait()) == 3, "value receiver must not change the handle")
+let m = try! p.Moved(10).wait()
+check(m.X == 11 && m.Y == 2 && (try! p.Total().wait()) == 3, "value result is a copy")
+check((try! p.Less(m).wait()) && !(try! p.Less(try! p.Moved(-1).wait()).wait()), "value parameter of the handle type")
+check((try! p.Move(1).wait()) == 2 && (try! p.Total().wait()) == 4, "pointer receiver changes the handle")
+try! p.close()
+do { try NewCoord(-1, 0).wait()!.close(); check(false, "missing Close error") } catch let f as GoalchemyFailure { check(f.kind == "source", "value receiver Close") }
 // Calls from several host threads are serialized; instances are independent.
 let x = make("x"), y = make("y")
 DispatchQueue.concurrentPerform(iterations: 8) { i in
