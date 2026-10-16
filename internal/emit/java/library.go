@@ -418,7 +418,7 @@ func (e *emitter) library() (string, error) {
 		if h.Stream.Any() {
 			run := "null"
 			if h.Close != nil {
-				run = frame(h.Close, []string{"Library.<" + e.jt(h.Ptr) + ">obj(h0)"})
+				run = frame(h.Close, []string{e.handleRecv(h, h.Close, "Library.<"+e.jt(h.Ptr)+">obj(h0)")})
 			}
 			hp := h.Ptr
 			streamOps("streamOps"+h.Name, h.Stream, func(*ir.Type) string {
@@ -430,7 +430,7 @@ func (e *emitter) library() (string, error) {
 		fmt.Fprintf(&b, " /** Handle to a source *%s owned by a library instance. Close it when\n  * done; a collected handle is released without running Close. */\n public static final class %s implements AutoCloseable {\n  final Library.Handle h;\n  %s(Library.Handle h){this.h=h;}\n", h.Name, h.Name, h.Name)
 		run := "null"
 		if h.Close != nil {
-			run = frame(h.Close, []string{"Library.<" + e.jt(h.Ptr) + ">obj(h0)"})
+			run = frame(h.Close, []string{e.handleRecv(h, h.Close, "Library.<"+e.jt(h.Ptr)+">obj(h0)")})
 		}
 		fmt.Fprintf(&b, "  /** Runs the source Close, if any, and releases the handle. Queued calls\n   * fail and an active call is canceled first. */\n  public Library.Operation<Void> closeAsync(){final Library.Handle h0=h;return Library.close(h0,libraryState,%s,Generated::sourceFailure);}\n", run)
 		b.WriteString("  /** Blocks until closeAsync completes, rethrowing its failure. */\n  @Override public void close(){try{closeAsync().completion().toCompletableFuture().join();}catch(java.util.concurrent.CompletionException e){if(e.getCause() instanceof Library.Failure f)throw f;throw e;}}\n")
@@ -463,6 +463,15 @@ func (e *emitter) library() (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// handleRecv is the source receiver argument of method f of h on obj; a value
+// receiver gets a copy.
+func (e *emitter) handleRecv(h *ir.Handle, f *ir.Func, obj string) string {
+	if h.ValueReceiver(f) {
+		return e.cloneExpr(f.RecvType, obj)
+	}
+	return obj
 }
 
 func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, typ func(*ir.Type) string, frame func(*ir.Func, []string) string, used, reserved map[string]bool) error {
@@ -512,7 +521,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	if recv != nil {
 		params = params[1:]
 		hs = append(hs, "h")
-		as = append(as, "Library.<"+e.jt(recv.Ptr)+">obj(hs[0])")
+		as = append(as, e.handleRecv(recv, f, "Library.<"+e.jt(recv.Ptr)+">obj(hs[0])"))
 	}
 	for i, t := range params {
 		if sourceContext(t) {

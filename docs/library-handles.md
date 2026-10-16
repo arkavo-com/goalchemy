@@ -40,6 +40,8 @@ poisoned and mixed handles are `closed`, `poisoned` and `instance_mismatch`
 - Exported methods of `T` and `*T` are exposed when every parameter and result
   is a copied value, a handle, a leading `context.Context` or a final `error`.
   Other methods are not exposed. A method named `Close` must be `Close() error`.
+- A method with receiver `T` runs on a copy of the handle's object, as in Go:
+  changes it makes to its receiver do not reach the handle.
 - Handles are direct parameters and results only, not fields of structs or
   elements of slices. A nil pointer crosses as the host's null.
 

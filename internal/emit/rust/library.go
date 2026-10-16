@@ -326,7 +326,7 @@ func (e *emitter) library() (string, error) {
 		if h.Stream.Any() {
 			body := "library_close(h, |_, _, _| Ok(()))"
 			if h.Close != nil {
-				body = fmt.Sprintf("let h0 = Some(h.clone());\nlibrary_close(h, move |options, inst, fresh| %s)", owner(h.Close, []string{"library_obj(&h0)"}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
+				body = fmt.Sprintf("let h0 = Some(h.clone());\nlibrary_close(h, move |options, inst, fresh| %s)", owner(h.Close, []string{e.handleRecv(h, h.Close, "library_obj(&h0)")}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
 			}
 			td := e.td(h.Ptr)
 			streamOps("stream_ops_handle_"+strings.ToLower(h.Name), h.Stream, func(*ir.Type) string { return "boxv(" + td + ", library_obj(&h0))" }, body)
@@ -336,7 +336,7 @@ func (e *emitter) library() (string, error) {
 		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close when done;\n/// dropping the last clone releases it without running Close.\n#[derive(Clone)]\npub struct %s(std::sync::Arc<rt::Handle>);\nimpl PartialEq for %s { fn eq(&self, other: &Self) -> bool { rt::Handle::same(&self.0, &other.0) } }\nimpl Eq for %s {}\nimpl std::fmt::Debug for %s { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(%q) } }\n#[allow(non_snake_case)]\nimpl %s {\n", h.Name, h.Name, h.Name, h.Name, h.Name, h.Name, h.Name)
 		b.WriteString("/// Runs the source Close, if any, and releases the handle. Queued calls fail\n/// and an active call is canceled first.\npub fn close(&self) -> Operation<()> {\n")
 		if h.Close != nil {
-			fmt.Fprintf(&b, "let h0 = Some(self.0.clone());\nlibrary_close(&self.0, move |options, inst, fresh| %s)\n}\n", owner(h.Close, []string{"library_obj(&h0)"}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
+			fmt.Fprintf(&b, "let h0 = Some(self.0.clone());\nlibrary_close(&self.0, move |options, inst, fresh| %s)\n}\n", owner(h.Close, []string{e.handleRecv(h, h.Close, "library_obj(&h0)")}, "if !rv[0].is_nil() {return Err(source_failure(&rv[0]));}\nOk(())"))
 		} else {
 			b.WriteString("library_close(&self.0, |_, _, _| Ok(()))\n}\n")
 		}
@@ -360,6 +360,15 @@ func (e *emitter) library() (string, error) {
 	return b.String(), nil
 }
 
+// handleRecv is the source receiver argument of method f of h on obj; a value
+// receiver gets a copy.
+func (e *emitter) handleRecv(h *ir.Handle, f *ir.Func, obj string) string {
+	if h.ValueReceiver(f) {
+		return e.cloneExpr(f.RecvType, obj, false)
+	}
+	return obj
+}
+
 func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, typ func(*ir.Type) string, owner func(*ir.Func, []string, string) string) {
 	ptyp := func(t *ir.Type, param bool) string {
 		if h := abi.Handle(t); h != nil {
@@ -380,7 +389,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		ps = append(ps, "&self")
 		pre = append(pre, "let h0 = Some(self.0.clone());")
 		hs = append(hs, "h0.clone()")
-		args = append(args, "library_obj(&h0)")
+		args = append(args, e.handleRecv(recv, f, "library_obj(&h0)"))
 	}
 	for i, t := range params {
 		if sourceContext(t) {

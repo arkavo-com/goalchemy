@@ -357,7 +357,7 @@ func (e *emitter) library() (string, error) {
 		if h.Stream.Any() {
 			start := "nil"
 			if h.Close != nil {
-				start = fmt.Sprintf("{ args, context, objects in %s([objects[0]], []) }", e.names.Symbol(h.Close.Sym))
+				start = fmt.Sprintf("{ args, context, objects in %s([%s], []) }", e.names.Symbol(h.Close.Sym), handleRecv(h, h.Close))
 			}
 			streamOps("gStreamOps"+h.Name, h.Stream, fmt.Sprintf(".interface(GInterface(%d, objects[0]))", h.Ptr.ID), start)
 		}
@@ -366,7 +366,7 @@ func (e *emitter) library() (string, error) {
 		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close() when\n/// done; deinit releases it without running Close.\npublic final class %s {\n    let handle: GHandle\n    init(_ handle: GHandle) { self.handle = handle }\n    deinit { GLibrary.finalize(handle) }\n", h.Name, swiftPublic(handleNames[h]))
 		start := "nil"
 		if h.Close != nil {
-			start = fmt.Sprintf("{ args, context, objects in %s([objects[0]], []) }", e.names.Symbol(h.Close.Sym))
+			start = fmt.Sprintf("{ args, context, objects in %s([%s], []) }", e.names.Symbol(h.Close.Sym), handleRecv(h, h.Close))
 		}
 		fmt.Fprintf(&b, "    /// Runs the source Close, if any, and releases the handle. Queued calls\n    /// fail and an active call is canceled first.\n    public func close() throws {\n        try GLibrary.close(handle, gLibraryState, %s, %s, { rv, _ in if let error = try gSourceError(rv[0]) { throw error } })\n    }\n", initFrame, start)
 		if h.Stream.Any() {
@@ -390,6 +390,15 @@ func (e *emitter) library() (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// handleRecv is the source receiver argument of method f of h; a value
+// receiver gets a copy of the object the handle points to.
+func handleRecv(h *ir.Handle, f *ir.Func) string {
+	if h.ValueReceiver(f) {
+		return "{ if case .pointer(let cell) = objects[0] { return GCopy(cell.value) }; return .nilValue }()"
+	}
+	return "objects[0]"
 }
 
 func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, typ func(*ir.Type) string, initFrame string, used, reserved map[string]bool) error {
@@ -424,7 +433,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	if recv != nil {
 		params = params[1:]
 		hs = append(hs, "handle")
-		args = append(args, "objects[0]")
+		args = append(args, handleRecv(recv, f))
 	}
 	inputIndex := 0
 	for i, t := range params {

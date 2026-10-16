@@ -24,6 +24,10 @@ type Handle struct {
 	Stream StreamOps
 }
 
+// ValueReceiver reports whether f, a method or Close of h, has receiver T
+// rather than *T. Hosts must pass it a copy of the handle's object.
+func (h *Handle) ValueReceiver(f *Func) bool { return f.RecvType == h.Elem }
+
 // StreamOps lists the std/io operations a host stream view supports.
 type StreamOps struct{ Read, Write, Seek, Close bool }
 

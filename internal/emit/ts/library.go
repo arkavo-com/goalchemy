@@ -341,7 +341,7 @@ func (e *emitter) library() (string, error) {
 		if h.Stream.Any() {
 			run := "null"
 			if h.Close != nil {
-				run = frame(h.Close, []string{"rt.obj(h)"})
+				run = frame(h.Close, []string{e.handleRecv(h, h.Close, "rt.obj(h)")})
 			}
 			streamOps("streamOps$"+h.Name, h.Stream, "rt.box("+e.td(h.Ptr)+",rt.obj(h))", run)
 		}
@@ -350,7 +350,7 @@ func (e *emitter) library() (string, error) {
 		fmt.Fprintf(&b, "/** Handle to a source *%s owned by a library instance. Call close() when\n * done; a collected handle is released without running Close. */\nexport class %s {\nreadonly [H]:rt.Handle;\n/** @internal */\nconstructor(h:rt.Handle){this[H]=h;}\n", h.Name, h.Name)
 		run := "null"
 		if h.Close != nil {
-			run = frame(h.Close, []string{"rt.obj(this[H])"})
+			run = frame(h.Close, []string{e.handleRecv(h, h.Close, "rt.obj(this[H])")})
 		}
 		fmt.Fprintf(&b, "/** Runs the source Close, if any, and releases the handle. Queued calls\n * fail and an active call is canceled first. */\nclose():Promise<void>{return rt.closeHandle(this[H],libraryState,%s,sourceFailure);}\n[Symbol.asyncDispose]():Promise<void>{return this.close();}\n", run)
 		if h.Stream.Any() {
@@ -384,13 +384,22 @@ func (e *emitter) library() (string, error) {
 	return b.String(), nil
 }
 
+// handleRecv is the source receiver argument of method f of h on obj; a value
+// receiver gets a copy.
+func (e *emitter) handleRecv(h *ir.Handle, f *ir.Func, obj string) string {
+	if h.ValueReceiver(f) {
+		return e.cloneExpr(f.RecvType, obj)
+	}
+	return obj
+}
+
 func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, typ func(*ir.Type) string, frame func(*ir.Func, []string) string) error {
 	{
 		params := f.Sig.Params
 		var ps, as, hs []string
 		if recv != nil {
 			params = params[1:]
-			as = append(as, "rt.obj(this[H])")
+			as = append(as, e.handleRecv(recv, f, "rt.obj(this[H])"))
 			hs = append(hs, "this[H]")
 		}
 		var conv, streams []string

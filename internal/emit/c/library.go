@@ -356,7 +356,11 @@ static void gxc_poll(void) {
 		var as []string
 		index := 0
 		if en.recv != nil {
-			as = append(as, "gxc_obj(&gxc_args[0])")
+			obj := "gxc_obj(&gxc_args[0])"
+			if en.recv.ValueReceiver(f) {
+				obj = e.cloneExpr(f.RecvType, obj)
+			}
+			as = append(as, obj)
 			index++
 		} else if en.box != nil {
 			as = append(as, fmt.Sprintf("gx_boxv(%s,gxc_obj(&gxc_args[0]))", e.td(en.box)))

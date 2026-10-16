@@ -170,7 +170,7 @@ func (e *emitter) library() error {
 		e.p_("func (x *%s) handle() *rt.Handle {\nif x == nil { return nil }\nreturn x.h\n}\n", h.Name)
 		closeRun := "nil"
 		if h.Close != nil {
-			closeRun = "func(sourceCtx rt.Context, fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{"rt.Obj[" + e.typ(h.Ptr) + "](x.h)"}) + "\n}"
+			closeRun = "func(sourceCtx rt.Context, fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{e.handleRecv(h, h.Close, "x.h")}) + "\n}"
 		}
 		e.p_("// Close runs the source Close, if any, and releases the handle. Calls\n// queued on the handle fail and an active call is canceled first.\nfunc (x *%s) Close() error {\nif x == nil { return &LibraryError{Kind: \"invalid_handle\"} }\nreturn rt.CloseHandle(x.h, libraryState, %s)\n}\n", h.Name, closeRun)
 	}
@@ -200,7 +200,7 @@ func (e *emitter) library() error {
 		}
 		close := "nil"
 		if h.Close != nil {
-			close = "func(sourceCtx rt.Context, fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{"rt.Obj[" + e.typ(h.Ptr) + "](h)"}) + "\n}"
+			close = "func(sourceCtx rt.Context, fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{e.handleRecv(h, h.Close, "h")}) + "\n}"
 		}
 		e.streamOps("streamOps"+h.Name, h.Stream, func(iface *ir.Type) string {
 			return e.typ(iface) + "(rt.Obj[" + e.typ(h.Ptr) + "](h))"
@@ -275,6 +275,16 @@ func (e *emitter) libraryCallFrame(f *ir.Func, args []string) string {
 	return "call := func() rt.Frame { return " + call + " }\nif fresh {\nlibraryReset()\nreturn rt.LibrarySequence(" + init + ", call)\n}\nreturn call()"
 }
 
+// handleRecv is the source receiver argument of method f of h on handle hv.
+// Dereferencing copies the object for a value receiver.
+func (e *emitter) handleRecv(h *ir.Handle, f *ir.Func, hv string) string {
+	obj := "rt.Obj[" + e.typ(h.Ptr) + "](" + hv + ")"
+	if h.ValueReceiver(f) {
+		return "*" + obj
+	}
+	return obj
+}
+
 func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 	results := f.Sig.Results
 	params := f.Sig.Params
@@ -301,7 +311,7 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 	streams := []string{}
 	if recv != nil {
 		handles = append(handles, "x.h")
-		as = append(as, "rt.Obj["+e.typ(recv.Ptr)+"](x.h)")
+		as = append(as, e.handleRecv(recv, f, "x.h"))
 	}
 	for i, t := range params {
 		if sourceContext(t) {
