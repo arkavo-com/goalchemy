@@ -67,6 +67,18 @@ public final class HandlesConsumer {
   check(kind(Generated.Sum(a,other,null)).equals("instance_mismatch"),"mixed instances");
   check(get(Generated.Sum(null,null,null))==-1,"nil handle arguments");
   a.close();b.close();other.close();
+  // Value receivers run on a copy of the handle's object.
+  c=get(Generated.New("a",null));
+  check(get(c.Name(null)).equals("a"),"value receiver on a handle with private state");
+  c.close();
+  var p=get(Generated.NewCoord(1,2,null));
+  check(get(p.Total(null))==3&&get(p.Shift(5,null))==6&&get(p.Total(null))==3,"value receiver must not change the handle");
+  var moved=get(p.Moved(10,null));
+  check(moved.X==11&&moved.Y==2&&get(p.Total(null))==3,"value result is a copy");
+  check(get(p.Less(moved,null))&&!get(p.Less(get(p.Moved(-1,null)),null)),"value parameter of the handle type");
+  check(get(p.Move(1,null))==2&&get(p.Total(null))==4,"pointer receiver changes the handle");
+  p.close();
+  check(kind(get(Generated.NewCoord(-1,0,null)).closeAsync()).equals("source"),"value receiver Close");
   // Calls from several host threads are serialized; instances are independent.
   var x=get(Generated.New("x",null));var y=get(Generated.New("y",null));
   var pool=Executors.newFixedThreadPool(8);var jobs=new ArrayList<Future<?>>();

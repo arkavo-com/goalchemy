@@ -70,6 +70,18 @@ fn main(){
  assert_eq!(kind(Sum(Some(&a),Some(&other),opts())),Some(ErrorKind::InstanceMismatch));
  assert_eq!(get(Sum(None,None,opts())),-1);
  get(a.close());get(b.close());get(other.close());
+ // Value receivers run on a copy of the handle's object.
+ let c=get(New(b"a".to_vec(),opts())).unwrap();
+ assert_eq!(get(c.Name(opts())),b"a".to_vec(),"value receiver on a handle with private state");
+ get(c.close());
+ let p=get(NewCoord(1,2,opts())).unwrap();
+ assert_eq!((get(p.Total(opts())),get(p.Shift(5,opts())),get(p.Total(opts()))),(3,6,3),"value receiver must not change the handle");
+ let m=get(p.Moved(10,opts()));
+ assert!(m.X==11&&m.Y==2&&get(p.Total(opts()))==3,"value result is a copy {:?}",m);
+ assert!(get(p.Less(m,opts()))&&!get(p.Less(get(p.Moved(-1,opts())),opts())),"value parameter of the handle type");
+ assert_eq!((get(p.Move(1,opts())),get(p.Total(opts()))),(2,4),"pointer receiver changes the handle");
+ get(p.close());
+ assert_eq!(kind(get(NewCoord(-1,0,opts())).unwrap().close()),Some(ErrorKind::Source),"value receiver Close");
  // Calls from several host threads are serialized; instances are independent.
  let x=get(New(b"x".to_vec(),opts())).unwrap();let y=get(New(b"y".to_vec(),opts())).unwrap();
  let threads:Vec<_>=(0..8).map(|i|{let h=if i%2==0{x.clone()}else{y.clone()};std::thread::spawn(move||{for _ in 0..50{get(h.Add(1,opts()));}})}).collect();

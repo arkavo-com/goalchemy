@@ -262,7 +262,7 @@ func (e *emitter) library() (string, error) {
 		if h.Stream.Any() {
 			run := ""
 			if h.Close != nil {
-				run = factory(h.Close, []string{"rt.library_obj(hs[0])"}, "    ")
+				run = factory(h.Close, []string{e.handleRecv(h, h.Close, "rt.library_obj(hs[0])")}, "    ")
 			}
 			streamOps("_stream_"+h.Name, h.Stream, "rt.box("+e.td(h.Ptr)+", rt.library_obj(hs[0]))", run)
 		}
@@ -276,7 +276,7 @@ func (e *emitter) library() (string, error) {
 		fmt.Fprintf(&b, "class %s:\n    \"\"\"Handle to a source *%s owned by a library instance. Call close() or use\n    it as a context manager; a collected handle is released without running Close.\"\"\"\n    __slots__ = ('_h', '__weakref__')\n    def __init__(self, h): self._h = h\n", h.Name, h.Name)
 		b.WriteString("    def close(self):\n        \"\"\"Runs the source Close, if any, and releases the handle. Queued calls\n        fail and an active call is canceled first.\"\"\"\n        h0 = self._h\n")
 		if h.Close != nil {
-			b.WriteString(factory(h.Close, []string{"rt.library_obj(h0)"}, "        "))
+			b.WriteString(factory(h.Close, []string{e.handleRecv(h, h.Close, "rt.library_obj(h0)")}, "        "))
 		} else {
 			b.WriteString("        factory = None\n")
 		}
@@ -305,6 +305,15 @@ func (e *emitter) library() (string, error) {
 	return b.String(), nil
 }
 
+// handleRecv is the source receiver argument of method f of h on obj; a value
+// receiver gets a copy.
+func (e *emitter) handleRecv(h *ir.Handle, f *ir.Func, obj string) string {
+	if h.ValueReceiver(f) {
+		return e.cloneExpr(f.RecvType, obj)
+	}
+	return obj
+}
+
 func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, factory func(*ir.Func, []string, string) string) error {
 	indent := ""
 	params := f.Sig.Params
@@ -315,7 +324,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		params = params[1:]
 		ps = append(ps, "self")
 		hs = append(hs, "self._h")
-		as = append(as, "rt.library_obj(hs[0])")
+		as = append(as, e.handleRecv(recv, f, "rt.library_obj(hs[0])"))
 	}
 	for i, t := range params {
 		if sourceContext(t) {

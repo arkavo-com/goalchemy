@@ -79,6 +79,21 @@ const warnings: string[] = [];
   await a.close(); await b.close(); await other.close();
 }
 
+// Value receivers run on a copy of the handle's object.
+{
+  const c = (await g.New('a'))!;
+  assert(await c.Name() === 'a', 'value receiver on a handle with private state');
+  await c.close();
+  const p = (await g.NewCoord(1n, 2n))!;
+  assert(await p.Total() === 3n && await p.Shift(5n) === 6n && await p.Total() === 3n, 'value receiver must not change the handle');
+  const m = await p.Moved(10n);
+  assert(m.X === 11n && m.Y === 2n && await p.Total() === 3n, 'value result is a copy');
+  assert(await p.Less(m) === true && await p.Less(await p.Moved(-1n)) === false, 'value parameter of the handle type');
+  assert(await p.Move(1n) === 2n && await p.Total() === 4n, 'pointer receiver changes the handle');
+  await p.close();
+  assert(await kind((await g.NewCoord(-1n, 0n))!.close()) === 'source', 'value receiver Close');
+}
+
 // Interleaved calls on one instance are serialized; instances are independent.
 {
   const a = (await g.New('a'))!, b = (await g.New('b'))!;

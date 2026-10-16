@@ -159,6 +159,34 @@ func TestHandleParameters(t *testing.T) {
 	}
 }
 
+func TestValueReceivers(t *testing.T) {
+	c := get(g.New(bg, "a"))
+	defer c.Close()
+	if get(c.Name(bg)) != "a" {
+		t.Fatal("value receiver on a handle with private state")
+	}
+	p := get(g.NewCoord(bg, 1, 2))
+	if get(p.Total(bg)) != 3 || get(p.Shift(bg, 5)) != 6 || get(p.Total(bg)) != 3 {
+		t.Fatal("value receiver must not change the handle's object")
+	}
+	m := get(p.Moved(bg, 10))
+	if m.X != 11 || m.Y != 2 || get(p.Total(bg)) != 3 {
+		t.Fatal("value result is a copy", m)
+	}
+	if !get(p.Less(bg, m)) || get(p.Less(bg, get(p.Moved(bg, -1)))) {
+		t.Fatal("value parameter of the handle's type")
+	}
+	if get(p.Move(bg, 1)) != 2 || get(p.Total(bg)) != 4 {
+		t.Fatal("pointer receiver changes the handle's object")
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := get(g.NewCoord(bg, -1, 0)).Close(); err == nil || err.Error() != "negative coord" {
+		t.Fatal("value receiver Close", err)
+	}
+}
+
 func TestConcurrentCalls(t *testing.T) {
 	a := get(g.New(bg, "a"))
 	b := get(g.New(bg, "b"))
