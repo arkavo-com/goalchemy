@@ -151,6 +151,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		source.WriteByte('\n')
 		source.Write(bodies[file].Bytes())
 		src, lines := e.resolveMarkers(source.String())
+		if e.p.NoLineDirectives {
+			lines = nil
+		}
 		files = append(files, artifact.File{Path: file, Source: []byte(src), Owner: owners[file], Lines: lines})
 	}
 	var contracts []string

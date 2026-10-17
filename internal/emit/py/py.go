@@ -15,6 +15,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -386,9 +387,13 @@ type fnEmitter struct {
 	defers bool
 	frame  bool
 	indent string
+	folds  *structure.Folds
 }
 
 func (fe *fnEmitter) localName(l *ir.Local) string {
+	if n, ok := fe.folds.Name(l); ok {
+		return n
+	}
 	return fe.e.names.Local(l, "_")
 }
 
@@ -410,6 +415,9 @@ func cell(l *ir.Local) bool { return l.Boxed && !l.Type.IsAggregate() }
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if cell(v) {
 			return fe.local(v) + ".v"
 		}
@@ -591,6 +599,7 @@ func (e *emitter) function(f *ir.Func) string {
 	for _, l := range f.Params {
 		params = append(params, fe.localName(l))
 	}
+	fe.analyze()
 	fe.w("@rt.source_guard")
 	fe.w("%sdef %s(%s):", position(f.Pos), e.names.Symbol(f.Sym), strings.Join(params, ", "))
 	fe.indent = "    "
@@ -602,22 +611,89 @@ func (e *emitter) function(f *ir.Func) string {
 		fe.w("_d = []")
 		fe.w("_p = None")
 		fe.w("try:")
-		fe.indent = "        "
-		fe.loop(f)
-		fe.indent = "    "
+		fe.structured(2)
 		fe.w("except rt.GoPanic as _e:")
 		fe.w("    _p = _e")
 		fe.w("rt.run_defers(_d, _p)")
 		fe.w("return %s", fe.results())
-	} else if len(f.Blocks) == 1 {
-		fe.block(f.Blocks[0])
 	} else {
-		fe.loop(f)
+		fe.structured(1)
 	}
 	fe.indent = ""
 	fe.b.WriteString("\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
+
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, pyProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+var pySyntax = structure.Syntax{
+	Indent: "    ", If: "if %s:", ElseIf: "elif %s:", Else: "else:",
+	Loop: "while True:", While: "while %s:", Break: "break", Continue: "continue",
+	Python: true, Flag: "_gx", Pass: "pass", Not: "not %s", And: "%s and %s", Or: "%s or %s",
+	Default: []string{"else:", "    raise rt.fault(\"bad block\")"},
+}
+
+// structured writes the function body as structured statements; a
+// function with defers leaves its body through a break, and a resumable
+// frame dispatches on the block it resumes at.
+func (fe *fnEmitter) structured(depth int) {
+	body := structure.Build(fe.f, structure.Options{ExitReturns: fe.defers, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	syn := pySyntax
+	pc := fe.pc()
+	syn.DispatchOpen = []string{"while True:"}
+	if !fe.frame {
+		syn.DispatchOpen = []string{pc + " = 0", "while True:"}
+	}
+	syn.CaseFirst, syn.CaseOpen, syn.SetPC = "if "+pc+" == %d:", "elif "+pc+" == %d:", pc+" = %d"
+	fe.b.WriteString(structure.Print(body, syn, pyEmitter{fe}, depth))
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved, indent := fe.b, fe.indent
+	fe.b, fe.indent = strings.Builder{}, ""
+	fn()
+	out := fe.b.String()
+	fe.b, fe.indent = saved, indent
+	return out
+}
+
+// pyEmitter prints the target-specific statements of a structured body.
+type pyEmitter struct{ fe *fnEmitter }
+
+func (p pyEmitter) Code(b *ir.Block) string {
+	fe := p.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil && fe.frame {
+			fe.resume(b.ResumeOf)
+		}
+		for _, in := range b.Instrs {
+			if !fe.folds.Folded(in) {
+				fe.instr(in)
+			}
+		}
+	})
+}
+
+func (p pyEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return p.fe.capture(func() { p.fe.term(t) })
+}
+
+func (p pyEmitter) Pause(*ir.Pause) string    { panic("py: inline pause") }
+func (p pyEmitter) Cond(v ir.Value) string    { return p.fe.val(v) }
+func (p pyEmitter) Mark(pos token.Pos) string { return p.fe.mark(pos) }
+
+// pyProbe renders statements for fold analysis.
+type pyProbe struct{ fe *fnEmitter }
+
+func (p pyProbe) Instr(in ir.Instr) string { return p.fe.capture(func() { p.fe.instr(in) }) }
+func (p pyProbe) Pause(*ir.Pause) string   { panic("py: inline pause") }
+func (p pyProbe) Cond(v ir.Value) string   { return p.fe.val(v) }
+func (p pyProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return p.fe.capture(func() { p.fe.term(t) })
+}
+func (p pyProbe) Assign(l *ir.Local) (string, string) { return p.fe.val(l) + " = ", "" }
 
 // globalDecl declares the globals the function rebinds.
 func (fe *fnEmitter) globalDecl() {
@@ -643,33 +719,6 @@ func (fe *fnEmitter) globalDecl() {
 		sort.Strings(gs)
 		fe.w("global %s", strings.Join(gs, ", "))
 	}
-}
-
-// loop writes the block dispatch loop.
-func (fe *fnEmitter) loop(f *ir.Func) {
-	pc := fe.pc()
-	if !fe.frame {
-		fe.w("%s = 0", pc)
-	}
-	fe.w("while True:")
-	base := fe.indent
-	for i, b := range f.Blocks {
-		kw := "elif"
-		if i == 0 {
-			kw = "if"
-		}
-		fe.indent = base + "    "
-		fe.w("%s %s == %d:", kw, pc, i)
-		fe.indent = base + "        "
-		if b.ResumeOf != nil {
-			fe.resume(b.ResumeOf)
-		}
-		fe.block(b)
-	}
-	fe.indent = base + "    "
-	fe.w("else:")
-	fe.w("    raise rt.fault(\"bad block\")")
-	fe.indent = base
 }
 
 func (fe *fnEmitter) pc() string {
@@ -704,27 +753,9 @@ func (fe *fnEmitter) mark(pos token.Pos) string {
 	return fmt.Sprintf("%s%d\x00", marker, int(pos))
 }
 
-func (fe *fnEmitter) block(b *ir.Block) {
-	for _, in := range b.Instrs {
-		fe.instr(in)
-	}
-	fe.term(b.Term)
-}
-
-func (fe *fnEmitter) goTo(target *ir.Block) {
-	fe.w("%s = %d", fe.pc(), fe.order[target])
-	fe.w("continue")
-}
-
 func (fe *fnEmitter) term(t ir.Terminator) {
 	m := fe.mark(t.Position())
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.w("%s%s = %d", m, fe.pc(), fe.order[t.Target])
-		fe.w("continue")
-	case *ir.If:
-		fe.w("%s%s = %d if %s else %d", m, fe.pc(), fe.order[t.Then], fe.val(t.Cond), fe.order[t.Else])
-		fe.w("continue")
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
@@ -732,8 +763,6 @@ func (fe *fnEmitter) term(t ir.Terminator) {
 		case fe.frame:
 			fe.w("%srt.ret(t, fr)", m)
 			fe.w("return")
-		case fe.defers:
-			fe.w("%sbreak", m)
 		default:
 			fe.w("%sreturn %s", m, fe.results())
 		}
@@ -755,6 +784,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
+	fe.analyze()
 	cls := "frame_" + e.names.Symbol(f.Sym)
 	fe.w("%sclass %s(rt.Frame):", position(f.Pos), cls)
 	fe.indent = "    "
@@ -766,9 +796,8 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 	fe.w("    fr = self")
 	fe.indent = "        "
 	fe.globalDecl()
-	fe.indent = "        "
-	fe.loop(f)
 	fe.indent = ""
+	fe.structured(2)
 	fe.b.WriteString("\n\n")
 	var params []string
 	for _, l := range f.Env {
@@ -788,7 +817,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 	}
 	fe.w("    return fr")
 	fe.b.WriteString("\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 func (fe *fnEmitter) resultsList() string {
