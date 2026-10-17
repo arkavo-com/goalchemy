@@ -89,6 +89,8 @@ func intKind(t *ir.Type) string { return t.U().Int.String() }
 
 func (e *emitter) susp(t *ir.Type) bool { return e.p.SuspTypes[t.U()] }
 
+func (e *emitter) native() bool { return e.p.PauseModel == "native" }
+
 func (e *emitter) adapt(f string, n int) string {
 	e.use("core.task.spawn")
 	return fmt.Sprintf("rt.adapt(%s, %d)", f, n)
@@ -386,6 +388,9 @@ type fnEmitter struct {
 	order  map[*ir.Block]int
 	defers bool
 	frame  bool
+	// task is set when f is a coroutine of the native pause model, taking
+	// the running task as its first parameter t.
+	task   bool
 	indent string
 	folds  *structure.Folds
 }
@@ -578,10 +583,10 @@ func (fe *fnEmitter) addrOf(p *ir.Place) string {
 }
 
 func (e *emitter) function(f *ir.Func) string {
-	if f.MaySuspend {
+	if f.MaySuspend && !e.native() {
 		return e.frameFunction(f)
 	}
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, task: f.MaySuspend}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
@@ -600,8 +605,13 @@ func (e *emitter) function(f *ir.Func) string {
 		params = append(params, fe.localName(l))
 	}
 	fe.analyze()
-	fe.w("@rt.source_guard")
-	fe.w("%sdef %s(%s):", position(f.Pos), e.names.Symbol(f.Sym), strings.Join(params, ", "))
+	if fe.task {
+		e.use("core.task.spawn")
+		fe.w("%sasync def %s_a(%s):", position(f.Pos), e.names.Symbol(f.Sym), strings.Join(append([]string{"t"}, params...), ", "))
+	} else {
+		fe.w("@rt.source_guard")
+		fe.w("%sdef %s(%s):", position(f.Pos), e.names.Symbol(f.Sym), strings.Join(params, ", "))
+	}
 	fe.indent = "    "
 	fe.globalDecl()
 	for _, r := range f.Results {
@@ -614,18 +624,40 @@ func (e *emitter) function(f *ir.Func) string {
 		fe.structured(2)
 		fe.w("except rt.GoPanic as _e:")
 		fe.w("    _p = _e")
-		fe.w("rt.run_defers(_d, _p)")
+		if fe.pausingDefer() {
+			fe.w("await rt.run_defers_async(t, _d, _p)")
+		} else {
+			fe.w("rt.run_defers(_d, _p)")
+		}
 		fe.w("return %s", fe.results())
 	} else {
 		fe.structured(1)
 	}
 	fe.indent = ""
 	fe.b.WriteString("\n\n")
+	if fe.task {
+		n := e.names.Symbol(f.Sym)
+		fe.w("def %s(%s):", n, strings.Join(params, ", "))
+		fe.w("    return rt.native_task(lambda t: %s_a(%s), %d)", n, strings.Join(append([]string{"t"}, params...), ", "), len(f.Results))
+		fe.b.WriteString("\n\n")
+	}
 	return structure.Resolve(fe.b.String())
 }
 
+// pausingDefer reports whether a deferred call of f may pause.
+func (fe *fnEmitter) pausingDefer() bool {
+	for _, b := range fe.f.Blocks {
+		for _, in := range b.Instrs {
+			if d, ok := in.(*ir.Defer); ok && d.Call.Suspends {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (fe *fnEmitter) analyze() {
-	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, pyProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.task, Order: structure.LeftToRight}, pyProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
 }
 
 var pySyntax = structure.Syntax{
@@ -639,7 +671,7 @@ var pySyntax = structure.Syntax{
 // function with defers leaves its body through a break, and a resumable
 // frame dispatches on the block it resumes at.
 func (fe *fnEmitter) structured(depth int) {
-	body := structure.Build(fe.f, structure.Options{ExitReturns: fe.defers, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	body := structure.Build(fe.f, structure.Options{Inline: fe.task, ExitReturns: fe.defers, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, fe.task) }})
 	syn := pySyntax
 	pc := fe.pc()
 	syn.DispatchOpen = []string{"while True:"}
@@ -680,7 +712,13 @@ func (p pyEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
 	return p.fe.capture(func() { p.fe.term(t) })
 }
 
-func (p pyEmitter) Pause(*ir.Pause) string    { panic("py: inline pause") }
+func (p pyEmitter) Pause(ps *ir.Pause) string {
+	if p.fe.folds.FoldedPause(ps) {
+		return ""
+	}
+	return p.fe.capture(func() { p.fe.nativePause(ps, p.fe.mark(ps.Position())) })
+}
+
 func (p pyEmitter) Cond(v ir.Value) string    { return p.fe.val(v) }
 func (p pyEmitter) Mark(pos token.Pos) string { return p.fe.mark(pos) }
 
@@ -688,8 +726,10 @@ func (p pyEmitter) Mark(pos token.Pos) string { return p.fe.mark(pos) }
 type pyProbe struct{ fe *fnEmitter }
 
 func (p pyProbe) Instr(in ir.Instr) string { return p.fe.capture(func() { p.fe.instr(in) }) }
-func (p pyProbe) Pause(*ir.Pause) string   { panic("py: inline pause") }
-func (p pyProbe) Cond(v ir.Value) string   { return p.fe.val(v) }
+func (p pyProbe) Pause(ps *ir.Pause) string {
+	return p.fe.capture(func() { p.fe.nativePause(ps, "") })
+}
+func (p pyProbe) Cond(v ir.Value) string { return p.fe.val(v) }
 func (p pyProbe) Leaf(b *ir.Block, t ir.Terminator) string {
 	return p.fe.capture(func() { p.fe.term(t) })
 }
@@ -886,19 +926,90 @@ func (fe *fnEmitter) pause(p *ir.Pause) {
 		fe.w("rt.chan_recv(t, %s)", fe.val(i.Ch))
 	case *ir.Select:
 		e.use("core.select")
-		var cs []string
-		for _, c := range i.Cases {
-			if c.Send {
-				cs = append(cs, fmt.Sprintf("(%s, True, %s)", fe.val(c.Ch), fe.val(c.V)))
-			} else {
-				cs = append(cs, fmt.Sprintf("(%s, False, None)", fe.val(c.Ch)))
-			}
-		}
-		fe.w("rt.select(t, [%s], %s)", strings.Join(cs, ", "), pyBool(i.Default))
+		fe.w("rt.select(t, [%s], %s)", strings.Join(fe.selectCases(i), ", "), pyBool(i.Default))
 	default:
 		panic(fmt.Sprintf("py: pause on %T", p.Op))
 	}
 	fe.w("return")
+}
+
+// nativePause emits a pause point of a coroutine, prefixed with mark m: a
+// generated callee is awaited for its results; a runtime primitive either
+// completes at once or leaves the task blocked, and then the task waits for
+// the scheduler to choose it again. Primitive, function value and method
+// results arrive in t.rv.
+func (fe *fnEmitter) nativePause(p *ir.Pause, m string) {
+	e := fe.e
+	const wait = "if t.blocked: await rt.wait(t)"
+	switch i := p.Op.(type) {
+	case *ir.Call:
+		fn, args, _ := fe.callee(i)
+		args = append([]string{"t"}, args...)
+		switch i.Kind {
+		case ir.CallExtern:
+			fe.w("%s%s(%s)", m, fn, strings.Join(args, ", "))
+			fe.w(wait)
+		case ir.CallStatic:
+			call := fmt.Sprintf("await %s_a(%s)", fn, strings.Join(args, ", "))
+			if d := fe.resultTargets(i.Dsts); d != "" {
+				fe.w("%s%s = %s", m, d, call)
+			} else {
+				fe.w("%s%s", m, call)
+			}
+			return
+		default:
+			if i.Kind == ir.CallValue {
+				fn = "rt.fnchk(" + fn + ")"
+			}
+			fe.w("%sawait rt.await_frame(t, %s(%s))", m, fn, strings.Join(args[1:], ", "))
+		}
+	case *ir.Send:
+		e.use("core.chan.send")
+		fe.w("%srt.chan_send(t, %s, %s)", m, fe.val(i.Ch), fe.val(i.V))
+		fe.w(wait)
+	case *ir.Recv:
+		e.use("core.chan.recv")
+		fe.w("%srt.chan_recv(t, %s)", m, fe.val(i.Ch))
+		fe.w(wait)
+	case *ir.Select:
+		e.use("core.select")
+		fe.w("%srt.select(t, [%s], %s)", m, strings.Join(fe.selectCases(i), ", "), pyBool(i.Default))
+		fe.w(wait)
+	default:
+		panic(fmt.Sprintf("py: pause on %T", p.Op))
+	}
+	fe.resume(p.Op)
+}
+
+// resultTargets renders the assignment targets of a call's results, with _
+// for a discarded one, or "" when every result is discarded.
+func (fe *fnEmitter) resultTargets(ds []*ir.Local) string {
+	var s []string
+	used := false
+	for _, d := range ds {
+		if d == nil {
+			s = append(s, "_")
+			continue
+		}
+		used = true
+		s = append(s, fe.val(d))
+	}
+	if !used {
+		return ""
+	}
+	return strings.Join(s, ", ")
+}
+
+func (fe *fnEmitter) selectCases(i *ir.Select) []string {
+	var cs []string
+	for _, c := range i.Cases {
+		if c.Send {
+			cs = append(cs, fmt.Sprintf("(%s, True, %s)", fe.val(c.Ch), fe.val(c.V)))
+		} else {
+			cs = append(cs, fmt.Sprintf("(%s, False, None)", fe.val(c.Ch)))
+		}
+	}
+	return cs
 }
 
 func pyBool(b bool) string {
@@ -1176,6 +1287,10 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		}
 		if fe.frame {
 			w("fr.defers.append(rt.Deferred(%s, [%s], %s, %s))", fn, strings.Join(args, ", "), fid, pyBool(i.Call.Suspends))
+			return
+		}
+		if fe.task && i.Call.Suspends {
+			w("_d.append(rt.Deferred(%s, [%s], %s, True))", fn, strings.Join(args, ", "), fid)
 			return
 		}
 		w("_d.append(rt.Deferred(%s, [%s], %s))", fn, strings.Join(args, ", "), fid)
