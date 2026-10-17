@@ -5,7 +5,7 @@ package main
 
 import "goalchemyout/rt"
 
-type Task struct {
+type task struct {
 	ID    int
 	Title string
 	Done  bool
@@ -13,13 +13,13 @@ type Task struct {
 
 type _frame_produce struct {
 	rt.FrameBase
-	out rt.Chan[Task]
+	out rt.Chan[task]
 	n   int
 	i   int
-	_4  Task
+	_4  task
 }
 
-func produce(out rt.Chan[Task], n int) rt.Frame {
+func produce(out rt.Chan[task], n int) rt.Frame {
 	_fr := &_frame_produce{}
 	_fr.out = out
 	_fr.n = n
@@ -36,7 +36,7 @@ func (_fr *_frame_produce) Step(_t *rt.Task) {
 	_fr.i = int(1)
 b1:
 	if _fr.i <= _fr.n {
-		_fr._4 = *new(Task)
+		_fr._4 = *new(task)
 		_fr._4.ID = _fr.i
 		_fr._4.Title = "task"
 		_fr._4.Done = (_fr.i % int(3)) == int(0)
@@ -55,15 +55,15 @@ b5:
 type _frame_fetchTasks struct {
 	rt.FrameBase
 	n     int
-	_1    []Task
+	_1    []task
 	_2    error
 	_4    error
-	ch    rt.Chan[Task]
-	tasks []Task
-	_9    Task
+	ch    rt.Chan[task]
+	tasks []task
+	_9    task
 	_10   bool
-	_11   rt.Chan[Task]
-	t     Task
+	_11   rt.Chan[task]
+	t     task
 }
 
 func fetchTasks(n int) rt.Frame {
@@ -79,27 +79,27 @@ func (_fr *_frame_fetchTasks) Step(_t *rt.Task) {
 	case 9:
 		goto b9
 	}
-	_fr._1 = *new([]Task)
+	_fr._1 = *new([]task)
 	_fr._2 = *new(error)
 	if _fr.n < int(0) {
 		_fr._4 = rt.StdErrorsNew("negative count")
-		_fr._1 = ([]Task)(nil)
+		_fr._1 = ([]task)(nil)
 		_fr._2 = _fr._4
 		rt.Ret(_t, _fr)
 		return
 	}
-	_fr.ch = rt.MakeChan[Task](int(0))
-	func(_g0 rt.Chan[Task], _g1 int) {
+	_fr.ch = rt.MakeChan[task](int(0))
+	func(_g0 rt.Chan[task], _g1 int) {
 		rt.Spawn(produce(_g0, _g1))
-	}(rt.Chan[Task](_fr.ch), _fr.n)
-	_fr.tasks = *new([]Task)
+	}(rt.Chan[task](_fr.ch), _fr.n)
+	_fr.tasks = *new([]task)
 	_fr._11 = _fr.ch
 b3:
 	_fr.PC = 9
 	_fr._11.Recv(_t)
 	return
 b9:
-	_fr._9 = rt.As[Task](_t.RV[0])
+	_fr._9 = rt.As[task](_t.RV[0])
 	_fr._10 = _t.RV[1].(bool)
 	if !_fr._10 {
 		_fr._1 = _fr.tasks
@@ -116,15 +116,15 @@ b9:
 
 type _frame_main_2 struct {
 	rt.FrameBase
-	tasks []Task
+	tasks []task
 	err   error
-	_2    []Task
+	_2    []task
 	_3    error
 	_7    int
 	_8    int
-	_9    []Task
-	t     Task
-	_16   []Task
+	_9    []task
+	t     task
+	_16   []task
 	_17   error
 }
 
@@ -146,7 +146,7 @@ func (_fr *_frame_main_2) Step(_t *rt.Task) {
 	rt.Call(_t, fetchTasks(int(7)))
 	return
 b7:
-	_fr._2 = rt.As[[]Task](_t.RV[0])
+	_fr._2 = rt.As[[]task](_t.RV[0])
 	_fr._3 = rt.As[error](_t.RV[1])
 	_fr.tasks = _fr._2
 	_fr.err = _fr._3
@@ -167,7 +167,7 @@ b7:
 	rt.Call(_t, fetchTasks(int(-1)))
 	return
 b8:
-	_fr._16 = rt.As[[]Task](_t.RV[0])
+	_fr._16 = rt.As[[]task](_t.RV[0])
 	_fr._17 = rt.As[error](_t.RV[1])
 	_fr.err = _fr._17
 	println(_fr.err.Error())

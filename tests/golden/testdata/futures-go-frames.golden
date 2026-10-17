@@ -27,16 +27,16 @@ func total(n int) int {
 
 type _frame_main_2 struct {
 	rt.FrameBase
-	a   Future
+	a   future
 	_1  func() int
 	_2  func() []any
 	_4  rt.FutureState
-	_5  Future
-	b   Future
+	_5  future
+	b   future
 	_7  func() int
 	_8  func() []any
 	_10 rt.FutureState
-	_11 Future
+	_11 future
 	_13 rt.FutureState
 	_14 []any
 	_15 any
@@ -74,7 +74,7 @@ func (_fr *_frame_main_2) Step(_t *rt.Task) {
 	}()
 	_fr._2 = func(_r func() int) func() []any { return func() []any { return _Start(_r) } }(_fr._1)
 	_fr._4 = rt.LibTaskStart(any(_fr._2))
-	_fr._5 = *new(Future)
+	_fr._5 = *new(future)
 	_fr._5.state = _fr._4
 	_fr.a = _fr._5
 	_fr._7 = func() func() int {
@@ -88,7 +88,7 @@ func (_fr *_frame_main_2) Step(_t *rt.Task) {
 	}()
 	_fr._8 = func(_r func() int) func() []any { return func() []any { return _Start(_r) } }(_fr._7)
 	_fr._10 = rt.LibTaskStart(any(_fr._8))
-	_fr._11 = *new(Future)
+	_fr._11 = *new(future)
 	_fr._11.state = _fr._10
 	_fr.b = _fr._11
 	_fr._13 = _fr.a.state
