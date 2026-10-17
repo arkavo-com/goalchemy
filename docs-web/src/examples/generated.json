@@ -1,0 +1,29 @@
+{
+  "sourceHash": "12587e521b375077871f705ab8ece72999d19d10ec92f092647f86a8d776fff3",
+  "outputs": {
+    "go": {
+      "file": "pkg_tasks_51ee6f93a026bf93.go"
+    },
+    "typescript": {
+      "file": "pkg_tasks_51ee6f93a026bf93.ts"
+    },
+    "python": {
+      "file": "pkg_tasks_51ee6f93a026bf93.py"
+    },
+    "java": {
+      "file": "pkg_tasks_51ee6f93a026bf93.java"
+    },
+    "csharp": {
+      "file": "pkg_tasks_51ee6f93a026bf93.cs"
+    },
+    "rust": {
+      "file": "src/pkg_tasks_51ee6f93a026bf93.rs"
+    },
+    "c": {
+      "file": "pkg_tasks_51ee6f93a026bf93.c"
+    },
+    "swift": {
+      "file": "pkg_tasks_51ee6f93a026bf93.swift"
+    }
+  }
+}

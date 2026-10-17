@@ -1,0 +1,48 @@
+package main
+
+import (
+    "github.com/eugenioenko/goalchemy/lib/context"
+    "github.com/eugenioenko/goalchemy/lib/errors"
+    "github.com/eugenioenko/goalchemy/lib/http"
+    "github.com/eugenioenko/goalchemy/std/encoding/json"
+)
+
+type Task struct {
+    Title     string `json:"title"`
+    Completed bool   `json:"completed"`
+}
+
+func fetchTasks(url string) ([]Task, error) {
+    status, _, body, err := http.Do(
+        context.Background(), "GET", url,
+        nil, nil, 1<<20, 5000,
+    )
+    if err != nil {
+        return nil, err
+    }
+    if status != 200 {
+        return nil, errors.New("unexpected HTTP status")
+    }
+
+    var tasks []Task
+    err = json.Unmarshal(body, &tasks)
+    return tasks, err
+}
+
+func main() {
+    tasks, err := fetchTasks("https://jsonplaceholder.typicode.com/todos")
+    if err != nil {
+        println("Could not load tasks:", err.Error())
+        return
+    }
+
+    completed := 0
+    for _, task := range tasks {
+        if task.Completed {
+            completed++
+        } else {
+            println("To do:", task.Title)
+        }
+    }
+    println("Completed:", completed, "of", len(tasks))
+}

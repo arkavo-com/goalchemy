@@ -12,7 +12,8 @@
     "check": "pnpm prepare:docs && astro check",
     "build": "pnpm prepare:docs && astro build && node scripts/check-links.mjs",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "examples:generate": "node scripts/generate-examples.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.6",
@@ -27,6 +28,7 @@
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
+    "shiki": "^4.5.0",
     "typescript": "^5.9.3",
     "unified": "^11.0.5",
     "yaml": "^2.8.1"

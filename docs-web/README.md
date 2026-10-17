@@ -31,6 +31,18 @@ New canonical documents need a source mapping. Keep generated output paths in `.
 
 The social image is copied from the existing README graphic during preparation. The Erlenmeyer-flask SVG logo in `src/assets/goalchemy.svg` is also copied to the favicon path during preparation. The SVG hero diagram includes all eight targets; Swift remains explicitly experimental. Do not add analytics or external font dependencies without a deliberate project decision.
 
+## Homepage code example
+
+The two-column source/output viewer uses real compiler output from `src/examples/tasks.go.txt`. Native read-only textareas sit over synchronized, decorative syntax-highlighted layers; Shiki runs at build time, and no highlighter or editor framework is shipped to the browser. The selected output loads from a static JSON asset, with subsequent tab selections cached locally. Examples are display-only and do not call the task API from the browser.
+
+After changing the source or compiler, regenerate the committed output snapshots:
+
+```sh
+pnpm --filter docs-web examples:generate
+```
+
+This requires the reference Go toolchain but no target runtimes. The generator builds the local compiler, emits the cooperative example to all eight targets in a temporary directory, and retains each root package's source file under `src/examples/generated/`. Keeping `.go` samples as `.txt` avoids adding documentation fixtures to the compiler's Go package discovery. Normal docs builds use the snapshots and require only Node/pnpm. A source hash check rejects stale examples.
+
 ## GitHub Pages
 
 `.github/workflows/docs.yml` installs the locked pnpm dependencies, checks Astro, builds the site, and validates links on relevant pull requests. Pushes to `main` affecting the docs, specs, site tooling, or workflow also upload `docs-web/dist` and deploy it through the `github-pages` environment. Manual runs on `main` support a deliberate redeploy. Pull requests only build.

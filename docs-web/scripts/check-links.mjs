@@ -19,6 +19,7 @@ async function collect(directory) {
         const attrs = Object.fromEntries((node.attrs ?? []).map(({ name, value }) => [name, value]));
         if (attrs.id) ids.add(attrs.id);
         if (node.tagName === 'a' && attrs.href) links.push(attrs.href);
+        if (attrs['data-example-url']) links.push(attrs['data-example-url']);
         if (['img', 'script', 'source'].includes(node.tagName) && attrs.src) links.push(attrs.src);
         if (node.tagName === 'link' && attrs.href && attrs.rel !== 'canonical') links.push(attrs.href);
         for (const child of node.childNodes ?? []) visit(child);
