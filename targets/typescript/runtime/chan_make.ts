@@ -1,7 +1,7 @@
 // core.chan.make: make(chan T, size), and the channel state shared by the
 // channel and select runtime functions.
 import { GoPanic, plainPanic } from "../types/panic.ts";
-import { sched, type Task } from "./task_spawn.ts";
+import { Queue, sched, type Task } from "./task_spawn.ts";
 
 export class SelectState {
   done = false;
@@ -51,11 +51,11 @@ export class Waiter {
 }
 
 export class Chan {
-  buf: unknown[] = [];
+  buf = new Queue<unknown>();
   size: number;
   closed = false;
-  recvq: Waiter[] = [];
-  sendq: Waiter[] = [];
+  recvq = new Queue<Waiter>();
+  sendq = new Queue<Waiter>();
   zero: () => unknown;
   constructor(size: number, zero: () => unknown) {
     this.size = size;
@@ -64,7 +64,7 @@ export class Chan {
 }
 
 /** Removes and returns the first waiter that can still complete. */
-export function dequeue(q: Waiter[]): Waiter | null {
+export function dequeue(q: Queue<Waiter>): Waiter | null {
   while (q.length > 0) {
     const w = q.shift()!;
     if (w.live()) return w;
@@ -73,7 +73,7 @@ export function dequeue(q: Waiter[]): Waiter | null {
   return null;
 }
 
-export function hasLive(q: Waiter[]): boolean {
+export function hasLive(q: Queue<Waiter>): boolean {
   return q.some(w => w.live());
 }
 
@@ -104,10 +104,10 @@ export function makeChan(size: number | bigint, zero: () => unknown = () => unde
 }
 
 /** Install one removable source waiter; task cleanup also runs on retirement. */
-export function parkWaiter(t: Task, q: Waiter[], w: Waiter): void {
+export function parkWaiter(t: Task, q: Queue<Waiter>, w: Waiter): void {
   q.push(w);
   t.cleanup = () => {
-    const i = q.indexOf(w); if (i >= 0) q.splice(i,1);
+    q.remove(w);
     w.clear();
   };
   sched.block(t);

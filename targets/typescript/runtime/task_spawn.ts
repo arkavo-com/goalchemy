@@ -12,6 +12,52 @@ import { catchPanic, formatChain, panicState, resetPanicBinding, type Deferred, 
 import { writeStderr } from "../types/print.ts";
 import { Slice } from "../types/slice.ts";
 
+/** A FIFO ring that keeps its storage as it drains, so a short queue that
+ * fills and drains repeatedly does not reallocate. */
+export class Queue<T> {
+  private a: (T | undefined)[] = new Array(8);
+  private h = 0;
+  length = 0;
+  push(x: T): void {
+    if (this.length === this.a.length) this.grow();
+    this.a[(this.h + this.length) & (this.a.length - 1)] = x;
+    this.length++;
+  }
+  shift(): T | undefined {
+    if (this.length === 0) return undefined;
+    const x = this.a[this.h];
+    this.a[this.h] = undefined;
+    this.h = (this.h + 1) & (this.a.length - 1);
+    this.length--;
+    return x;
+  }
+  /** Removes the first occurrence of x, keeping the order of the rest. */
+  remove(x: T): void {
+    const m = this.a.length - 1;
+    let i = 0;
+    while (i < this.length && this.a[(this.h + i) & m] !== x) i++;
+    if (i === this.length) return;
+    for (; i < this.length - 1; i++) this.a[(this.h + i) & m] = this.a[(this.h + i + 1) & m];
+    this.a[(this.h + i) & m] = undefined;
+    this.length--;
+  }
+  some(f: (x: T) => boolean): boolean {
+    for (let i = 0; i < this.length; i++) if (f(this.a[(this.h + i) & (this.a.length - 1)]!)) return true;
+    return false;
+  }
+  toArray(): T[] {
+    const out: T[] = [];
+    for (let i = 0; i < this.length; i++) out.push(this.a[(this.h + i) & (this.a.length - 1)]!);
+    return out;
+  }
+  private grow(): void {
+    const a = this.toArray() as (T | undefined)[];
+    a.length = this.a.length * 2;
+    this.a = a;
+    this.h = 0;
+  }
+}
+
 export abstract class Frame {
   pc = 0;
   defers: Deferred[] = [];
@@ -104,7 +150,7 @@ interface HostOperation {
 }
 
 export class Scheduler {
-  runq: Task[] = [];
+  runq = new Queue<Task>();
   cur: Task;
   main: Task;
   nextId = 1;
@@ -267,7 +313,7 @@ export class Scheduler {
     this.mail.live.clear();
     this.mail.wake = null;
     this.boundary = null;
-    this.runq = [];
+    this.runq = new Queue<Task>();
     this.timers = [];
     for (const dispose of [...this.disposers, ...this.retained]) { try { dispose(); } catch (e) { failure ??= e; } }
     this.disposers.clear();

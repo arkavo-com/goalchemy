@@ -46,16 +46,16 @@ export async function runPortableSuite(): Promise<string[]> {
     tb.complete([bytes,nested]); bytes[0]=9; nested[0].a[0]=9;
     tb.acknowledgeCleanup(); ta.complete(['a']); ta.acknowledgeCleanup();
     tb.complete(['duplicate']); other.drainHost(); check(other.runq.length===0,'foreign owner');
-    s.drainHost(); eq(s.runq.map(t=>t.id),[2,1],'FIFO publication');
+    s.drainHost(); eq(s.runq.toArray().map(t=>t.id),[2,1],'FIFO publication');
     eq(Array.from(b.rv[0] as Uint8Array),[1,255],'owned byte result'); eq(b.rv[1],[{a:[3]}],'owned nested result');
     for(let i=0;i<2000;i++) { tb.complete([]); tb.acknowledgeCleanup(); }
     check(s.mail.queue.length===0 && s.mail.cleaned.size===0,'late record bookkeeping bounded');
     await s.shutdown(); ta.complete([]); ta.acknowledgeCleanup(); check(s.mail.queue.length===0,'retired callbacks'); await other.shutdown();
     const c=owner(); let canceled=false;
     const tc = c.registerHost(new Task(3,new Steps([])),()=>{},()=>{},()=>canceled?['cancel']:null);
-    tc.complete(['success']);tc.acknowledgeCleanup();canceled=true;c.drainHost();eq(c.runq[0].rv,['cancel'],'cancel before apply');
+    tc.complete(['success']);tc.acknowledgeCleanup();canceled=true;c.drainHost();eq(c.runq.toArray()[0].rv,['cancel'],'cancel before apply');
     canceled=false; const td=c.registerHost(new Task(4,new Steps([])),()=>{},()=>{},()=>canceled?['cancel']:null);
-    td.complete(['applied']);td.acknowledgeCleanup();c.drainHost();canceled=true;eq(c.runq[1].rv,['applied'],'applied final');
+    td.complete(['applied']);td.acknowledgeCleanup();c.drainHost();canceled=true;eq(c.runq.toArray()[1].rv,['applied'],'applied final');
     const te=c.registerHost(new Task(5,new Steps([])),()=>{},()=>{},()=>['cancel']);te.complete([],new HostFault('adapter'));te.acknowledgeCleanup();
     let fault=false;try{c.drainHost();}catch(e){fault=e instanceof HostFault;}check(fault,'fault beats cancel');await c.shutdown();
     passed.push('registration/order/snapshot/duplicates/owners/cancel/fault');
@@ -193,7 +193,7 @@ export async function runPortableSuite(): Promise<string[]> {
           u=>select(u,[],false),u=>stdTimeSleep(u,1_000_000_000n),
         ];
         for(const block of blockers)spawn(new Steps([block,()=>{throw new Error('retired source task resumed');}]));yieldTask(t);},
-      ()=>{check(sending.sendq.length===1&&receiving.recvq.length===2&&chosen.sendq.length===1&&m.waiters.length===1&&wg.waiters.length===1,'all source blocker registrations installed');stale=[...sending.sendq,...receiving.recvq,...chosen.sendq];blockedTasks=stale.map(w=>w.task!);},
+      ()=>{check(sending.sendq.length===1&&receiving.recvq.length===2&&chosen.sendq.length===1&&m.waiters.length===1&&wg.waiters.length===1,'all source blocker registrations installed');stale=[...sending.sendq.toArray(),...receiving.recvq.toArray(),...chosen.sendq.toArray()];blockedTasks=stale.map(w=>w.task!);},
     ]),host());
     check(sending.sendq.length===0&&receiving.recvq.length===0&&chosen.sendq.length===0&&m.waiters.length===0&&wg.waiters.length===0,'blocked channel/select/mutex/WaitGroup roots removed');
     check(stale.every(w=>w.task===null&&w.val===undefined)&&old.tasks.size===0&&old.timers.length===0,'retained payload/tasks/nil/select/sleep roots released');
