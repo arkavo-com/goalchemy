@@ -98,6 +98,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	files := []artifact.File{{Path: "goalchemy_internal.h", Source: internal.Bytes()}}
 	write := func(path, owner string, body []byte) {
 		source, lines := e.resolveMarkers(banner + "#include \"goalchemy_internal.h\"\n\n" + string(body))
+		if e.p.NoLineDirectives {
+			lines = nil
+		}
 		files = append(files, artifact.File{Path: path, Owner: owner, Source: []byte(source), Lines: lines})
 	}
 	var shared bytes.Buffer

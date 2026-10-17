@@ -18,6 +18,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -613,6 +614,7 @@ type fnEmitter struct {
 	slots  map[*ir.Local]int
 	defers bool
 	frame  bool
+	folds  *structure.Folds
 }
 
 func (fe *fnEmitter) w(format string, args ...any) {
@@ -623,16 +625,26 @@ func (fe *fnEmitter) w(format string, args ...any) {
 
 func cell(l *ir.Local) bool { return l.Boxed && !l.Type.IsAggregate() }
 
-func (fe *fnEmitter) raw(l *ir.Local) string {
-	if fe.frame {
-		return "l[" + fe.e.names.Local(l, "_") + "]"
+func (fe *fnEmitter) name(l *ir.Local) string {
+	if n, ok := fe.folds.Name(l); ok {
+		return n
 	}
 	return fe.e.names.Local(l, "_")
+}
+
+func (fe *fnEmitter) raw(l *ir.Local) string {
+	if fe.frame {
+		return "l[" + fe.name(l) + "]"
+	}
+	return fe.name(l)
 }
 
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if cell(v) {
 			return "gx_pget(" + fe.raw(v) + ")"
 		}
@@ -850,7 +862,9 @@ func (fe *fnEmitter) addrOf(p *ir.Place) string {
 
 func (fe *fnEmitter) slotDecls() {
 	for _, l := range fe.f.Locals {
-		fe.w("enum { %s = %d };", fe.e.names.Local(l, "_"), fe.slots[l])
+		if !fe.folds.Temp(l) {
+			fe.w("enum { %s = %d };", fe.e.names.Local(l, "_"), fe.slots[l])
+		}
 	}
 }
 
@@ -888,6 +902,7 @@ func (e *emitter) function(f *ir.Func) string {
 			}
 		}
 	}
+	fe.analyze()
 	ps := append(append([]*ir.Local(nil), f.Env...), f.Params...)
 	e.proto("gx_V f_%s(%s)", e.names.Symbol(f.Sym), e.params(ps))
 	fmt.Fprintf(&fe.b, "%sgx_V f_%s(%s) {\n", position(f.Pos), e.names.Symbol(f.Sym), e.params(ps))
@@ -897,7 +912,9 @@ func (e *emitter) function(f *ir.Func) string {
 		qual = "volatile "
 	}
 	for _, l := range f.Locals {
-		fe.w("%sgx_V %s = {0};", qual, fe.raw(l))
+		if !fe.folds.Temp(l) {
+			fe.w("%sgx_V %s = {0};", qual, fe.raw(l))
+		}
 	}
 	for _, p := range ps {
 		fe.w("%s = arg_%s;", fe.raw(p), e.names.Local(p, "_"))
@@ -920,25 +937,81 @@ func (e *emitter) function(f *ir.Func) string {
 		fe.w("return result;")
 	}
 	fe.b.WriteString("}\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 func (fe *fnEmitter) body() {
-	if fe.frame {
-		fe.w("switch (fr->pc) {")
-		for i := range fe.f.Blocks {
-			fe.w("case %d: goto b%d;", i, i)
+	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	fe.b.WriteString(structure.Print(body, cSyntax, cEmitter{fe}, 1))
+}
+
+var cSyntax = structure.Syntax{
+	Indent: "    ", If: "if (%s) {", ElseIf: "} else if (%s) {", Else: "} else {", End: "}",
+	Loop: "for (;;) {", While: "while (%s) {", LabelName: "L%d",
+	Break: "break;", Continue: "continue;", Goto: "goto %s;", Label: "%s:;", GotoLoops: true,
+	Not: "!%s", And: "%s && %s", Or: "%s || %s", EntryLabel: "b%d:;", GotoEntry: "goto b%d;",
+	Resume: func(heads []*ir.Block) string {
+		var b strings.Builder
+		b.WriteString("switch (fr->pc) {\ncase 0: break;\n")
+		for _, h := range heads {
+			fmt.Fprintf(&b, "case %d: goto b%d;\n", h.ID, h.ID)
 		}
-		fe.w("default: gx_fault(\"bad block\");")
-		fe.w("}")
-	}
-	for i, b := range fe.f.Blocks {
-		fmt.Fprintf(&fe.b, "b%d:;\n", i)
+		b.WriteString("default: gx_fault(\"bad block\");\n}")
+		return b.String()
+	},
+}
+
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.Unsequenced}, cProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	fe.b = strings.Builder{}
+	fn()
+	out := fe.b.String()
+	fe.b = saved
+	return out
+}
+
+// cEmitter prints the target-specific statements of a structured body.
+type cEmitter struct{ fe *fnEmitter }
+
+func (c cEmitter) Code(b *ir.Block) string {
+	fe := c.fe
+	return fe.capture(func() {
 		if b.ResumeOf != nil {
 			fe.resume(b.ResumeOf)
 		}
-		fe.block(b)
-	}
+		for _, in := range b.Instrs {
+			if !fe.folds.Folded(in) {
+				fe.instr(in)
+			}
+		}
+	})
+}
+
+func (c cEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return c.fe.capture(func() { c.fe.term(t) })
+}
+
+func (c cEmitter) Pause(*ir.Pause) string    { panic("c: inline pause") }
+func (c cEmitter) Cond(v ir.Value) string    { return "gx_b(" + c.fe.val(v) + ")" }
+func (c cEmitter) Mark(pos token.Pos) string { return c.fe.mark(pos) }
+
+// cProbe renders statements for fold analysis.
+type cProbe struct{ fe *fnEmitter }
+
+func (c cProbe) Instr(in ir.Instr) string { return c.fe.capture(func() { c.fe.instr(in) }) }
+func (c cProbe) Pause(*ir.Pause) string   { panic("c: inline pause") }
+func (c cProbe) Cond(v ir.Value) string   { return c.fe.val(v) }
+func (c cProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return c.fe.capture(func() { c.fe.term(t) })
+}
+func (c cProbe) Assign(l *ir.Local) (string, string) {
+	s := c.fe.set(l, "\x01")
+	i := strings.Index(s, "\x01")
+	return s[:i], s[i+1:] + ";"
 }
 
 func (fe *fnEmitter) results() string {
@@ -967,21 +1040,9 @@ func (fe *fnEmitter) mark(pos token.Pos) string {
 	return fmt.Sprintf("%s%d\x00", marker, int(pos))
 }
 
-func (fe *fnEmitter) block(b *ir.Block) {
-	for _, in := range b.Instrs {
-		fe.instr(in)
-	}
-	fe.term(b.Term)
-}
-
 func (fe *fnEmitter) term(t ir.Terminator) {
 	m := fe.mark(t.Position())
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.w("%sgoto b%d;", m, fe.order[t.Target])
-	case *ir.If:
-		fe.w("%sif (gx_b(%s)) goto b%d;", m, fe.val(t.Cond), fe.order[t.Then])
-		fe.w("goto b%d;", fe.order[t.Else])
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
@@ -1014,6 +1075,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
+	fe.analyze()
 	e.localProto("static void st_%s(gx_Task *t, gx_Frame *fr)", e.names.Symbol(f.Sym))
 	e.localProto("static int rs_%s(gx_Frame *fr, gx_V *out)", e.names.Symbol(f.Sym))
 	fmt.Fprintf(&fe.b, "%sstatic void st_%s(gx_Task *t, gx_Frame *fr) {\n", position(f.Pos), e.names.Symbol(f.Sym))
@@ -1043,7 +1105,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 	}
 	fe.w("return gx_vframe(fr);")
 	fe.b.WriteString("}\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 func (fe *fnEmitter) resume(op ir.Instr) {
