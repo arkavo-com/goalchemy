@@ -21,6 +21,7 @@ func runCompile(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	target := fs.String("target", "go", "output target: "+targetNames()+", or ir")
 	out := fs.String("out", "", "output directory")
 	nf := registerNameFlags(fs)
+	host := registerHostFlag(fs)
 	pauseModel := fs.String("pause-model", "frames", "suspending function form: frames or native")
 	lineDirectives := fs.Bool("line-directives", true, "annotate generated code with source positions")
 	if err := fs.Parse(args); err != nil {
@@ -49,7 +50,7 @@ func runCompile(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	eds := driver.EmitWithOptions(*target, res, *out, driver.EmitOptions{Names: names, NameCollisions: collisions, PauseModel: *pauseModel, NoLineDirectives: !*lineDirectives})
+	eds := driver.EmitWithOptions(*target, res, *out, driver.EmitOptions{Names: names, NameCollisions: collisions, PauseModel: *pauseModel, NoLineDirectives: !*lineDirectives, Host: *host})
 	if len(eds) > 0 {
 		_ = diagnostics.Write(stderr, eds, sf.json)
 		return 1

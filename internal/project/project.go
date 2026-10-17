@@ -17,6 +17,9 @@ const FileName = "goalchemy.yaml"
 
 type Target struct {
 	Out string `json:"out"`
+	// Host lists Go files or directories, relative to the configuration
+	// file, that the project compiles into the generated Go package.
+	Host []string `json:"host,omitempty"`
 }
 
 type Config struct {
@@ -67,6 +70,9 @@ func Load(path string) (*Config, error) {
 	for name, t := range c.Targets {
 		if t.Out == "" {
 			return nil, fmt.Errorf("%s: target %s needs an out directory", path, name)
+		}
+		if len(t.Host) > 0 && name != "go" {
+			return nil, fmt.Errorf("%s: target %s: host files are only supported for the go target", path, name)
 		}
 	}
 	switch c.PauseModel {
@@ -122,6 +128,18 @@ func (c *Config) OutDir(target string) string {
 		return out
 	}
 	return filepath.Join(c.Dir, out)
+}
+
+// HostFiles resolves a target's host files relative to the config file.
+func (c *Config) HostFiles(target string) []string {
+	var out []string
+	for _, h := range c.Targets[target].Host {
+		if !filepath.IsAbs(h) {
+			h = filepath.Join(c.Dir, h)
+		}
+		out = append(out, h)
+	}
+	return out
 }
 
 // RegressionMeta records how a corpus regression was found.

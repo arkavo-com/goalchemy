@@ -66,7 +66,7 @@ func TestNamingFlagsAndConfigOverride(t *testing.T) {
 			mode := "compact"
 			if strings.Contains(string(source), "fn_main_main_") {
 				mode = "readable"
-			} else if strings.Contains(string(source), "func CountBinding(binding PolicyBinding) int {") {
+			} else if strings.Contains(string(source), "func countBinding(binding policyBinding) int {") {
 				mode = "source"
 			}
 			if mode != tc.want {
