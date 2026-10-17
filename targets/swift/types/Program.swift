@@ -75,6 +75,19 @@ func GPanicBytes(_ panic: GPanic) -> [UInt8] {
 }
 func GPanicText(_ panic: GPanic) -> String { String(decoding: GPanicBytes(panic), as: UTF8.self) }
 
+/// GMain runs an executable's entry on a thread with a 1 GiB stack, as Go
+/// allows: functions that cannot pause recurse on the native stack.
+func GMain(_ body: @escaping () -> Void) {
+  let done = DispatchSemaphore(value: 0)
+  let thread = Thread {
+    body()
+    done.signal()
+  }
+  thread.stackSize = 1 << 30
+  thread.start()
+  done.wait()
+}
+
 func GReport(_ error: Error) -> Never {
   let text: String
   if let p = error as? GPanic {
@@ -263,6 +276,12 @@ final class GFrame {
     f.step = { _, _ in .complete(try call()) }
     return f
   }
+  /// plain adapts a function that cannot pause to the frame calling convention.
+  static func plain(_ id: Int, _ body: @escaping (GTask) throws -> [GValue]) -> GFrame {
+    let f = GFrame(id)
+    f.step = { _, task in .complete(try body(task)) }
+    return f
+  }
   static func failure(_ error: Error) -> GFrame {
     let f = GFrame(-1)
     f.step = { _, _ in throw error }
@@ -344,6 +363,9 @@ final class GOwner {
   var retainKeys: ((GCryptoKey) -> Void)?
   var abandoned = 0
   var nextCollection = 4096
+  /// syncDepth counts synchronous calls in progress; their callers' locals
+  /// are not frame roots, so collection waits until they return.
+  var syncDepth = 0
   var harness = false
   static var current: GOwner?
   init(host: Bool) {
@@ -447,8 +469,18 @@ final class GOwner {
     GTransferKeys(root.rv)
     return root.rv
   }
-  func drive(_ task: GTask) throws {
-    while !task.done && !task.blocked {
+  /// callSync runs a frame that cannot pause to completion on the current
+  /// task and returns its results; an unrecovered panic is thrown.
+  func callSync(_ task: GTask, _ frame: GFrame) throws -> [GValue] {
+    let base = task.stack.count
+    task.stack.append(frame)
+    syncDepth += 1
+    defer { syncDepth -= 1 }
+    try drive(task, base: base)
+    return task.rv
+  }
+  func drive(_ task: GTask, base: Int = 0) throws {
+    while !task.done && !task.blocked && task.stack.count > base {
       guard let frame = task.stack.last else {
         task.done = true
         break
@@ -484,6 +516,7 @@ final class GOwner {
           continue
         }
         if let p = panicking, !p.recovered {
+          if task.stack.count == base && base > 0 { throw p }
           if let parent = task.stack.last {
             parent.panic = p
             parent.finishing = true
@@ -492,7 +525,7 @@ final class GOwner {
           throw p
         }
         task.rv = frame.results()
-        if task.stack.isEmpty {
+        if task.stack.isEmpty && base == 0 {
           task.done = true
           break
         }
@@ -512,9 +545,11 @@ final class GOwner {
         frame.finishing = true
       case .resume(let values): task.rv = values
       case .yield:
+        if base > 0 { throw GFault("synchronous call paused") }
         ready(task)
         return
       case .park:
+        if base > 0 { throw GFault("synchronous call paused") }
         task.blocked = true
         return
       }
@@ -594,7 +629,7 @@ func GTransferKeys(_ values: [GValue]) {
 }
 extension GOwner {
   func safepoint() {
-    if GHeap.allocations.count < nextCollection { return }
+    if syncDepth > 0 || GHeap.allocations.count < nextCollection { return }
     var roots: [GValue] = []
     for task in tasks where !task.done {
       roots += task.rv

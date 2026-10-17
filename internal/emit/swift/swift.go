@@ -1,5 +1,6 @@
-// Package swift emits native Swift with explicit Go storage and a stack-safe
-// resumable calling convention shared by sequential and cooperative code.
+// Package swift emits native Swift with explicit Go storage. Functions that
+// cannot pause are plain Swift functions; the others are resumable frames
+// driven by the cooperative scheduler.
 package swift
 
 import (
@@ -15,6 +16,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -192,14 +194,24 @@ type fnEmitter struct {
 	b      strings.Builder
 	labels map[*ir.Block]int
 	next   int
-	resume int
+	folds  *structure.Folds
+	// frame is set when f is a resumable frame rather than a plain function.
+	frame bool
 }
 
 func (fe *fnEmitter) w(format string, a ...any) { fmt.Fprintf(&fe.b, "            "+format+"\n", a...) }
-func (fe *fnEmitter) local(l *ir.Local) string  { return fe.e.names.Local(l, "_") }
+func (fe *fnEmitter) local(l *ir.Local) string {
+	if n, ok := fe.folds.Name(l); ok {
+		return n
+	}
+	return fe.e.names.Local(l, "_")
+}
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		return fe.local(v) + ".value"
 	case *ir.Const:
 		return fe.e.constant(v)
@@ -222,12 +234,36 @@ func (fe *fnEmitter) results() string {
 	}
 	return "[" + strings.Join(xs, ", ") + "]"
 }
+
+// plain reports whether f runs as a plain Swift function: it cannot pause,
+// and it has no deferred calls or recover, which the frame scheduler runs.
+func plain(f *ir.Func) bool {
+	if f.MaySuspend {
+		return false
+	}
+	for _, b := range f.Blocks {
+		for _, in := range b.Instrs {
+			switch in.(type) {
+			case *ir.Defer, *ir.Recover:
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (e *emitter) function(f *ir.Func) string {
-	fe := &fnEmitter{e: e, f: f, labels: map[*ir.Block]int{}, next: len(f.Blocks)}
+	fe := &fnEmitter{e: e, f: f, labels: map[*ir.Block]int{}, next: len(f.Blocks), frame: !plain(f)}
 	for i, b := range f.Blocks {
 		fe.labels[b] = i
 	}
-	fmt.Fprintf(&fe.b, "\n%sfunc %s(_ args: [GValue], _ env: [GCell]) -> GFrame {\n    _ = gTypeRegistration\n", position(f.Pos), e.names.Symbol(f.Sym))
+	structure.Analyze(f, structure.FoldOptions{Order: structure.LeftToRight}, swiftProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+	sym := e.names.Symbol(f.Sym)
+	if fe.frame {
+		fmt.Fprintf(&fe.b, "\n%sfunc %s(_ args: [GValue], _ env: [GCell]) -> GFrame {\n    _ = gTypeRegistration\n", position(f.Pos), sym)
+	} else {
+		fmt.Fprintf(&fe.b, "\n%sfunc %s_p(_ task: GTask, _ args: [GValue], _ env: [GCell]) throws -> [GValue] {\n", position(f.Pos), sym)
+	}
 	params := map[*ir.Local]int{}
 	for i, l := range f.Params {
 		params[l] = i
@@ -247,7 +283,12 @@ func (e *emitter) function(f *ir.Func) string {
 			}
 		}
 	}
+	var roots []string
 	for _, l := range f.Locals {
+		if fe.folds.Temp(l) {
+			continue
+		}
+		roots = append(roots, ".pointer("+fe.local(l)+")")
 		binding := "let"
 		if rebound[l] {
 			binding = "var"
@@ -260,26 +301,88 @@ func (e *emitter) function(f *ir.Func) string {
 			fmt.Fprintf(&fe.b, "    %s %s = GCell(GTypes.zero(%d))\n", binding, fe.local(l), l.Type.ID)
 		}
 	}
-	var roots []string
-	for _, l := range f.Locals {
-		roots = append(roots, ".pointer("+fe.local(l)+")")
+	body := structure.Build(f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	if !fe.frame {
+		syn := swiftSyntax
+		syn.DispatchOpen, syn.SetPC = []string{"var pc = 0", "%swhile true {", "\tswitch pc {"}, "pc = %d"
+		syn.Default = []string{`default: throw GFault("invalid block")`}
+		fe.b.WriteString(structure.Print(body, syn, swiftEmitter{fe}, 1))
+		fmt.Fprintf(&fe.b, "}\n%sfunc %s(_ args: [GValue], _ env: [GCell]) -> GFrame {\n    _ = gTypeRegistration\n    return GFrame.plain(%d) { task in try %s_p(task, args, env) }\n}\n", position(f.Pos), sym, f.ID, sym)
+		return structure.Resolve(fe.b.String())
 	}
-	fmt.Fprintf(&fe.b, "    let frame = GFrame(%d)\n    frame.dynamicResults = true\n    frame.roots = { [%s] }\n    frame.results = { %s }\n    frame.step = { frame, task in\n        while true {\n            task.owner.safepoint()\n            switch frame.pc {\n", f.ID, strings.Join(roots, ", "), fe.results())
-	for _, b := range f.Blocks {
-		fmt.Fprintf(&fe.b, "        case %d:\n", fe.labels[b])
+	fmt.Fprintf(&fe.b, "    let frame = GFrame(%d)\n    frame.dynamicResults = true\n    frame.roots = { [%s] }\n    frame.results = { %s }\n    frame.step = { frame, task in\n", f.ID, strings.Join(roots, ", "), fe.results())
+	if body.Dispatch == nil {
+		fe.b.WriteString("        task.owner.safepoint()\n")
+	}
+	syn := swiftSyntax
+	syn.LoopStart = "task.owner.safepoint()"
+	fe.b.WriteString(structure.Print(body, syn, swiftEmitter{fe}, 2))
+	fe.b.WriteString("    }\n    return frame\n}\n")
+	return structure.Resolve(fe.b.String())
+}
+
+var swiftSyntax = structure.Syntax{
+	Indent: "    ", If: "if %s {", ElseIf: "} else if %s {", Else: "} else {", End: "}",
+	Loop: "while true {", While: "while %s {", Block: "%s: do {", LoopLabel: "%s: ", LabelName: "l%d",
+	Break: "break", BreakTo: "break %s", Continue: "continue", ContinueTo: "continue %s",
+	Not: "!%s", And: "try %s && %s", Or: "try %s || %s",
+	DispatchOpen: []string{"%swhile true {", "\ttask.owner.safepoint()", "\tswitch frame.pc {"}, CaseOpen: "case %d:",
+	Default: []string{`default: throw GFault("invalid frame PC")`}, DispatchClose: []string{"\t}", "}"}, SetPC: "frame.pc = %d",
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	fe.b = strings.Builder{}
+	fn()
+	out := fe.b.String()
+	fe.b = saved
+	return out
+}
+
+// swiftEmitter prints the target-specific statements of a structured body.
+type swiftEmitter struct{ fe *fnEmitter }
+
+func (x swiftEmitter) Code(b *ir.Block) string {
+	fe := x.fe
+	return fe.capture(func() {
 		if b.ResumeOf != nil {
 			fe.resumeInstr(b.ResumeOf)
 		}
 		for _, in := range b.Instrs {
-			fe.mark(in.Position())
-			fe.instr(in)
+			if !fe.folds.Folded(in) {
+				fe.mark(in.Position())
+				fe.instr(in)
+			}
 		}
-		fe.mark(b.Term.Position())
-		fe.term(b.Term)
-	}
-	fe.b.WriteString("        default: throw GFault(\"invalid frame PC\")\n            }\n        }\n    }\n    return frame\n}\n")
-	return fe.b.String()
+	})
 }
+
+func (x swiftEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() {
+		x.fe.mark(t.Position())
+		x.fe.term(t)
+	})
+}
+
+func (x swiftEmitter) Pause(*ir.Pause) string { panic("swift: inline pause") }
+func (x swiftEmitter) Cond(v ir.Value) string { return x.fe.val(v) + ".boolValue" }
+func (x swiftEmitter) Mark(pos token.Pos) string {
+	if !pos.IsValid() {
+		return ""
+	}
+	return fmt.Sprintf("%s%d\x00", marker, int(pos))
+}
+
+// swiftProbe renders statements for fold analysis.
+type swiftProbe struct{ fe *fnEmitter }
+
+func (x swiftProbe) Instr(in ir.Instr) string { return x.fe.capture(func() { x.fe.instr(in) }) }
+func (x swiftProbe) Pause(*ir.Pause) string   { panic("swift: inline pause") }
+func (x swiftProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
+func (x swiftProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() { x.fe.term(t) })
+}
+func (x swiftProbe) Assign(l *ir.Local) (string, string) { return x.fe.val(l) + " = ", "" }
 
 const marker = "\x00@"
 
@@ -311,13 +414,6 @@ func (e *emitter) markers(src string) (string, map[int]token.Position) {
 	return strings.Join(ls, "\n"), m
 }
 
-func (fe *fnEmitter) newCase() {
-	n := fe.next
-	fe.next++
-	fe.w("frame.pc = %d", n)
-	fe.w("return .call(child)")
-	fmt.Fprintf(&fe.b, "        case %d:\n", n)
-}
 func (fe *fnEmitter) assignResults(ds []*ir.Local) {
 	for i, d := range ds {
 		if d != nil {
@@ -343,6 +439,15 @@ func (fe *fnEmitter) call(c *ir.Call) string {
 		return fmt.Sprintf("%s(%s)", symbol, args)
 	}
 	panic("swift call")
+}
+
+// syncCall calls a function that cannot pause and returns its results: a
+// plain function directly, any other through a synchronous frame run.
+func (fe *fnEmitter) syncCall(c *ir.Call) string {
+	if c.Kind == ir.CallStatic && plain(c.Func) {
+		return fmt.Sprintf("try %s_p(task, %s, [])", fe.e.names.Symbol(c.Func.Sym), fe.values(c.Args))
+	}
+	return "try task.owner.callSync(task, " + fe.call(c) + ")"
 }
 
 func (fe *fnEmitter) root(p *ir.Place) string {
@@ -449,9 +554,22 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			w("%s = .bool(asserted%d.1)", fe.val(i.Ok), n)
 		}
 	case *ir.Call:
-		w("let child = %s", fe.call(i))
-		fe.newCase()
-		fe.assignResults(i.Dsts)
+		call := fe.syncCall(i)
+		switch {
+		case len(i.Dsts) == 0:
+			w("_ = %s", call)
+		case len(i.Dsts) == 1 && i.Dsts[0] != nil:
+			w("%s = %s[0]", fe.val(i.Dsts[0]), call)
+		default:
+			n := fe.next
+			fe.next++
+			w("let results%d = %s", n, call)
+			for k, d := range i.Dsts {
+				if d != nil {
+					w("%s = results%d[%d]", fe.val(d), n, k)
+				}
+			}
+		}
 	case *ir.MakeClosure:
 		var env []string
 		for _, l := range i.Env {
@@ -601,11 +719,11 @@ func (fe *fnEmitter) resumeInstr(in ir.Instr) {
 }
 func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.w("frame.pc = %d; continue", fe.labels[t.Target])
-	case *ir.If:
-		fe.w("frame.pc = %s.boolValue ? %d : %d; continue", fe.val(t.Cond), fe.labels[t.Then], fe.labels[t.Else])
 	case *ir.Return:
+		if !fe.frame {
+			fe.w("return %s", fe.results())
+			return
+		}
 		fe.w("return .complete(%s)", fe.results())
 	case *ir.Panic:
 		fe.w("throw GPanic.source(%s)", fe.val(t.X))
