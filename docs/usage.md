@@ -31,7 +31,7 @@ packages: [./cmd/app]      # package patterns, relative to this file
 tags: [prod]               # optional build tags
 gate: sequential           # sequential (default) or cooperative
 compact_names: false        # readable private identifiers (default)
-pause_model: frames         # frames (default) or native (Go, TypeScript and Swift, experimental)
+pause_model: frames         # frames (default) or native (Go, TypeScript, Swift and C#, experimental)
 line_directives: true       # map generated code back to the source (default)
 targets:
   go: {out: out/go}
@@ -60,7 +60,7 @@ goalchemy build --compact-names=false
 
 `compile`, `run`, and `build` also accept `--pause-model=frames|native`
 (`build` overrides `pause_model`). `frames` emits suspending functions as
-resumable frames. `native` is implemented by the Go, TypeScript and Swift
+resumable frames. `native` is implemented by the Go, TypeScript, Swift and C#
 targets.
 On Go it emits them as ordinary Go functions that take the current task and
 block at pause points; a turn-passing scheduler keeps exactly one task
@@ -75,8 +75,12 @@ Swift task on its owner's own executor, on the owner thread, and only
 Goalchemy's scheduler resumes a blocked task, so Swift's cooperative pool
 never runs source code. Swift native output needs task executors: on Apple
 platforms, macOS 15, iOS 18, tvOS 18, watchOS 11 or visionOS 2 (the generated
-package declares these minimums); frames output has no such requirement.
-Output is identical to frames on all three. See issue #92.
+package declares these minimums); frames output has no such requirement. On
+C# it emits `async` methods that take the task first and return the
+runtime's own `Async`/`Async<T>` types, whose builders never use the .NET
+thread pool, `SynchronizationContext` or `TaskScheduler`: a blocked task's
+continuation runs only when Goalchemy's scheduler chooses that task next, on
+the owner thread. Output is identical to frames on all four. See issue #92.
 
 `compile`, `run`, and `build` accept `--line-directives` (default on; `build`
 overrides `line_directives`). With `--line-directives=false`, generated code
