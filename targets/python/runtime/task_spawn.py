@@ -30,6 +30,7 @@ class Frame:
         self.defers = []
         self.parent = None
         self.panicking = None
+        self.completion = None
 
     def step(self, t):
         raise NotImplementedError
@@ -99,6 +100,7 @@ class Scheduler:
         self.timers = []
         self.seq = 0
         self.harness = False
+        self.unawaited = {}
         self.library_poll = None
         self.library_results = False
         # Identity shared by the schedulers of one library instance; native
@@ -106,6 +108,10 @@ class Scheduler:
         self.domain = self
         self.handoff = None
         self.fault = None
+
+    def check_future_panics(self):
+        if self.unawaited:
+            raise _FatalPanic(next(iter(self.unawaited.values())))
 
     def choose(self, n):
         """xorshift32 choice source, identical on every target."""
@@ -191,6 +197,7 @@ class Scheduler:
                         delay = 0.05 if delay is None else min(delay, 0.05)
                     self.mailbox.condition.wait(delay)
                 continue
+            self.check_future_panics()
             if self.harness:
                 raise Blocked()
             fatal("all goroutines are asleep - deadlock!")
@@ -398,6 +405,10 @@ class Scheduler:
         if parent is None:
             t.done = True
             self.tasks.discard(t)
+            completion = getattr(f, "completion", None)
+            if completion is not None:
+                completion(t, f.results() if p is None else [], p)
+                return
             t.rv = f.results() if self.library_results and p is None else []
             t.cur_panic = t.resume_panic = t.defer_target = None
             if p is not None:
@@ -733,6 +744,7 @@ def _drive(factory, real=False, harness=False, library=False, convert=lambda rv:
             s.run(s.next())
             if s.handoff is not None:
                 s.turn_back()
+        s.check_future_panics()
         result = convert(main.rv)
         main.rv = []
     except RecursionError:

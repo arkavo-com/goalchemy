@@ -155,3 +155,5 @@ functions:
   - {id: lib.http.exchange_close, contract_version: 1.0.0, symbol: rt.libHttpExchangeClose, implementation: runtime/lib_http_exchange_close.ts, requires: [std.context.err]}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: rt.libChecksumCRC32IEEE, implementation: runtime/lib_checksum_crc32_ieee.ts, harness: "rt.libChecksumCRC32IEEE({0})"}
+  - {id: lib.task.start, contract_version: 1.0.0, symbol: "rt.libTaskStart", implementation: runtime/lib_task_start.ts, requires: [core.task.spawn], harness: "unsupported"}
+  - {id: lib.task.await, contract_version: 1.0.0, symbol: "rt.libTaskAwait", implementation: runtime/lib_task_await.ts, requires: [lib.task.start], harness: "unsupported"}

@@ -185,9 +185,10 @@ func (e *emitter) proto(format string, args ...any) {
 }
 
 var opaqueContracts = map[string]string{
-	"sync.Mutex":      "std.sync.mutex.lock",
-	"sync.WaitGroup":  "std.sync.waitgroup.add",
-	"context.Context": "std.context.err",
+	"task.FutureState": "lib.task.start",
+	"sync.Mutex":       "std.sync.mutex.lock",
+	"sync.WaitGroup":   "std.sync.waitgroup.add",
+	"context.Context":  "std.context.err",
 }
 
 func intKind(t *ir.Type) string { return t.U().Int.String() }

@@ -38,7 +38,14 @@ var variants = []struct {
 }
 
 func TestGenerated(t *testing.T) {
-	const fixture = "../language/testdata/co_fetch_tasks"
+	generated(t, "../language/testdata/co_fetch_tasks", "")
+}
+
+func TestFutures(t *testing.T) {
+	generated(t, "../language/testdata/co_futures_docs", "futures-")
+}
+
+func generated(t *testing.T, fixture, prefix string) {
 	for _, v := range variants {
 		t.Run(v.name, func(t *testing.T) {
 			out := t.TempDir()
@@ -46,13 +53,13 @@ func TestGenerated(t *testing.T) {
 			if ds := testutil.CompileGateOptions(fixture, v.target, out, "cooperative", opts); len(ds) > 0 {
 				t.Fatalf("compile: %v", ds)
 			}
-			got := source(t, out, v.ext)
+			got := normalizeSource(source(t, out, v.ext))
 			for _, marker := range []string{"/*line ", "sourceMappingURL"} {
 				if strings.Contains(got, marker) {
 					t.Errorf("output contains %q with line directives off", marker)
 				}
 			}
-			path := filepath.Join("testdata", v.name+".golden")
+			path := filepath.Join("testdata", prefix+v.name+".golden")
 			if *update {
 				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 					t.Fatal(err)
@@ -63,7 +70,7 @@ func TestGenerated(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v (run go test ./tests/golden -update)", err)
 			}
-			if got != string(want) {
+			if got != normalizeSource(string(want)) {
 				t.Errorf("generated %s differs from %s; review and run go test ./tests/golden -update\n%s", v.name, path, diff(string(want), got))
 			}
 		})
@@ -96,6 +103,14 @@ func source(t *testing.T, out, ext string) string {
 		t.Fatal(err)
 	}
 	return b.String()
+}
+
+func normalizeSource(source string) string {
+	lines := strings.Split(strings.TrimRight(source, "\n"), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t\r")
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func diff(want, got string) string {

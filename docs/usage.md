@@ -545,6 +545,55 @@ request body is collected (at most 64 MiB) and sent when the response is
 requested; the response body still streams. Browser `fetch` decodes
 compressed responses itself.
 
+## `lib/task`: optional futures
+
+Ordinary calls infer whether they can pause; they need no `task.Await`.
+Use futures when work should start now and its results are needed later:
+
+```go
+import "github.com/eugenioenko/goalchemy/lib/task"
+
+a := task.Start(func() ([]Task, error) { return fetchTasks(u1) })
+b := task.Start(func() ([]Task, error) { return fetchTasks(u2) })
+ta, errA := task.Await(a)
+tb, errB := task.Await(b)
+```
+
+`Start` accepts a function with no parameters and any number of results,
+including named functions and bound methods. It queues the task and returns
+without yielding. `Await` returns the function's original result list. A
+completed future returns immediately; a pending future parks its awaiter.
+Waiters resume through Goalchemy's FIFO scheduler under both pause models.
+
+Awaiting again returns the same results. Struct and array results copy by
+value; pointers, slices, and maps retain their usual Go sharing rules.
+A started task's panic is raised independently in every awaiter, so each
+awaiter can recover it. An unobserved panic is fatal when the program entry
+finishes or before the scheduler reports a deadlock. Cancellation follows
+the contexts captured by the started function.
+
+Futures can be stored in containers and sent through channels. When an
+explicit type is needed, write the zero-argument function signature:
+
+```go
+var pending []task.Future[func() ([]Task, error)]
+pending = append(pending, task.Start(func() ([]Task, error) {
+    return fetchTasks(u1)
+}))
+tasks, err := task.Await(pending[0])
+```
+
+`Future` is a compiler-known typed carrier; this notation does not enable
+user-defined generic functions or types. A zero future never completes and
+participates in normal deadlock detection. Futures cannot cross an exported
+library API or be retained inside an exported handle: await inside the
+library and export the completed results. `task.All` and ordinary `go`
+statements can be mixed with futures.
+
+Goalchemy source uses `task.Await(f)`. The reference Go runner normalizes this
+to the callable result bridge `task.Await(f)()` before running the gc toolchain.
+Generated Go uses typed runtime calls and builds with the ordinary Go compiler.
+
 ## Behavior Go leaves open
 
 Goalchemy fixes some behavior that Go leaves to the implementation. These choices are identical on every target:

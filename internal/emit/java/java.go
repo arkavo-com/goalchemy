@@ -125,11 +125,12 @@ func ClassOf(contract string) string {
 }
 
 var opaque = map[string][2]string{
-	"sync.Mutex":      {"StdSyncMutexLock.Mutex", "std.sync.mutex.lock"},
-	"sync.WaitGroup":  {"StdSyncWaitgroupAdd.WaitGroup", "std.sync.waitgroup.add"},
-	"context.Context": {"StdContextErr.Context", "std.context.err"},
-	"crypto.Key":      {"Native.Key", "lib.crypto.close"},
-	"http.Exchange":   {"LibHttpExchangeClose.Exchange", "lib.http.exchange_close"},
+	"task.FutureState": {"LibTaskStart.FutureState", "lib.task.start"},
+	"sync.Mutex":       {"StdSyncMutexLock.Mutex", "std.sync.mutex.lock"},
+	"sync.WaitGroup":   {"StdSyncWaitgroupAdd.WaitGroup", "std.sync.waitgroup.add"},
+	"context.Context":  {"StdContextErr.Context", "std.context.err"},
+	"crypto.Key":       {"Native.Key", "lib.crypto.close"},
+	"http.Exchange":    {"LibHttpExchangeClose.Exchange", "lib.http.exchange_close"},
 }
 
 func intKind(t *ir.Type) string { return t.U().Int.String() }

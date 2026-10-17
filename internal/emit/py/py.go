@@ -73,9 +73,10 @@ func (e *emitter) use(c string) {
 }
 
 var opaqueContracts = map[string]string{
-	"sync.Mutex":      "std.sync.mutex.lock",
-	"sync.WaitGroup":  "std.sync.waitgroup.add",
-	"context.Context": "std.context.err",
+	"task.FutureState": "lib.task.start",
+	"sync.Mutex":       "std.sync.mutex.lock",
+	"sync.WaitGroup":   "std.sync.waitgroup.add",
+	"context.Context":  "std.context.err",
 }
 
 func byteElem(t *ir.Type) bool { u := t.U(); return u.Kind == ir.KInt && u.Int == ir.U8 }
@@ -1041,6 +1042,9 @@ func (fe *fnEmitter) callee(c *ir.Call) (fn string, args []string, fid string) {
 		return fmt.Sprintf("rt.ichk(%s).t.methods[%q]", x, c.Method), append([]string{x + ".v"}, args...), "None"
 	case ir.CallExtern:
 		fe.e.use(c.Extern.Contract)
+		if c.Extern.Contract == "lib.task.start" && fe.e.native() {
+			args[0] = fmt.Sprintf("lambda fn=%s: rt.native_task(lambda t: rt.fnchk(rt.ichk(fn).v)(t), 1)", args[0])
+		}
 		for k, a := range c.Args {
 			if u := a.IRType().U(); u.Kind == ir.KSlice && u.Elem.U().Kind == ir.KFunc && !fe.e.susp(u.Elem) {
 				fe.e.use("core.task.spawn")

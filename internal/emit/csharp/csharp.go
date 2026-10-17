@@ -99,11 +99,12 @@ func (e *emitter) rc(contract string) string {
 }
 
 var opaque = map[string][2]string{
-	"sync.Mutex":      {"GoMutex", "std.sync.mutex.lock"},
-	"sync.WaitGroup":  {"WaitGroup", "std.sync.waitgroup.add"},
-	"context.Context": {"GoContext", "std.context.err"},
-	"crypto.Key":      {"Native.Key", "lib.crypto.close"},
-	"http.Exchange":   {"R.Exchange", "lib.http.exchange_close"},
+	"task.FutureState": {"FutureState", "lib.task.start"},
+	"sync.Mutex":       {"GoMutex", "std.sync.mutex.lock"},
+	"sync.WaitGroup":   {"WaitGroup", "std.sync.waitgroup.add"},
+	"context.Context":  {"GoContext", "std.context.err"},
+	"crypto.Key":       {"Native.Key", "lib.crypto.close"},
+	"http.Exchange":    {"R.Exchange", "lib.http.exchange_close"},
 }
 
 func intKind(t *ir.Type) string { return t.U().Int.String() }
