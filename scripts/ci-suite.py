@@ -138,17 +138,18 @@ def plan(suite, shard, target=None):
         commands = [['go', 'test', '-v', '-timeout', '15m', './tests/language',
                      '-run', '^TestNamingModes$', '-count=1']]
     elif suite == 'pause':
-        # The Go and TypeScript targets under the native pause model:
-        # fixtures, corpus, the frames/native agreement checks and the Go
-        # library/host integration.
-        environment['GOALCHEMY_TEST_TARGETS'] = 'go,typescript'
+        # The Go, TypeScript and C# targets under the native pause model:
+        # fixtures, corpus, the frames/native agreement checks and the Go and
+        # C# library/host integration.
+        environment['GOALCHEMY_TEST_TARGETS'] = 'go,typescript,csharp'
         environment['GOALCHEMY_PAUSE_MODEL'] = 'native'
         commands = [['go', 'test', '-v', '-timeout', '40m', './tests/language',
-                     '-run', '^(?:TestFixtures|TestGoPauseModelsAgree|TestTypeScriptPauseModelsAgree)$', '-count=1'],
+                     '-run', '^(?:TestFixtures|TestGoPauseModelsAgree|TestTypeScriptPauseModelsAgree|TestCSharpPauseModelsAgree)$',
+                     '-count=1'],
                     ['go', 'test', '-v', '-timeout', '40m', './tests/corpus',
                      '-run', '^TestRegressions$', '-count=1'],
                     ['go', 'test', '-short', '-v', '-timeout', '30m', INTEGRATION,
-                     '-run', '^TestGeneratedGo', '-count=1']]
+                     '-run', '^(?:TestGeneratedGo|TestGeneratedCSharp|TestCSharp)', '-count=1']]
     elif suite == 'pause-swift':
         # The Swift target under the native pause model (an optional job):
         # fixtures, the frames/native agreement check, the cooperative

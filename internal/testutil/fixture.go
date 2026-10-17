@@ -198,6 +198,16 @@ func BuildSwift(out string) error {
 	return err
 }
 
+// BuildCSharp compiles a generated C# program to bin/main.dll without
+// running it.
+func BuildCSharp(out string) error {
+	o, err := run(out, 3*time.Minute, "sh", "-c", "sed '/^exec /d' run.sh | sh")
+	if err == nil && o.Exit != 0 {
+		err = fmt.Errorf("csharp build failed:\n%s", o.Stderr)
+	}
+	return err
+}
+
 var Runners = map[string]Runner{
 	"swift": func(out string) (Observation, error) {
 		swiftBuilds <- struct{}{}

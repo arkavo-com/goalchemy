@@ -43,6 +43,15 @@ func TestSwiftPauseModelsAgree(t *testing.T) {
 	})
 }
 
+func TestCSharpPauseModelsAgree(t *testing.T) {
+	pauseModelsAgree(t, "csharp", func(t *testing.T, out string) []string {
+		if err := testutil.BuildCSharp(out); err != nil {
+			t.Fatal(err)
+		}
+		return []string{"sh", "-c", "exec dotnet bin/main.dll"}
+	})
+}
+
 // pauseModelsAgree compiles every cooperative fixture for target under both
 // pause models; prepare returns the command that runs a compiled program.
 func pauseModelsAgree(t *testing.T, target string, prepare func(t *testing.T, out string) []string) {
@@ -82,7 +91,7 @@ func runSeed(t *testing.T, dir string, argv []string, seed string) testutil.Obse
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOALCHEMY_SEED="+seed)
+	cmd.Env = append(driver.ToolEnv(), "GOALCHEMY_SEED="+seed)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
