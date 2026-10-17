@@ -67,6 +67,10 @@ public sealed class Scheduler
     public long clock;
     internal readonly List<Timer> timers = new();
     long seq;
+    /// <summary>The native frame that runs next: set when a task body must
+    /// take the turn, run by the driver's trampoline (turnBack).</summary>
+    internal NativeFrame handoff;
+    Exception fault;
 
     internal Scheduler(GoTask main) : this(main, System.Diagnostics.Stopwatch.GetTimestamp, System.Diagnostics.Stopwatch.Frequency) { }
     internal Scheduler(GoTask main, Func<long> monotonic, long frequency)
@@ -211,7 +215,7 @@ public sealed class Scheduler
             t.cleanup = null; t.frame = null; t.rv = Array.Empty<object>(); t.done = true; t.blocked = false;
             t.curPanic = null; t.resumePanic = null; t.deferTarget = null;
         }
-        tasks.Clear(); cur = null; main = null; libraryObserve=null;
+        tasks.Clear(); cur = null; main = null; libraryObserve=null; handoff = null;
         if (failure != null) throw new HostFault("owner cleanup: " + failure);
     }
     internal GoTask next()
@@ -234,18 +238,11 @@ public sealed class Scheduler
     internal void run(GoTask t)
     {
         assertDriver();
-        cur = t;
-        t.blocked = false;
-        if (t.cleanup != null)
-        {
-            var c = t.cleanup;
-            t.cleanup = null;
-            c();
-        }
+        enter(t);
         while (!t.blocked && t.frame != null)
         {
             var p = t.resumePanic;
-            if (p != null)
+            if (p != null && t.frame is not NativeFrame)
             {
                 t.resumePanic = null;
                 exit(t, t.frame, p);
@@ -260,7 +257,86 @@ public sealed class Scheduler
             {
                 exit(t, f, e);
             }
+            if (handoff != null) return;
         }
+    }
+
+    void enter(GoTask t)
+    {
+        cur = t;
+        t.blocked = false;
+        if (t.cleanup != null)
+        {
+            var c = t.cleanup;
+            t.cleanup = null;
+            c();
+        }
+    }
+
+    /// <summary>Runs task bodies the turn was handed to until it comes back
+    /// to the driver: nothing is runnable, main is done, or the scheduler
+    /// failed on a body's side, which is raised here.</summary>
+    internal void turnBack()
+    {
+        while (handoff != null)
+        {
+            var n = handoff;
+            handoff = null;
+            n.resume();
+            if (fault != null)
+            {
+                var e = fault;
+                fault = null;
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(e);
+            }
+        }
+    }
+
+    /// <summary>Runs the scheduler for a native task body that blocked, or
+    /// finished (self null), while holding the turn: frame tasks run inline
+    /// and the next native body is handed the turn. Reports true when self
+    /// is next. Host drivers take every turn back. Scheduler failures never
+    /// unwind a task body: the driver raises them.</summary>
+    internal bool turn(GoTask self)
+    {
+        if (hostMode) return false;
+        try
+        {
+            while (!main.done && runq.Count > 0)
+            {
+                var u = runq.Dequeue();
+                if (u == self)
+                {
+                    enter(u);
+                    return true;
+                }
+                run(u);
+                if (handoff != null) return false;
+            }
+        }
+        catch (Exception e) { fault = e; }
+        return false;
+    }
+
+    /// <summary>Delivers a finished native body like a frame return, then
+    /// continues the task's remaining frames and the scheduler.</summary>
+    internal void nativeDone(GoTask t, NativeFrame n, Exception failure)
+    {
+        try
+        {
+            exit(t, n, failure == null ? null : Program.catchPanic(failure));
+            if (t.frame != null)
+            {
+                run(t);
+                if (handoff != null) return;
+            }
+        }
+        catch (Exception e)
+        {
+            fault = e;
+            return;
+        }
+        turn(null);
     }
 
     internal void exit(GoTask t, Frame f, GoPanic p)
@@ -390,7 +466,7 @@ sealed class DeferRunner : Frame
 
 sealed class SyncFrame : Frame
 {
-    readonly Func<object[]> fn;
+    internal readonly Func<object[]> fn;
     object[] res = Array.Empty<object>();
 
     internal SyncFrame(Func<object[]> fn) => this.fn = fn;
@@ -406,7 +482,7 @@ sealed class SyncFrame : Frame
 
 sealed class AwaitFrame : Frame
 {
-    readonly Action<GoTask> fn;
+    internal readonly Action<GoTask> fn;
     internal object[] res = Array.Empty<object>();
 
     internal AwaitFrame(Action<GoTask> fn) => this.fn = fn;
@@ -432,7 +508,9 @@ sealed class AwaitFrame : Frame
 /// reaches a pause point. A task is a stack of frames driven by a trampoline;
 /// exactly one task runs at a time and runnable tasks are dispatched in FIFO
 /// order. Pause primitives either complete immediately, leaving their results
-/// in task.rv, or block the task until another task or a timer readies it.</summary>
+/// in task.rv, or block the task until another task or a timer readies it.
+/// Under the native pause model a task's frame is a NativeFrame running an
+/// async body (types/Async.cs); the same scheduler picks the next task.</summary>
 public static partial class R
 {
     internal static long seed()
@@ -533,7 +611,11 @@ public static partial class R
         {
             var main = new GoTask(0, null); s = install(main, false); s.hostMode = host;
             main.frame = entry(); s.ready(main);
-            while (!main.done) s.run(host ? s.nextHost() : s.next());
+            while (!main.done)
+            {
+                s.run(host ? s.nextHost() : s.next());
+                if (s.handoff != null) s.turnBack();
+            }
         }
         catch (Exception e) { failure = e; }
         if (s != null) try { s.shutdown(); } catch (Exception e) { failure ??= e; }
@@ -552,7 +634,7 @@ public static partial class R
         {
             var main=new GoTask(0,null);owner=install(main,false);owner.hostMode=true;owner.libraryObserve=observe;
             var mail=owner.mail;wake(() => {lock(mail)mail.signal();});root=entry();main.frame=root;owner.ready(main);
-            while(!main.done){observe();owner.run(owner.nextHost());}
+            while(!main.done){observe();owner.run(owner.nextHost());if(owner.handoff!=null)owner.turnBack();}
             value=capture(root.results());
         }
         catch(FatalPanic){failure=new Library.Failure("panic");}
