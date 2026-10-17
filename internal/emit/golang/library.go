@@ -264,6 +264,17 @@ func (e *emitter) streamOps(name string, ops ir.StreamOps, obj func(*ir.Type) st
 // libraryCallFrame renders the frame body that calls f with the given source
 // arguments, initializing packages first when the owner is fresh.
 func (e *emitter) libraryCallFrame(f *ir.Func, args []string) string {
+	if e.native() {
+		init := e.names.Symbol(e.p.Init.Sym) + "()"
+		if e.p.Init.MaySuspend {
+			init = e.names.Symbol(e.p.Init.Sym) + "(t)"
+		}
+		if f.MaySuspend {
+			args = append([]string{"t"}, args...)
+		}
+		call := e.funcRef(f) + "(" + strings.Join(args, ", ") + ")"
+		return "return rt.NativeTask(func(t *rt.Task) []any {\nif fresh {\nlibraryReset()\n" + init + "\n}\n" + syncFrameBody(len(f.Sig.Results), call) + "\n})"
+	}
 	init := e.names.Symbol(e.p.Init.Sym) + "()"
 	if !e.p.Init.MaySuspend {
 		init = "rt.Sync(func() []any { " + e.names.Symbol(e.p.Init.Sym) + "(); return nil })"

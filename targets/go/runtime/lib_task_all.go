@@ -38,6 +38,10 @@ func LibTaskAll(t *Task, fns any) {
 		}
 	case []func() Frame:
 		starts = fs
+	case []func(*Task):
+		for _, fn := range fs {
+			starts = append(starts, func() Frame { return NativeTask(func(t *Task) []any { fn(t); return nil }) })
+		}
 	}
 	t.RV = nil
 	if len(starts) == 0 {

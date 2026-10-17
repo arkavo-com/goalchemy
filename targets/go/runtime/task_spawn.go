@@ -2,6 +2,7 @@ package rt
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"strconv"
 	"sync"
@@ -94,6 +95,8 @@ type scheduler struct {
 	retire    []func()
 	// live counts spawned tasks that have not finished.
 	live int
+	// natives lists the native-pause tasks whose goroutines have started.
+	natives []*nativeTask
 }
 
 // HostFault is an adapter implementation failure, never a source panic or
@@ -224,6 +227,10 @@ func (s *scheduler) shutdown() {
 		return
 	}
 	s.closed = true
+	for _, n := range s.natives {
+		n.kill()
+	}
+	s.natives = nil
 	for _, op := range s.operations {
 		if op.cancel != nil {
 			op.cancel()
@@ -408,9 +415,11 @@ func (s *scheduler) run(t *Task) {
 			s.boundary()
 		}
 		if p := t.resumePanic; p != nil {
-			t.resumePanic = nil
-			s.exit(t, t.Frame, p)
-			continue
+			if _, ok := t.Frame.(*nativeTask); !ok {
+				t.resumePanic = nil
+				s.exit(t, t.Frame, p)
+				continue
+			}
 		}
 		s.step(t)
 	}
@@ -422,6 +431,10 @@ func (s *scheduler) step(t *Task) {
 		if r := recover(); r != nil {
 			if _, ok := r.(HostFault); ok {
 				panic(r)
+			}
+			if p, ok := r.(*Panic); ok {
+				s.exit(t, f, p)
+				return
 			}
 			s.exit(t, f, &Panic{Value: r})
 		}
@@ -725,4 +738,124 @@ func ResetScheduler() {
 	sched.shutdown()
 	sched = &scheduler{rng: seed(), nextID: 1, harness: true}
 	sched.cur = &Task{deferTarget: -1}
+}
+
+// Under the native pause model a task is a coroutine (iter.Pull) running
+// ordinary Go functions, and its only frame is a nativeTask. The driver
+// resumes it in Step and regains control when it parks at a pause point or
+// finishes, so exactly one task runs and the frame scheduler keeps choosing
+// who runs next. Panics leaving the task body propagate to Step.
+type nativeTask struct {
+	FrameBase
+	body   func(t *Task) []any
+	res    []any
+	next   func() (struct{}, bool)
+	stop   func()
+	yield  func(struct{}) bool
+	killed bool
+}
+
+// killSignal unwinds a parked task at scheduler shutdown.
+type killSignal struct{}
+
+// NativeTask adapts a native-pause task body to the frame scheduler.
+func NativeTask(body func(t *Task) []any) Frame {
+	return &nativeTask{body: body}
+}
+
+func (n *nativeTask) Results() []any { return n.res }
+
+func (n *nativeTask) Step(t *Task) {
+	if n.next == nil {
+		n.next, n.stop = iter.Pull(func(yield func(struct{}) bool) {
+			n.yield = yield
+			n.res = n.body(t)
+		})
+		sched.natives = append(sched.natives, n)
+	}
+	if _, parked := n.next(); parked {
+		return
+	}
+	Ret(t, n)
+}
+
+// kill ends a parked task without running source code: its wrapped
+// deferred calls are skipped.
+func (n *nativeTask) kill() {
+	if n.stop == nil {
+		return
+	}
+	n.killed = true
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(killSignal); !ok {
+				panic(r)
+			}
+		}
+	}()
+	n.stop()
+}
+
+// Wait completes a pause primitive started by t: when the primitive blocked
+// t, the turn returns to the scheduler until t is resumed.
+func Wait(t *Task) {
+	if !t.blocked {
+		return
+	}
+	n := t.Frame.(*nativeTask)
+	if !n.yield(struct{}{}) {
+		panic(killSignal{})
+	}
+	if p := t.resumePanic; p != nil {
+		t.resumePanic = nil
+		panic(p)
+	}
+}
+
+// Defer runs a deferred call of a native-pause function, keeping the panic
+// chain and recover identity that frames keep in deferRunner.
+func Defer(t *Task, fid int, fn func()) {
+	r := recover()
+	if n, ok := t.Frame.(*nativeTask); ok && n.killed {
+		if r != nil {
+			panic(r)
+		}
+		return
+	}
+	if r == nil {
+		fn()
+		return
+	}
+	if _, ok := r.(HostFault); ok {
+		panic(r)
+	}
+	p, ok := r.(*Panic)
+	if !ok {
+		p = &Panic{Value: r}
+	}
+	saved, savedFid := t.curPanic, t.deferTarget
+	t.curPanic, t.deferTarget = p, fid
+	func() {
+		defer func() {
+			if x := recover(); x != nil {
+				t.curPanic, t.deferTarget = saved, savedFid
+				if _, ok := x.(HostFault); ok {
+					panic(x)
+				}
+				q, ok := x.(*Panic)
+				if !ok {
+					q = &Panic{Value: x}
+				}
+				if q.Prev == nil && q != p {
+					q.Prev = p
+				}
+				panic(q)
+			}
+		}()
+		fn()
+	}()
+	t.curPanic, t.deferTarget = saved, savedFid
+	if !p.Recovered {
+		panic(p)
+	}
 }

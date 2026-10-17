@@ -428,9 +428,27 @@ func (e *emitter) typ(t *ir.Type) string {
 // calling convention: calling one returns a frame.
 func (e *emitter) susp(t *ir.Type) bool { return e.p.SuspTypes[t.U()] }
 
-// startType renders the resumable form of a function type.
+// startType renders the resumable form of a function type. Under the
+// native pause model it is an ordinary function taking the current task.
 func (e *emitter) startType(t *ir.Type) string {
+	if e.native() {
+		s := "func(" + strings.Join(append([]string{"*rt.Task"}, e.paramTypes(t)...), ", ") + ")"
+		if r := syncResults(e, t.U()); r != "" {
+			s += " " + r
+		}
+		return s
+	}
 	return "func(" + strings.Join(e.paramTypes(t), ", ") + ") rt.Frame"
+}
+
+func (e *emitter) native() bool { return e.p.PauseModel == "native" }
+
+// nativeBody renders a function body returning call's results, if any.
+func nativeBody(n int, call string) string {
+	if n == 0 {
+		return call
+	}
+	return "return " + call
 }
 
 // syncType renders a function type in the ordinary convention.
@@ -501,6 +519,10 @@ func syncFrameBody(n int, call string) string {
 func (e *emitter) adapt(t *ir.Type, expr string) string {
 	u := t.U()
 	ps, as := e.forward(u)
+	if e.native() {
+		return fmt.Sprintf("func(f_ %s) %s { return func(%s) %s { %s } }(%s)",
+			e.syncType(u), e.startType(u), strings.Join(append([]string{"_ *rt.Task"}, ps...), ", "), syncResults(e, u), nativeBody(len(u.Results), "f_("+strings.Join(as, ", ")+")"), expr)
+	}
 	body := syncFrameBody(len(u.Results), "f_("+strings.Join(as, ", ")+")")
 	return fmt.Sprintf("func(f_ %s) %s { return func(%s) rt.Frame { return rt.Sync(func() []any { %s }) } }(%s)",
 		e.syncType(u), e.startType(u), strings.Join(ps, ", "), body, expr)
@@ -553,7 +575,9 @@ func (e *emitter) entry() {
 	if e.p.Cooperative {
 		e.use("core.task.spawn")
 		start := e.names.Symbol(e.p.Entry.Sym) + "()"
-		if !e.p.Entry.MaySuspend {
+		if e.native() && e.p.Entry.MaySuspend {
+			start = "rt.NativeTask(func(t *rt.Task) []any { " + e.names.Symbol(e.p.Entry.Sym) + "(t); return nil })"
+		} else if !e.p.Entry.MaySuspend {
 			start = "rt.Sync(func() []any { " + e.names.Symbol(e.p.Entry.Sym) + "(); return nil })"
 		}
 		run := "RunMain"
@@ -582,6 +606,8 @@ type fnEmitter struct {
 	// frame is set when f is emitted as a resumable frame; locals are
 	// fields of fr.
 	frame bool
+	// task is set when f is a native-pause function taking the task t.
+	task bool
 	// funcOf records the function a local holds when it was set by
 	// MakeClosure or MakeBound, for recover identity of deferred calls.
 	funcOf map[*ir.Local]*ir.Func
@@ -716,6 +742,12 @@ func placeRootType(p *ir.Place) *ir.Type {
 
 func (e *emitter) signature(f *ir.Func, fe *fnEmitter, skipRecv bool) string {
 	var ps []string
+	if fe.task {
+		ps = append(ps, "t *rt.Task")
+		for _, l := range f.Env {
+			ps = append(ps, fe.local(l)+" *"+e.typ(l.Type))
+		}
+	}
 	for i, p := range f.Params {
 		if skipRecv && i == 0 {
 			continue
@@ -754,11 +786,12 @@ func (e *emitter) signature(f *ir.Func, fe *fnEmitter, skipRecv bool) string {
 
 func (e *emitter) function(f *ir.Func) {
 	e.p_("%s", e.lineDirective(f.Pos))
-	if f.MaySuspend {
+	if f.MaySuspend && !e.native() {
 		e.frameFunction(f)
 		return
 	}
 	fe := e.localNames(f)
+	fe.task = f.MaySuspend
 	var body bytes.Buffer
 	fe.b = &body
 	fe.body()
@@ -766,7 +799,7 @@ func (e *emitter) function(f *ir.Func) {
 		e.p_("func %s%s {\n", e.names.Symbol(f.Sym), e.signature(f, fe, false))
 		e.buf.Write(body.Bytes())
 		e.p_("}\n\n")
-		e.startMethod(f, false)
+		e.startMethod(f, f.MaySuspend)
 		return
 	}
 	if isMethod(f) {
@@ -799,6 +832,19 @@ func (e *emitter) startMethod(f *ir.Func, isFrame bool) {
 		}
 		ps = append(ps, fmt.Sprintf("a%d_ %s", i, t))
 		as = append(as, a)
+	}
+	if e.native() {
+		recv := []string{"r_"}
+		if isFrame {
+			recv = []string{"t", "r_"}
+		}
+		call := e.names.Symbol(f.Sym) + "(" + strings.Join(append(recv, as...), ", ") + ")"
+		res := syncResults(e, f.Sig.U())
+		if res != "" {
+			res = " " + res
+		}
+		e.p_("func (r_ %s) %s(%s)%s {\n%s\n}\n\n", e.typ(r.Type), e.methodName(f.MethodID, methodShortName(f)), strings.Join(append([]string{"t *rt.Task"}, ps...), ", "), res, nativeBody(len(f.Results), call))
+		return
 	}
 	call := e.names.Symbol(f.Sym) + "(" + strings.Join(append([]string{"r_"}, as...), ", ") + ")"
 	body := "return " + call
@@ -951,6 +997,10 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 // operation, and return to the trampoline.
 func (fe *fnEmitter) pause(p *ir.Pause) {
 	e := fe.e
+	if fe.task {
+		fe.nativePause(p)
+		return
+	}
 	fe.w("fr.PC = %d\n", p.Next.ID)
 	switch i := p.Op.(type) {
 	case *ir.Call:
@@ -985,6 +1035,86 @@ func (fe *fnEmitter) pause(p *ir.Pause) {
 		panic(fmt.Sprintf("golang: pause on %T", p.Op))
 	}
 	fe.w("return\n")
+}
+
+// nativePause emits a pause point as a blocking operation: generated callees
+// return their results directly; runtime primitives leave them in t.RV
+// after rt.Wait hands the turn back to the scheduler while the task blocks.
+func (fe *fnEmitter) nativePause(p *ir.Pause) {
+	e := fe.e
+	switch i := p.Op.(type) {
+	case *ir.Call:
+		if i.Kind == ir.CallExtern {
+			e.use(i.Extern.Contract)
+			as := []string{"t"}
+			for _, a := range i.Args {
+				as = append(as, fe.externArg(a))
+			}
+			fe.w("%s(%s)\nrt.Wait(t)\n", e.externSym(i.Extern.Contract), strings.Join(as, ", "))
+			fe.resume(i)
+			break
+		}
+		var ds []string
+		for _, d := range i.Dsts {
+			ds = append(ds, fe.assignDst(d))
+		}
+		call := fe.taskCallExpr(i)
+		if len(ds) > 0 {
+			fe.w("%s = %s\n", strings.Join(ds, ", "), call)
+		} else {
+			fe.w("%s\n", call)
+		}
+	case *ir.Send:
+		e.use("core.chan.send")
+		fe.w("%s.Send(t, %s)\nrt.Wait(t)\n", fe.chanVal(i.Ch), fe.val(i.V))
+	case *ir.Recv:
+		e.use("core.chan.recv")
+		fe.w("%s.Recv(t)\nrt.Wait(t)\n", fe.chanVal(i.Ch))
+		fe.resume(i)
+	case *ir.Select:
+		e.use("core.select")
+		var cs []string
+		for _, c := range i.Cases {
+			if c.Send {
+				cs = append(cs, fmt.Sprintf("rt.Case(%s, true, %s)", fe.chanVal(c.Ch), fe.val(c.V)))
+			} else {
+				cs = append(cs, fmt.Sprintf("rt.RecvCase(%s)", fe.chanVal(c.Ch)))
+			}
+		}
+		fe.w("rt.Select(t, []rt.SelectCase{%s}, %v)\nrt.Wait(t)\n", strings.Join(cs, ", "), i.Default)
+		fe.resume(i)
+	default:
+		panic(fmt.Sprintf("golang: pause on %T", p.Op))
+	}
+	fe.w("goto b%d\n", p.Next.ID)
+}
+
+// taskCallExpr renders a call using the native-pause convention: the
+// current task is the first argument of a suspending callee.
+func (fe *fnEmitter) taskCallExpr(c *ir.Call) string {
+	switch c.Kind {
+	case ir.CallStatic:
+		if c.Func.MaySuspend {
+			return fe.e.names.Symbol(c.Func.Sym) + "(" + strings.Join(append([]string{"t"}, fe.argList(c, c.Func.Sig, 0)...), ", ") + ")"
+		}
+	case ir.CallValue:
+		if fe.e.susp(c.Fn.IRType()) {
+			return fe.val(c.Fn) + "(" + strings.Join(append([]string{"t"}, fe.argList(c, c.Fn.IRType().U(), 0)...), ", ") + ")"
+		}
+	case ir.CallInterface:
+		if fe.e.p.SuspMethods[c.Method] {
+			it := c.Recv.IRType().U()
+			var sig *ir.Type
+			name := c.Method
+			for _, m := range it.Methods {
+				if m.ID == c.Method {
+					sig, name = m.Sig, m.Name
+				}
+			}
+			return fe.val(c.Recv) + "." + fe.e.methodName(c.Method, name) + "(" + strings.Join(append([]string{"t"}, fe.argList(c, sig, 0)...), ", ") + ")"
+		}
+	}
+	return fe.callExpr(c)
 }
 
 // externAdapts emits a capability call whose function-typed results must be
@@ -1117,6 +1247,10 @@ func (fe *fnEmitter) assignDst(l *ir.Local) string {
 }
 
 func (fe *fnEmitter) args(c *ir.Call, sig *ir.Type, skip int) string {
+	return strings.Join(fe.argList(c, sig, skip), ", ")
+}
+
+func (fe *fnEmitter) argList(c *ir.Call, sig *ir.Type, skip int) []string {
 	var as []string
 	for i, a := range c.Args {
 		s := fe.val(a)
@@ -1125,7 +1259,7 @@ func (fe *fnEmitter) args(c *ir.Call, sig *ir.Type, skip int) string {
 		}
 		as = append(as, s)
 	}
-	return strings.Join(as[skip:], ", ")
+	return as[skip:]
 }
 
 func (fe *fnEmitter) callExpr(c *ir.Call) string {
@@ -1398,6 +1532,10 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			fe.frameDefer(i.Call)
 			return
 		}
+		if fe.task {
+			fe.nativeDefer(i.Call)
+			return
+		}
 		fe.w("defer %s\n", fe.callExpr(i.Call))
 	case *ir.Recover:
 		switch {
@@ -1494,12 +1632,87 @@ func (fe *fnEmitter) bindCall(c *ir.Call) (params, args []string, call string) {
 
 // goStmt starts a task running the evaluated call.
 func (fe *fnEmitter) goStmt(c *ir.Call) {
+	if fe.e.native() && c.Suspends {
+		params, args, call := fe.bindTaskCall(c)
+		fe.w("func(%s) {\nrt.Spawn(rt.NativeTask(func(t *rt.Task) []any { %s; return nil }))\n}(%s)\n", strings.Join(params, ", "), call, strings.Join(args, ", "))
+		return
+	}
 	params, args, call := fe.bindCall(c)
 	frame := call
 	if !c.Suspends {
 		frame = "rt.Sync(func() []any { " + call + "; return nil })"
 	}
 	fe.w("func(%s) {\nrt.Spawn(%s)\n}(%s)\n", strings.Join(params, ", "), frame, strings.Join(args, ", "))
+}
+
+// bindTaskCall binds an evaluated suspending callee and arguments like
+// bindCall; the call takes the task t and waits on runtime primitives.
+func (fe *fnEmitter) bindTaskCall(c *ir.Call) (params, args []string, call string) {
+	bind := func(v ir.Value, t string) string {
+		name := fmt.Sprintf("g%d_", len(params))
+		params = append(params, name+" "+t)
+		args = append(args, fe.val(v))
+		return name
+	}
+	var sig *ir.Type
+	switch c.Kind {
+	case ir.CallStatic:
+		sig = c.Func.Sig
+	case ir.CallValue:
+		sig = c.Fn.IRType().U()
+	case ir.CallExtern:
+		sig = c.Extern.Sig
+	default:
+		panic("golang: interface call in go or defer")
+	}
+	callArgs := []string{"t"}
+	for j, a := range c.Args {
+		t := a.IRType()
+		if j < len(sig.Params) {
+			t = sig.Params[j]
+		}
+		n := bind(a, fe.e.typ(t))
+		if sig.Variadic && j == len(c.Args)-1 {
+			n += "..."
+		}
+		callArgs = append(callArgs, n)
+	}
+	switch c.Kind {
+	case ir.CallStatic:
+		call = fe.e.names.Symbol(c.Func.Sym) + "(" + strings.Join(callArgs, ", ") + ")"
+	case ir.CallValue:
+		f := bind(c.Fn, fe.e.typ(c.Fn.IRType()))
+		call = f + "(" + strings.Join(callArgs, ", ") + ")"
+	case ir.CallExtern:
+		fe.e.use(c.Extern.Contract)
+		call = fe.e.externSym(c.Extern.Contract) + "(" + strings.Join(callArgs, ", ") + "); rt.Wait(t)"
+	}
+	return params, args, call
+}
+
+// nativeDefer defers a call through rt.Defer, which keeps the frame model's
+// panic chain and recover identity on the native stack.
+func (fe *fnEmitter) nativeDefer(c *ir.Call) {
+	params, args, call := fe.bindCall(c)
+	if c.Suspends {
+		params, args, call = fe.bindTaskCall(c)
+	}
+	fid := fe.deferFid(c)
+	fe.w("defer rt.Defer(t, %d, func(%s) func() { return func() { %s } }(%s))\n", fid, strings.Join(params, ", "), call, strings.Join(args, ", "))
+}
+
+func (fe *fnEmitter) deferFid(c *ir.Call) int {
+	switch c.Kind {
+	case ir.CallStatic:
+		return c.Func.ID
+	case ir.CallValue:
+		if l, ok := c.Fn.(*ir.Local); ok {
+			if f := fe.funcOf[l]; f != nil {
+				return f.ID
+			}
+		}
+	}
+	return -1
 }
 
 // frameDefer registers a deferred call on the frame for the runtime to run.
@@ -1536,6 +1749,12 @@ func (fe *fnEmitter) makeBound(i *ir.MakeBound) {
 	call := e.funcRef(i.Func) + "(" + strings.Join(append([]string{"r_"}, as...), ", ") + ")"
 	var lit string
 	switch {
+	case e.native() && e.susp(dt):
+		recv := []string{"r_"}
+		if i.Func.MaySuspend {
+			recv = []string{"t", "r_"}
+		}
+		lit = fmt.Sprintf("func(%s) %s { %s }", strings.Join(append([]string{"t *rt.Task"}, ps...), ", "), syncResults(e, u), nativeBody(len(u.Results), e.funcRef(i.Func)+"("+strings.Join(append(recv, as...), ", ")+")"))
 	case e.susp(dt) && i.Func.MaySuspend:
 		lit = fmt.Sprintf("func(%s) rt.Frame { return %s }", strings.Join(ps, ", "), call)
 	case e.susp(dt):
@@ -1614,6 +1833,11 @@ func (fe *fnEmitter) closure(i *ir.MakeClosure) {
 		}
 		ps, as := e.forward(u)
 		call = append(call, as...)
+		if e.native() {
+			fe.w("%s = func(%s) %s { return func(%s) %s { %s } }(%s)\n", fe.val(i.Dst), strings.Join(envPs, ", "),
+				e.startType(u), strings.Join(append([]string{"t *rt.Task"}, ps...), ", "), syncResults(e, u), nativeBody(len(u.Results), fe.e.names.Symbol(f.Sym)+"("+strings.Join(append([]string{"t"}, call...), ", ")+")"), strings.Join(envAs, ", "))
+			return
+		}
 		fe.w("%s = func(%s) %s { return func(%s) rt.Frame { return %s(%s) } }(%s)\n", fe.val(i.Dst), strings.Join(envPs, ", "),
 			e.startType(u), strings.Join(ps, ", "), fe.e.names.Symbol(f.Sym), strings.Join(call, ", "), strings.Join(envAs, ", "))
 		return
