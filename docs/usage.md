@@ -31,7 +31,7 @@ packages: [./cmd/app]      # package patterns, relative to this file
 tags: [prod]               # optional build tags
 gate: sequential           # sequential (default) or cooperative
 compact_names: false        # readable private identifiers (default)
-pause_model: frames         # frames (default) or native (Go, TypeScript, Swift, C# and Python, experimental)
+pause_model: frames         # frames (default) or native (Go, TypeScript, Swift, C#, Python and Rust, experimental)
 line_directives: true       # map generated code back to the source (default)
 targets:
   go: {out: out/go}
@@ -60,8 +60,8 @@ goalchemy build --compact-names=false
 
 `compile`, `run`, and `build` also accept `--pause-model=frames|native`
 (`build` overrides `pause_model`). `frames` emits suspending functions as
-resumable frames. `native` is implemented by the Go, TypeScript, Swift, C# and
-Python targets.
+resumable frames. `native` is implemented by the Go, TypeScript, Swift, C#,
+Python and Rust targets.
 On Go it emits them as ordinary Go functions that take the current task and
 block at pause points; a turn-passing scheduler keeps exactly one task
 goroutine running, and a task that blocks hands the turn directly to the next
@@ -84,7 +84,14 @@ the owner thread. On Python it emits `async def` coroutines that take the task
 first and `await` their suspending callees; Goalchemy's scheduler drives each
 task's coroutine itself with `send`, and a blocked task's coroutine resumes
 only when the scheduler chooses that task next, so no asyncio event loop is
-involved. Output is identical to frames on all five. See issue #92.
+involved. On Rust, pausing functions become `async fn` with boxed
+`.await` calls. The existing FIFO scheduler polls their futures on the owner
+thread; wakers never dispatch source code. Primitive calls that complete
+immediately do not await. Per-task roots retain source values across awaits,
+and frame adapters preserve function values, defers and library exports.
+Rust keeps frames as its default. See [Rust native pausing](rust-native-pausing.md)
+for execution limits and validation, and issue #92 for the overall redesign.
+Output is identical to frames on all six.
 
 `compile`, `run`, and `build` accept `--line-directives` (default on; `build`
 overrides `line_directives`). With `--line-directives=false`, generated code

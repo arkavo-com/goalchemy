@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, proto/go-native-pause]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -116,6 +116,31 @@ jobs:
         run: bash scripts/fetch-toolchains.sh swift
       - name: Run Swift native pause model checks
         run: python3 scripts/ci-suite.py pause-swift
+
+  # Native Rust has its own optional job to keep Cargo builds out of the
+  # required native-pause suite while the parent redesign is in progress.
+  rust-native:
+    name: Native pause model (Rust, optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev cmake perl
+      - name: Cache locked Cargo dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('targets/rust/tests/harness/Cargo.lock') }}
+      - name: Run Rust native pause model checks
+        run: python3 scripts/ci-suite.py pause-rust
 
   # Preserve the existing required check name and fail if any shard fails or skips.
   test:

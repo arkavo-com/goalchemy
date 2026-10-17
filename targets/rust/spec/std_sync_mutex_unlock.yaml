@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: d432bb323379bd873c39346fa27f78ca8a93a8bc55125efd0418fa32c82e5e93
 symbol: "std_sync_mutex_unlock"
 implementation: runtime/std_sync_mutex_unlock.rs
-implementation_hash: e95c581f6412b6ddedfd0ccdded410d9644c24a5c11a36ccf84f2087aa580638
+implementation_hash: abb0e04b83f1acb695e623518cceabd5fb5139b99fbef52d49c8ae939b733e7c
 summary: "sync.Mutex.Unlock: hand the lock to the first waiter or release it."
 suspension: never
 determinism: deterministic

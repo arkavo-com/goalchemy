@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 6f0a76d917ebb6db12f234b4d02ce65d3c31540da84d025a27a6dcd5b26b19ca
 symbol: "std_sync_mutex_lock"
 implementation: runtime/std_sync_mutex_lock.rs
-implementation_hash: 3b5fa279ace0917c97f3edcfc0c224123af9bdef8ceebdd447b2a44196e66854
+implementation_hash: 1f9ce144d8f21954438c4d1e274889f7dfdf15725524f57dc8e8d1d0fd66ffb7
 summary: "sync.Mutex.Lock: acquire, or wait in FIFO order."
 suspension: may
 determinism: controlled

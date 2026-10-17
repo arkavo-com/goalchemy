@@ -31,7 +31,7 @@ pub struct Chan {
 
 pub struct Mutex {
     pub locked: bool,
-    pub waiters: Vec<Rc<Task>>,
+    pub waiters: VecDeque<Rc<Task>>,
 }
 
 pub struct WaitGroup {
@@ -57,7 +57,7 @@ pub fn with_chan<R>(c: &V, f: impl FnOnce(&mut Chan) -> R) -> R {
 }
 
 pub fn new_mutex() -> V {
-    V::Obj(alloc(Obj::Mutex(Mutex { locked: false, waiters: Vec::new() })))
+    V::Obj(alloc(Obj::Mutex(Mutex { locked: false, waiters: VecDeque::new() })))
 }
 
 pub fn new_waitgroup() -> V {

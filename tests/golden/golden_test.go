@@ -30,6 +30,7 @@ var variants = []struct {
 	{"csharp", "csharp", ".cs", "frames"},
 	{"csharp-native", "csharp", ".cs", "native"},
 	{"rust", "rust", ".rs", ""},
+	{"rust-native", "rust", ".rs", "native"},
 	{"c", "c", ".c", ""},
 	{"swift", "swift", ".swift", "frames"},
 	{"swift-native", "swift", ".swift", "native"},
