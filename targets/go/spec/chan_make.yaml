@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: d973a51672009574414745f973a06f85e58015261690632cfc985d50ea8a1199
 symbol: "rt.MakeChan"
 implementation: runtime/chan_make.go
-implementation_hash: d6f1e645657155f75a620b65342a70f44b542eac81295b50cc29792e99370478
+implementation_hash: 39d56019c6791fbecae745c2caede19e83e1d8fc654149943d96e7361e59b602
 summary: "make(chan T, size)."
 suspension: never
 determinism: deterministic
