@@ -22,7 +22,8 @@ var variants = []struct {
 }{
 	{"go-native", "go", ".go", "native"},
 	{"go-frames", "go", ".go", "frames"},
-	{"typescript", "typescript", ".ts", ""},
+	{"typescript", "typescript", ".ts", "frames"},
+	{"typescript-native", "typescript", ".ts", "native"},
 	{"python", "python", ".py", ""},
 	{"java", "java", ".java", ""},
 	{"csharp", "csharp", ".cs", ""},

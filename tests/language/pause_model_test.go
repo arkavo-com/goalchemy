@@ -18,6 +18,25 @@ import (
 // Cooperative fixtures must schedule identically under both pause models,
 // including under other scheduler choice seeds.
 func TestGoPauseModelsAgree(t *testing.T) {
+	pauseModelsAgree(t, "go", func(t *testing.T, out string) []string {
+		build := exec.Command("go", "build", "-o", "prog", ".")
+		build.Dir = out
+		if b, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("go build: %v\n%s", err, b)
+		}
+		return []string{filepath.Join(out, "prog")}
+	})
+}
+
+func TestTypeScriptPauseModelsAgree(t *testing.T) {
+	pauseModelsAgree(t, "typescript", func(t *testing.T, out string) []string {
+		return []string{"node", "--stack-size=4000", "main.ts"}
+	})
+}
+
+// pauseModelsAgree compiles every cooperative fixture for target under both
+// pause models; prepare returns the command that runs a compiled program.
+func pauseModelsAgree(t *testing.T, target string, prepare func(t *testing.T, out string) []string) {
 	fixtures, err := testutil.Discover("testdata")
 	if err != nil {
 		t.Fatal(err)
@@ -30,21 +49,16 @@ func TestGoPauseModelsAgree(t *testing.T) {
 		t.Run(f.Name, func(t *testing.T) {
 			t.Parallel()
 			work := t.TempDir()
-			bins := map[string]string{}
+			cmds := map[string][]string{}
 			for _, model := range []string{"frames", "native"} {
 				out := filepath.Join(work, model)
-				if ds := testutil.CompileGateOptions(f.Dir, "go", out, f.Gate, driver.EmitOptions{PauseModel: model}); len(ds) > 0 {
+				if ds := testutil.CompileGateOptions(f.Dir, target, out, f.Gate, driver.EmitOptions{PauseModel: model}); len(ds) > 0 {
 					t.Fatalf("%s: %v", model, ds)
 				}
-				build := exec.Command("go", "build", "-o", "prog", ".")
-				build.Dir = out
-				if b, err := build.CombinedOutput(); err != nil {
-					t.Fatalf("%s: go build: %v\n%s", model, err, b)
-				}
-				bins[model] = filepath.Join(out, "prog")
+				cmds[model] = prepare(t, out)
 			}
 			for _, seed := range []string{"1", "7", "4242"} {
-				frames, native := runSeed(t, bins["frames"], seed), runSeed(t, bins["native"], seed)
+				frames, native := runSeed(t, filepath.Join(work, "frames"), cmds["frames"], seed), runSeed(t, filepath.Join(work, "native"), cmds["native"], seed)
 				if frames != native {
 					t.Errorf("seed %s: native differs from frames\n=== frames\n%s=== native\n%s", seed, frames, native)
 				}
@@ -53,12 +67,12 @@ func TestGoPauseModelsAgree(t *testing.T) {
 	}
 }
 
-func runSeed(t *testing.T, bin, seed string) testutil.Observation {
+func runSeed(t *testing.T, dir string, argv []string, seed string) testutil.Observation {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin)
-	cmd.Dir = filepath.Dir(bin)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOALCHEMY_SEED="+seed)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

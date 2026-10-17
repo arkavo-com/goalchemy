@@ -137,12 +137,13 @@ def plan(suite, shard, target=None):
         commands = [['go', 'test', '-v', '-timeout', '15m', './tests/language',
                      '-run', '^TestNamingModes$', '-count=1']]
     elif suite == 'pause':
-        # The Go target under the native pause model: fixtures, corpus, the
-        # frames/native agreement check and the Go library/host integration.
-        environment['GOALCHEMY_TEST_TARGETS'] = 'go'
+        # The Go and TypeScript targets under the native pause model:
+        # fixtures, corpus, the frames/native agreement checks and the Go
+        # library/host integration.
+        environment['GOALCHEMY_TEST_TARGETS'] = 'go,typescript'
         environment['GOALCHEMY_PAUSE_MODEL'] = 'native'
         commands = [['go', 'test', '-v', '-timeout', '40m', './tests/language',
-                     '-run', '^(?:TestFixtures|TestGoPauseModelsAgree)$', '-count=1'],
+                     '-run', '^(?:TestFixtures|TestGoPauseModelsAgree|TestTypeScriptPauseModelsAgree)$', '-count=1'],
                     ['go', 'test', '-v', '-timeout', '40m', './tests/corpus',
                      '-run', '^TestRegressions$', '-count=1'],
                     ['go', 'test', '-short', '-v', '-timeout', '30m', INTEGRATION,
