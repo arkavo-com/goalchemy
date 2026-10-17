@@ -232,7 +232,37 @@ func (fe *fnEmitter) results() string {
 	for _, r := range fe.f.Results {
 		xs = append(xs, "GCopy("+fe.val(r)+")")
 	}
+	if !fe.frame && len(xs) == 1 {
+		return xs[0]
+	}
+	if !fe.frame {
+		return "(" + strings.Join(xs, ", ") + ")"
+	}
 	return "[" + strings.Join(xs, ", ") + "]"
+}
+
+// plainParams lists a plain function's parameters: the task, one value per
+// parameter, and the captured cells of a closure.
+func plainParams(f *ir.Func) []string {
+	ps := []string{"_ task: GTask"}
+	for i := range f.Params {
+		ps = append(ps, fmt.Sprintf("_ p%d: GValue", i))
+	}
+	if len(f.Env) > 0 {
+		ps = append(ps, "_ env: [GCell]")
+	}
+	return ps
+}
+
+func plainResults(f *ir.Func) string {
+	switch n := len(f.Results); n {
+	case 0:
+		return ""
+	case 1:
+		return " -> GValue"
+	default:
+		return " -> (" + strings.TrimSuffix(strings.Repeat("GValue, ", n), ", ") + ")"
+	}
 }
 
 // plain reports whether f runs as a plain Swift function: it cannot pause,
@@ -262,7 +292,7 @@ func (e *emitter) function(f *ir.Func) string {
 	if fe.frame {
 		fmt.Fprintf(&fe.b, "\n%sfunc %s(_ args: [GValue], _ env: [GCell]) -> GFrame {\n    _ = gTypeRegistration\n", position(f.Pos), sym)
 	} else {
-		fmt.Fprintf(&fe.b, "\n%sfunc %s_p(_ task: GTask, _ args: [GValue], _ env: [GCell]) throws -> [GValue] {\n", position(f.Pos), sym)
+		fmt.Fprintf(&fe.b, "\n%sfunc %s_p(%s) throws%s {\n", position(f.Pos), sym, strings.Join(plainParams(f), ", "), plainResults(f))
 	}
 	params := map[*ir.Local]int{}
 	for i, l := range f.Params {
@@ -296,7 +326,11 @@ func (e *emitter) function(f *ir.Func) string {
 		if i, ok := captures[l]; ok {
 			fmt.Fprintf(&fe.b, "    %s %s = env[%d]\n", binding, fe.local(l), i)
 		} else if i, ok := params[l]; ok {
-			fmt.Fprintf(&fe.b, "    %s %s = GCell(args[%d])\n", binding, fe.local(l), i)
+			arg := fmt.Sprintf("args[%d]", i)
+			if !fe.frame {
+				arg = fmt.Sprintf("p%d", i)
+			}
+			fmt.Fprintf(&fe.b, "    %s %s = GCell(%s)\n", binding, fe.local(l), arg)
 		} else {
 			fmt.Fprintf(&fe.b, "    %s %s = GCell(GTypes.zero(%d))\n", binding, fe.local(l), l.Type.ID)
 		}
@@ -307,7 +341,27 @@ func (e *emitter) function(f *ir.Func) string {
 		syn.DispatchOpen, syn.SetPC = []string{"var pc = 0", "%swhile true {", "\tswitch pc {"}, "pc = %d"
 		syn.Default = []string{`default: throw GFault("invalid block")`}
 		fe.b.WriteString(structure.Print(body, syn, swiftEmitter{fe}, 1))
-		fmt.Fprintf(&fe.b, "}\n%sfunc %s(_ args: [GValue], _ env: [GCell]) -> GFrame {\n    _ = gTypeRegistration\n    return GFrame.plain(%d) { task in try %s_p(task, args, env) }\n}\n", position(f.Pos), sym, f.ID, sym)
+		as := []string{"task"}
+		for i := range f.Params {
+			as = append(as, fmt.Sprintf("args[%d]", i))
+		}
+		if len(f.Env) > 0 {
+			as = append(as, "env")
+		}
+		call := fmt.Sprintf("try %s_p(%s)", sym, strings.Join(as, ", "))
+		switch len(f.Results) {
+		case 0:
+			call += "; return []"
+		case 1:
+			call = "[" + call + "]"
+		default:
+			var rs []string
+			for i := range f.Results {
+				rs = append(rs, fmt.Sprintf("r.%d", i))
+			}
+			call = "let r = " + call + "; return [" + strings.Join(rs, ", ") + "]"
+		}
+		fmt.Fprintf(&fe.b, "}\n%sfunc %s(_ args: [GValue], _ env: [GCell]) -> GFrame {\n    _ = gTypeRegistration\n    return GFrame.plain(%d) { task in %s }\n}\n", position(f.Pos), sym, f.ID, call)
 		return structure.Resolve(fe.b.String())
 	}
 	fmt.Fprintf(&fe.b, "    let frame = GFrame(%d)\n    frame.dynamicResults = true\n    frame.roots = { [%s] }\n    frame.results = { %s }\n    frame.step = { frame, task in\n", f.ID, strings.Join(roots, ", "), fe.results())
@@ -445,7 +499,11 @@ func (fe *fnEmitter) call(c *ir.Call) string {
 // plain function directly, any other through a synchronous frame run.
 func (fe *fnEmitter) syncCall(c *ir.Call) string {
 	if c.Kind == ir.CallStatic && plain(c.Func) {
-		return fmt.Sprintf("try %s_p(task, %s, [])", fe.e.names.Symbol(c.Func.Sym), fe.values(c.Args))
+		as := []string{"task"}
+		for _, a := range c.Args {
+			as = append(as, fe.val(a))
+		}
+		return fmt.Sprintf("try %s_p(%s)", fe.e.names.Symbol(c.Func.Sym), strings.Join(as, ", "))
 	}
 	return "try task.owner.callSync(task, " + fe.call(c) + ")"
 }
@@ -555,18 +613,28 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		}
 	case *ir.Call:
 		call := fe.syncCall(i)
+		direct := i.Kind == ir.CallStatic && plain(i.Func)
+		index := func(k int) string {
+			if direct {
+				if len(i.Dsts) == 1 {
+					return ""
+				}
+				return fmt.Sprintf(".%d", k)
+			}
+			return fmt.Sprintf("[%d]", k)
+		}
 		switch {
 		case len(i.Dsts) == 0:
 			w("_ = %s", call)
 		case len(i.Dsts) == 1 && i.Dsts[0] != nil:
-			w("%s = %s[0]", fe.val(i.Dsts[0]), call)
+			w("%s = %s%s", fe.val(i.Dsts[0]), call, index(0))
 		default:
 			n := fe.next
 			fe.next++
 			w("let results%d = %s", n, call)
 			for k, d := range i.Dsts {
 				if d != nil {
-					w("%s = results%d[%d]", fe.val(d), n, k)
+					w("%s = results%d%s", fe.val(d), n, index(k))
 				}
 			}
 		}
