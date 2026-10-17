@@ -19,9 +19,14 @@ def run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, check=True, capture_output=True, text=True).stdout
 
 
+def output(cmd, cwd=None, env=None):
+    p = subprocess.run(cmd, cwd=cwd, env=env, check=True, capture_output=True, text=True)
+    return p.stdout + p.stderr
+
+
 def timed(cmd, cwd=None, env=None):
     start = time.perf_counter()
-    out = run(cmd, cwd, env)
+    out = output(cmd, cwd, env)
     return time.perf_counter() - start, out
 
 
@@ -129,7 +134,7 @@ def swift_build(gen, mode, env):
     files = re.findall(r"^        '(.*)'", open(os.path.join(gen, 'run.sh')).read(), re.M)
     opt = ['-Onone', '-j', '2'] if mode == 'debug' else ['-O', '-wmo']
     t, _ = timed(['swiftc', '-swift-version', '5', '-suppress-warnings', *opt, '-I', 'rt/native', *files, '.build/native/native.o', *libs, '-o', f'.build/prog-{mode}'], cwd=gen, env=env)
-    return t, run([f'.build/prog-{mode}'], cwd=gen, env=env).strip()
+    return t, output([f'.build/prog-{mode}'], cwd=gen, env=env).strip()
 
 
 def swift_matrix(args, comps, work):
