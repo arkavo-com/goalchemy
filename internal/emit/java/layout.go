@@ -95,9 +95,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		if ir.HostEntry(e.contracts) {
 			run = "runHost();\n        System.out.flush();\n        System.exit(0);"
 		}
-		fmt.Fprintf(bodies[entry], "    public static void runHost() {\n        TaskSpawn.runMainHost(() -> %s);\n    }\n\n    public static void main(String[] args) {\n        %s\n    }\n", start, run)
+		fmt.Fprintf(bodies[entry], "    public static void runHost() {\n        TaskSpawn.runMainHost(() -> %s);\n    }\n\n    public static void main(String[] _args) {\n        %s\n    }\n", start, run)
 	} else {
-		fmt.Fprintf(bodies[entry], "    public static void main(String[] args) {\n        Program.main(() -> {\n            %s();\n", e.symbol(p.Init.Sym))
+		fmt.Fprintf(bodies[entry], "    public static void main(String[] _args) {\n        Program.main(() -> {\n            %s();\n", e.symbol(p.Init.Sym))
 		if p.Main != nil {
 			fmt.Fprintf(bodies[entry], "            %s();\n", e.symbol(p.Main.Sym))
 		}
