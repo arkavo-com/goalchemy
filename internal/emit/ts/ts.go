@@ -809,10 +809,10 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 			if c.Ok != nil {
 				fe.w(" %s = t.rv[2];", fe.val(c.Ok))
 			}
-			fe.w(close)
+			fe.w("%s", close)
 		}
 	}
-	fe.w(end)
+	fe.w("%s", end)
 }
 
 // pause emits a pause point: record the resume block, start the
