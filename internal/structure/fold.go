@@ -44,7 +44,9 @@ type FoldOptions struct {
 	// before it that a temporary would hold across the pause: the target's
 	// collector sees locals, not temporaries.
 	PauseAlone bool
-	Order      Order
+	// CallAlone applies the temporary-root rule to synchronous calls too.
+	CallAlone bool
+	Order     Order
 }
 
 // Folds records the single-use temporaries a target prints inside the
@@ -446,7 +448,7 @@ func Analyze(f *ir.Func, opt FoldOptions, pr Probe, set func(*Folds)) *Folds {
 // the source order of effects.
 func (c *cand) valid(cands map[*ir.Local]*cand, byDef map[any]*cand, siblings []*cand, root func(*cand) any, opt FoldOptions) bool {
 	order := opt.Order
-	if opt.PauseAlone && c.seq[c.d].pause != nil && !c.alone(cands, byDef) {
+	if (opt.PauseAlone && c.seq[c.d].pause != nil || opt.CallAlone && c.call) && !c.alone(cands, byDef) {
 		return false
 	}
 	reads := c.treeReads(cands)
