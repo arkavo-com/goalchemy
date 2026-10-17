@@ -17,6 +17,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -487,6 +488,7 @@ type fnEmitter struct {
 	defers bool
 	frame  bool
 	indent string
+	folds  *structure.Folds
 }
 
 func (fe *fnEmitter) w(format string, args ...any) {
@@ -505,6 +507,9 @@ func (fe *fnEmitter) raw(l *ir.Local) string {
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if cell(v) {
 			return "pget(&" + fe.raw(v) + ")"
 		}
@@ -719,11 +724,18 @@ func (fe *fnEmitter) addrOf(p *ir.Place) string {
 	return fmt.Sprintf("fptr(&%s, %d)", base, last.Field)
 }
 
-func (fe *fnEmitter) slot(l *ir.Local) string { return fe.e.names.Local(l, "_") }
+func (fe *fnEmitter) slot(l *ir.Local) string {
+	if n, ok := fe.folds.Name(l); ok {
+		return n
+	}
+	return fe.e.names.Local(l, "_")
+}
 
 func (fe *fnEmitter) slotDecls() {
 	for _, l := range fe.f.Locals {
-		fe.w("const %s: usize = %d;", fe.slot(l), fe.slots[l])
+		if !fe.folds.Temp(l) {
+			fe.w("const %s: usize = %d;", fe.slot(l), fe.slots[l])
+		}
 	}
 }
 
@@ -750,6 +762,7 @@ func (e *emitter) function(f *ir.Func) string {
 			}
 		}
 	}
+	fe.analyze()
 	var params []string
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
 		params = append(params, "arg_"+fe.slot(l)+": V")
@@ -779,42 +792,85 @@ func (e *emitter) function(f *ir.Func) string {
 	}
 	fe.indent = ""
 	fe.b.WriteString("}\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 func (fe *fnEmitter) body() {
-	if b := fe.f.Blocks; len(b) == 1 && b[0].ResumeOf == nil {
-		switch b[0].Term.(type) {
-		case *ir.Jump, *ir.If, *ir.Pause:
-		default:
-			fe.block(b[0])
-			return
-		}
-	}
+	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	syn := rustSyntax
+	syn.DispatchOpen = []string{"%sloop {", "\tsafepoint();", "\tmatch " + fe.pc() + " {"}
 	if !fe.frame {
-		fe.w("let mut pc: u32 = 0;")
+		syn.DispatchOpen = append([]string{"let mut pc: u32 = 0;"}, syn.DispatchOpen...)
+		syn.SetPC = "pc = %d;"
+	} else {
+		syn.SetPC = "fr.pc.set(%d);"
 	}
-	fe.w("loop {")
-	base := fe.indent
-	fe.indent = base + "    "
-	fe.w("safepoint();")
-	fe.w("match %s {", fe.pc())
-	for i, b := range fe.f.Blocks {
-		fe.indent = base + "        "
-		fe.w("%d => {", i)
-		fe.indent = base + "            "
+	depth := len(fe.indent) / 4
+	indent := fe.indent
+	fe.indent = ""
+	fe.b.WriteString(structure.Print(body, syn, rustEmitter{fe}, depth))
+	fe.indent = indent
+}
+
+var rustSyntax = structure.Syntax{
+	Indent: "    ", If: "if %s {", ElseIf: "} else if %s {", Else: "} else {", End: "}",
+	Loop: "loop {", While: "while %s {", Block: "%s: {", LoopLabel: "%s: ", LabelName: "'l%d",
+	Break: "break;", BreakTo: "break %s;", Continue: "continue;", ContinueTo: "continue %s;", LabelInBlocks: true,
+	Not: "!%s", And: "%s && %s", Or: "%s || %s", LoopStart: "safepoint();",
+	CaseOpen: "%d => {", CaseClose: "}", Default: []string{`_ => fault("bad block"),`}, DispatchClose: []string{"\t}", "}"},
+}
+
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, rustProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved, indent := fe.b, fe.indent
+	fe.b, fe.indent = strings.Builder{}, ""
+	fn()
+	out := fe.b.String()
+	fe.b, fe.indent = saved, indent
+	return out
+}
+
+// rustEmitter prints the target-specific statements of a structured body.
+type rustEmitter struct{ fe *fnEmitter }
+
+func (r rustEmitter) Code(b *ir.Block) string {
+	fe := r.fe
+	return fe.capture(func() {
 		if b.ResumeOf != nil {
 			fe.resume(b.ResumeOf)
 		}
-		fe.block(b)
-		fe.indent = base + "        "
-		fe.w("}")
-	}
-	fe.w("_ => fault(\"bad block\"),")
-	fe.indent = base + "    "
-	fe.w("}")
-	fe.indent = base
-	fe.w("}")
+		for _, in := range b.Instrs {
+			if !fe.folds.Folded(in) {
+				fe.instr(in)
+			}
+		}
+	})
+}
+
+func (r rustEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return r.fe.capture(func() { r.fe.term(t) })
+}
+
+func (r rustEmitter) Pause(*ir.Pause) string    { panic("rust: inline pause") }
+func (r rustEmitter) Cond(v ir.Value) string    { return r.fe.val(v) + ".b()" }
+func (r rustEmitter) Mark(pos token.Pos) string { return r.fe.mark(pos) }
+
+// rustProbe renders statements for fold analysis.
+type rustProbe struct{ fe *fnEmitter }
+
+func (r rustProbe) Instr(in ir.Instr) string { return r.fe.capture(func() { r.fe.instr(in) }) }
+func (r rustProbe) Pause(*ir.Pause) string   { panic("rust: inline pause") }
+func (r rustProbe) Cond(v ir.Value) string   { return r.fe.val(v) }
+func (r rustProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return r.fe.capture(func() { r.fe.term(t) })
+}
+func (r rustProbe) Assign(l *ir.Local) (string, string) {
+	s := r.fe.set(l, "\x01")
+	i := strings.Index(s, "\x01")
+	return s[:i], s[i+1:] + ";"
 }
 
 func (fe *fnEmitter) pc() string {
@@ -822,13 +878,6 @@ func (fe *fnEmitter) pc() string {
 		return "fr.pc.get()"
 	}
 	return "pc"
-}
-
-func (fe *fnEmitter) setPC(n int) string {
-	if fe.frame {
-		return fmt.Sprintf("fr.pc.set(%d);", n)
-	}
-	return fmt.Sprintf("pc = %d;", n)
 }
 
 func (fe *fnEmitter) results() string {
@@ -856,26 +905,9 @@ func (fe *fnEmitter) mark(pos token.Pos) string {
 	return fmt.Sprintf("%s%d\x00", marker, int(pos))
 }
 
-func (fe *fnEmitter) block(b *ir.Block) {
-	for _, in := range b.Instrs {
-		fe.instr(in)
-	}
-	fe.term(b.Term)
-}
-
 func (fe *fnEmitter) term(t ir.Terminator) {
 	m := fe.mark(t.Position())
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.w("%s%s", m, fe.setPC(fe.order[t.Target]))
-		fe.w("continue;")
-	case *ir.If:
-		if fe.frame {
-			fe.w("%sfr.pc.set(if %s.b() { %d } else { %d });", m, fe.val(t.Cond), fe.order[t.Then], fe.order[t.Else])
-		} else {
-			fe.w("%spc = if %s.b() { %d } else { %d };", m, fe.val(t.Cond), fe.order[t.Then], fe.order[t.Else])
-		}
-		fe.w("continue;")
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
@@ -907,6 +939,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
+	fe.analyze()
 	fe.w("%sfn st_%s(t: &Rc<Task>, fr: &Rc<Frame>) {", position(f.Pos), e.names.Symbol(f.Sym))
 	fe.indent = "    "
 	fe.slotDecls()
@@ -937,7 +970,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 		fe.w("    fr.l.s(%s, arg_%s);", fe.slot(p), fe.slot(p))
 	}
 	fe.w("    V::Frame(fr)\n}\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 func (fe *fnEmitter) resume(op ir.Instr) {
