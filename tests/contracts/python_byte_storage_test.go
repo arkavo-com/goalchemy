@@ -21,14 +21,14 @@ func TestPythonByteValuesNativeOracle(t *testing.T) {
 
 func TestPythonByteStorage(t *testing.T) {
 	outDir := t.TempDir()
-	if ds := testutil.CompileGate("../language/testdata/byte_storage", "python", outDir, "sequential"); len(ds) > 0 {
+	if ds := testutil.CompileGateOptions("../language/testdata/byte_storage", "python", outDir, "sequential", driver.EmitOptions{Names: "readable"}); len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	src, err := testutil.GeneratedSource(outDir, ".py")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"rt.alloc_bytes(4)", "return bytearray(s)", "memoryview(d)[:] = s", "return bytes(x)", "rt.BYTE_NIL", "lambda: 0, True)", "bytearray((", "rt.slice_to_array("} {
+	for _, want := range []string{"rt.alloc_bytes(4)", "return bytearray(_s)", "memoryview(_d)[:] = _s", "return bytes(_x)", "rt.BYTE_NIL", "lambda: 0, True)", "bytearray((", "rt.slice_to_array("} {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("emitted byte program lacks %q", want)
 		}
