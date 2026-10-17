@@ -28,9 +28,10 @@ every build prints the same output:
   then `fib(27)` through suspending recursion.
 - `pingpong`: 300k round trips over unbuffered channels between three tasks.
 
-`--targets` selects targets (`go`, `typescript`, `python`; default
+`--targets` selects targets (`go`, `typescript`, `python`, `swift`; default
 `go,typescript`), and `--pause-model native` selects the pause model of the
-targets that implement both (Go, TypeScript). A compiler named `NAME@MODEL`
+targets that implement both (Go, TypeScript, Swift). Swift programs are built
+in release mode (`-O -wmo`) before timing. A compiler named `NAME@MODEL`
 uses that pause model, so one run can compare models:
 `bench.py micro --targets typescript base=/tmp/gc-before after@frames=/tmp/gc-after after@native=/tmp/gc-after`.
 
@@ -47,7 +48,8 @@ and release (`-O -wmo`):
   is a resumable frame.
 
 `--variants`, `--blocks` (default `50,200,1000`) and `--modes` narrow the
-matrix. The Swift toolchain comes from `PATH` or `.toolchains/swift-6.4.0`.
+matrix. `--pause-model` and `NAME@MODEL` compilers select the pause model as
+for `micro`, so `C` compares frames with native async functions. The Swift toolchain comes from `PATH` or `.toolchains/swift-6.4.0`.
 
 ## swift-sdk
 

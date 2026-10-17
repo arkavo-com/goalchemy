@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Opt-in Goalchemy benchmarks (docs/benchmarks.md). Not run by go test or CI.
 
-  bench.py micro [--targets go,typescript] [--pause-model frames|native] [--runs 7] NAME[@MODEL]=COMPILER ...
-  bench.py swift-matrix [--variants A,B,C] [--blocks 50,200,1000] [--modes debug,release] NAME=COMPILER ...
+  bench.py micro [--targets go,typescript,swift] [--pause-model frames|native] [--runs 7] NAME[@MODEL]=COMPILER ...
+  bench.py swift-matrix [--variants A,B,C] [--blocks 50,200,1000] [--modes debug,release] NAME[@MODEL]=COMPILER ...
   bench.py swift-sdk --sdk DIR [--runs 1] NAME=COMPILER ...
 
 Each NAME=COMPILER is a goalchemy binary; several compare builds A/B. Timings
@@ -55,11 +55,16 @@ def toolchain_env():
     return env
 
 
+NATIVE_PAUSE = ('go', 'typescript', 'swift')
+
+
 def micro(args, comps, work):
+    env = toolchain_env()
     runners = {
-        'go': (['go', 'build', '-o', 'prog', '.'], ['./prog']),
+        'go': (lambda out: run(['go', 'build', '-o', 'prog', '.'], cwd=out), ['./prog']),
         'typescript': (None, ['node', 'main.ts']),
         'python': (None, ['python3', 'main.py']),
+        'swift': (lambda out: swift_build(out, 'release', env, False), ['.build/prog-release']),
     }
     res = {}
     for prog in args.programs.split(','):
@@ -71,10 +76,10 @@ def micro(args, comps, work):
                 out = os.path.join(work, f'{prog}-{target}-{name}')
                 shutil.rmtree(out, ignore_errors=True)
                 model = name.partition('@')[2] or args.pause_model
-                flags = ['-pause-model', model] if target in ('go', 'typescript') and model else []
+                flags = ['-pause-model', model] if target in NATIVE_PAUSE and model else []
                 run([comp, 'compile', '-gate', 'cooperative', '-target', target, *flags, '-out', out, '.'], cwd=src)
                 if build:
-                    run(build, cwd=out)
+                    build(out)
                 dirs[name] = out
             times = {n: [] for n in dirs}
             outputs = {n: set() for n in dirs}
@@ -127,7 +132,7 @@ def matrix_program(variant, blocks):
     return f'package main\n\nfunc f({params}) int {{\n' + '\n'.join(lines) + f'\n}}\n\nfunc main() {{\n\tprintln({call})\n}}\n'
 
 
-def swift_build(gen, mode, env):
+def swift_build(gen, mode, env, execute=True):
     os.makedirs(os.path.join(gen, '.build', 'native'), exist_ok=True)
     flags = run(['pkg-config', '--cflags', 'openssl', 'zlib', 'libcurl'], env=env).split()
     libs = run(['pkg-config', '--libs', 'openssl', 'zlib', 'libcurl'], env=env).split()
@@ -135,7 +140,7 @@ def swift_build(gen, mode, env):
     files = re.findall(r"^        '(.*)'", open(os.path.join(gen, 'run.sh')).read(), re.M)
     opt = ['-Onone', '-j', '2'] if mode == 'debug' else ['-O', '-wmo']
     t, _ = timed(['swiftc', '-swift-version', '5', '-suppress-warnings', *opt, '-I', 'rt/native', *files, '.build/native/native.o', *libs, '-o', f'.build/prog-{mode}'], cwd=gen, env=env)
-    return t, output([f'.build/prog-{mode}'], cwd=gen, env=env).strip()
+    return t, output([f'.build/prog-{mode}'], cwd=gen, env=env).strip() if execute else ''
 
 
 def swift_matrix(args, comps, work):
@@ -149,9 +154,11 @@ def swift_matrix(args, comps, work):
             open(os.path.join(src, 'go.mod'), 'w').write(f'module t\n\ngo 1.25\n\nrequire github.com/eugenioenko/goalchemy v0.0.0\n\nreplace github.com/eugenioenko/goalchemy => {ROOT}\n')
             open(os.path.join(src, 'main.go'), 'w').write(matrix_program(variant, blocks))
             for name, comp in comps.items():
-                gen = os.path.join(src, 'swift-' + name)
+                gen = os.path.join(src, 'swift-' + name.replace('@', '-'))
                 gate = ['-gate', 'cooperative'] if variant == 'C' else []
-                run([comp, 'compile', *gate, '-target', 'swift', '-out', gen, '.'], cwd=src)
+                model = name.partition('@')[2] or args.pause_model
+                flags = ['-pause-model', model] if model else []
+                run([comp, 'compile', *gate, '-target', 'swift', *flags, '-out', gen, '.'], cwd=src)
                 for mode in args.modes.split(','):
                     t, out = swift_build(gen, mode, env)
                     res[f'{variant}/{blocks}/{mode}/{name}'] = {'seconds': t, 'output': out}
