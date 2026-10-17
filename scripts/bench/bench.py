@@ -3,6 +3,7 @@
 
   bench.py micro [--targets go,typescript,swift] [--pause-model frames|native] [--runs 7] NAME[@MODEL]=COMPILER ...
   bench.py swift-matrix [--variants A,B,C] [--blocks 50,200,1000] [--modes debug,release] NAME[@MODEL]=COMPILER ...
+  bench.py csharp-matrix [--variants C] [--blocks 50,200,1000] NAME[@MODEL]=COMPILER ...
   bench.py swift-sdk --sdk DIR [--runs 1] NAME=COMPILER ...
 
 Each NAME=COMPILER is a goalchemy binary; several compare builds A/B. Timings
@@ -52,10 +53,18 @@ def toolchain_env():
         env['PATH'] = swift + os.pathsep + env['PATH']
     if subprocess.run(['pkg-config', '--exists', 'libcurl'], env=env).returncode != 0 and os.path.isdir(os.path.join(tc, 'pkgconfig')):
         env['PKG_CONFIG_PATH'] = os.path.join(tc, 'pkgconfig') + os.pathsep + env.get('PKG_CONFIG_PATH', '')
+    dotnet = os.path.join(tc, 'dotnet')
+    if shutil.which('dotnet') is None and os.path.isfile(os.path.join(dotnet, 'dotnet')):
+        env['PATH'] = dotnet + os.pathsep + env['PATH']
+        env['DOTNET_ROOT'] = dotnet
     return env
 
 
-NATIVE_PAUSE = ('go', 'typescript', 'swift')
+NATIVE_PAUSE = ('go', 'typescript', 'swift', 'csharp')
+
+
+def csharp_build(out, env):
+    return timed(['sh', '-c', "sed '/^exec /d' run.sh | sh"], cwd=out, env=env)[0]
 
 
 def micro(args, comps, work):
@@ -65,6 +74,7 @@ def micro(args, comps, work):
         'typescript': (None, ['node', 'main.ts']),
         'python': (None, ['python3', 'main.py']),
         'swift': (lambda out: swift_build(out, 'release', env, False), ['.build/prog-release']),
+        'csharp': (lambda out: csharp_build(out, env), ['dotnet', 'bin/main.dll']),
     }
     res = {}
     for prog in args.programs.split(','):
@@ -86,7 +96,7 @@ def micro(args, comps, work):
             for i in range(args.runs):
                 names = list(dirs) if i % 2 == 0 else list(reversed(dirs))
                 for n in names:
-                    t, o = timed(cmd, cwd=dirs[n])
+                    t, o = timed(cmd, cwd=dirs[n], env=env)
                     times[n].append(t)
                     outputs[n].add(o)
             key = f'{prog}/{target}'
@@ -132,6 +142,15 @@ def matrix_program(variant, blocks):
     return f'package main\n\nfunc f({params}) int {{\n' + '\n'.join(lines) + f'\n}}\n\nfunc main() {{\n\tprintln({call})\n}}\n'
 
 
+def write_matrix(work, variant, blocks):
+    src = os.path.join(work, f'matrix-{variant}-{blocks}')
+    shutil.rmtree(src, ignore_errors=True)
+    os.makedirs(src)
+    open(os.path.join(src, 'go.mod'), 'w').write(f'module t\n\ngo 1.25\n\nrequire github.com/eugenioenko/goalchemy v0.0.0\n\nreplace github.com/eugenioenko/goalchemy => {ROOT}\n')
+    open(os.path.join(src, 'main.go'), 'w').write(matrix_program(variant, blocks))
+    return src
+
+
 def swift_build(gen, mode, env, execute=True):
     os.makedirs(os.path.join(gen, '.build', 'native'), exist_ok=True)
     flags = run(['pkg-config', '--cflags', 'openssl', 'zlib', 'libcurl'], env=env).split()
@@ -148,11 +167,7 @@ def swift_matrix(args, comps, work):
     res = {}
     for variant in args.variants.split(','):
         for blocks in map(int, args.blocks.split(',')):
-            src = os.path.join(work, f'matrix-{variant}-{blocks}')
-            shutil.rmtree(src, ignore_errors=True)
-            os.makedirs(src)
-            open(os.path.join(src, 'go.mod'), 'w').write(f'module t\n\ngo 1.25\n\nrequire github.com/eugenioenko/goalchemy v0.0.0\n\nreplace github.com/eugenioenko/goalchemy => {ROOT}\n')
-            open(os.path.join(src, 'main.go'), 'w').write(matrix_program(variant, blocks))
+            src = write_matrix(work, variant, blocks)
             for name, comp in comps.items():
                 gen = os.path.join(src, 'swift-' + name.replace('@', '-'))
                 gate = ['-gate', 'cooperative'] if variant == 'C' else []
@@ -163,6 +178,25 @@ def swift_matrix(args, comps, work):
                     t, out = swift_build(gen, mode, env)
                     res[f'{variant}/{blocks}/{mode}/{name}'] = {'seconds': t, 'output': out}
                     print(f'{variant} {blocks:5} {mode:7} {name:10} {t:7.1f}s output={out}', flush=True)
+    return res
+
+
+def csharp_matrix(args, comps, work):
+    env = toolchain_env()
+    res = {}
+    for variant in args.variants.split(','):
+        for blocks in map(int, args.blocks.split(',')):
+            src = write_matrix(work, variant, blocks)
+            for name, comp in comps.items():
+                gen = os.path.join(src, 'csharp-' + name.replace('@', '-'))
+                gate = ['-gate', 'cooperative'] if variant == 'C' else []
+                model = name.partition('@')[2] or args.pause_model
+                flags = ['-pause-model', model] if model else []
+                run([comp, 'compile', *gate, '-target', 'csharp', *flags, '-out', gen, '.'], cwd=src)
+                build = csharp_build(gen, env)
+                t, out = timed(['dotnet', 'bin/main.dll'], cwd=gen, env=env)
+                res[f'{variant}/{blocks}/{name}'] = {'build_seconds': build, 'run_seconds': t, 'output': out.strip()}
+                print(f'{variant} {blocks:5} {name:10} build {build:6.1f}s run (JIT) {t:6.2f}s output={out.strip()}', flush=True)
     return res
 
 
@@ -186,7 +220,7 @@ def swift_sdk(args, comps, work):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('command', choices=['micro', 'swift-matrix', 'swift-sdk'])
+    ap.add_argument('command', choices=['micro', 'swift-matrix', 'csharp-matrix', 'swift-sdk'])
     ap.add_argument('compilers', nargs='+', help='NAME=PATH to a goalchemy binary')
     ap.add_argument('--work', default=os.path.join(ROOT, 'out', 'bench'))
     ap.add_argument('--json')
@@ -208,6 +242,8 @@ def main():
         res = micro(args, comps, args.work)
     elif args.command == 'swift-matrix':
         res = swift_matrix(args, comps, args.work)
+    elif args.command == 'csharp-matrix':
+        res = csharp_matrix(args, comps, args.work)
     else:
         if not args.sdk:
             sys.exit('swift-sdk needs --sdk')

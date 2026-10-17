@@ -14,6 +14,7 @@ go build -o /tmp/gc-before ./cmd/goalchemy   # on the base commit
 go build -o /tmp/gc-after ./cmd/goalchemy    # on the change
 python3 scripts/bench/bench.py micro before=/tmp/gc-before after=/tmp/gc-after
 python3 scripts/bench/bench.py swift-matrix before=/tmp/gc-before after=/tmp/gc-after
+python3 scripts/bench/bench.py csharp-matrix --variants C after@frames=/tmp/gc-after after@native=/tmp/gc-after
 python3 scripts/bench/bench.py swift-sdk --sdk ../opentdf-sdk before=/tmp/gc-before after=/tmp/gc-after
 ```
 
@@ -28,10 +29,11 @@ every build prints the same output:
   then `fib(27)` through suspending recursion.
 - `pingpong`: 300k round trips over unbuffered channels between three tasks.
 
-`--targets` selects targets (`go`, `typescript`, `python`, `swift`; default
-`go,typescript`), and `--pause-model native` selects the pause model of the
-targets that implement both (Go, TypeScript, Swift). Swift programs are built
-in release mode (`-O -wmo`) before timing. A compiler named `NAME@MODEL`
+`--targets` selects targets (`go`, `typescript`, `python`, `swift`, `csharp`;
+default `go,typescript`), and `--pause-model native` selects the pause model of
+the targets that implement both (Go, TypeScript, Swift, C#). Swift programs are
+built in release mode (`-O -wmo`) before timing; C# programs are compiled with
+their `run.sh` compiler line and timed as `dotnet bin/main.dll`. A compiler named `NAME@MODEL`
 uses that pause model, so one run can compare models:
 `bench.py micro --targets typescript base=/tmp/gc-before after@frames=/tmp/gc-after after@native=/tmp/gc-after`.
 
@@ -50,6 +52,14 @@ and release (`-O -wmo`):
 `--variants`, `--blocks` (default `50,200,1000`) and `--modes` narrow the
 matrix. `--pause-model` and `NAME@MODEL` compilers select the pause model as
 for `micro`, so `C` compares frames with native async functions. The Swift toolchain comes from `PATH` or `.toolchains/swift-6.4.0`.
+
+## csharp-matrix
+
+The `swift-matrix` programs compiled to C#: the time of the generated
+program's `csc` build and of one run, which includes JIT compilation of the
+large function. `NAME@MODEL` compilers select the pause model, so `C`
+compares a frame with an `async` method. The .NET SDK comes from `PATH` or
+`.toolchains/dotnet`.
 
 ## swift-sdk
 
