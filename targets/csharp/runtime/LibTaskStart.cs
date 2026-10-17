@@ -2,7 +2,7 @@ namespace Rt;
 
 public sealed class FutureState
 {
-    internal bool done, observed;
+    internal bool done, observed = false;
     internal Slice results;
     internal GoPanic panic;
     internal readonly List<GoTask> waiters = new();
