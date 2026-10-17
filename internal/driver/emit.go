@@ -38,6 +38,10 @@ type EmitOptions struct {
 	PauseModel     string
 	// NoLineDirectives omits line directives, source maps and line tables.
 	NoLineDirectives bool
+	// Host lists Go files or directories the project compiles into the
+	// generated Go package; source names avoid the names they declare.
+	// Other targets ignore it.
+	Host []string
 }
 
 // PauseModels lists the accepted pause models; the first is the default.
@@ -75,6 +79,15 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 		program.Names, program.NameCollisions = string(mode), policy
 		result.IR = &program
 		res = &result
+		if name == "go" && len(opts.Host) > 0 {
+			hosts, err := HostNames(opts.Host)
+			if err != nil {
+				return []diagnostics.Diagnostic{{Code: "GCE009", Severity: diagnostics.Error, Feature: "names",
+					Message: "host files: " + err.Error(),
+					Remedy:  "Pass Go files or directories that are compiled into the generated package."}}
+			}
+			res.IR.HostNames = hosts
+		}
 	}
 	e, ok := emitters[name]
 	if !ok {
@@ -203,7 +216,9 @@ func collisions(p *ir.Program, cs []naming.Collision) []diagnostics.Diagnostic {
 			pos := p.Fset.Position(c.Pos)
 			d.File, d.Line, d.Column = pos.Filename, pos.Line, pos.Column
 		}
-		if p.Fset != nil && c.Other.IsValid() {
+		if c.Where != "" {
+			where = " declared at " + c.Where
+		} else if p.Fset != nil && c.Other.IsValid() {
 			where = " declared at " + p.Fset.Position(c.Other).String()
 		}
 		switch {

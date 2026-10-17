@@ -90,12 +90,15 @@ type Collision struct {
 	Pos     token.Pos
 	Name    string
 	Emitted string
-	// Reason says why: "reserved word", "package clash", "shadowed local",
-	// "duplicate name" or "not a plain identifier".
+	// Reason says why: "reserved word", "host declaration", "package clash",
+	// "shadowed local", "duplicate name" or "not a plain identifier".
 	Reason string
 	// Other is the earlier declaration holding the name, when there is one.
 	Other     token.Pos
 	OtherName string
+	// Where locates the other declaration when it lies outside the program,
+	// such as a host file, as file:line:column.
+	Where string
 }
 
 // Identifier encodes a source fragment using ASCII identifier characters.
@@ -153,6 +156,7 @@ type Names struct {
 	rules      Rules
 	reserved   map[string]bool
 	globals    map[string]bool
+	hosts      map[string]string
 	members    map[string]bool
 	symbols    map[string]string
 	types      map[*ir.Type]*ir.Type
@@ -165,8 +169,8 @@ type Names struct {
 
 // New indexes private symbols and canonical representatives without modifying p.
 func New(p *ir.Program, rules Rules) *Names {
-	n := &Names{p: p, mode: modeOf(p), rules: rules, reserved: map[string]bool{}, globals: map[string]bool{}, members: map[string]bool{},
-		symbols: map[string]string{}, types: map[*ir.Type]*ir.Type{}, typeNames: map[*ir.Type]string{},
+	n := &Names{p: p, mode: modeOf(p), rules: rules, reserved: map[string]bool{}, globals: map[string]bool{}, hosts: map[string]string{},
+		members: map[string]bool{}, symbols: map[string]string{}, types: map[*ir.Type]*ir.Type{}, typeNames: map[*ir.Type]string{},
 		locals: map[*ir.Local]string{}, used: map[string]owner{}, generated: map[string]string{}}
 	for _, r := range rules.Reserved {
 		n.reserved[r] = true
@@ -177,6 +181,12 @@ func New(p *ir.Program, rules Rules) *Names {
 		}
 		for _, r := range p.ReservedGlobals {
 			n.globals[r] = true
+		}
+		for _, h := range p.HostNames {
+			n.globals[h.Name] = true
+			if _, ok := n.hosts[h.Name]; !ok {
+				n.hosts[h.Name] = h.Pos
+			}
 		}
 	}
 	for _, m := range rules.Members {
@@ -297,10 +307,15 @@ func (n *Names) assignModule() {
 			reason = "package clash"
 		}
 		name := claim(id, n.taken)
-		if (name != id || reason != "") && !quiet {
+		// A host declaration is reported even for a name that only
+		// lowercasing brought onto it: the project chose both spellings.
+		where, host := n.hosts[id]
+		if (name != id || reason != "") && (!quiet || host) {
 			c := Collision{Pos: d.pos, Name: d.name, Emitted: name, Reason: reason}
 			if o, ok := n.used[id]; ok {
 				c.Reason, c.Other, c.OtherName = "duplicate name", o.pos, o.name
+			} else if host {
+				c.Reason, c.OtherName, c.Where = "host declaration", id, where
 			} else if n.reserved[id] || n.globals[id] {
 				c.Reason = "reserved word"
 			}

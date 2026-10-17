@@ -35,7 +35,7 @@ name_collisions: rename     # under source names: rename (default) or fail on a 
 pause_model: frames         # frames (default) or native (Go, TypeScript, Swift, C#, Python, Rust and Java, experimental)
 line_directives: true       # map generated code back to the source (default)
 targets:
-  go: {out: out/go}
+  go: {out: out/go, host: [src/hosts/go]}  # host: Go files or directories compiled into the generated package
   typescript: {out: out/ts}
   python: {out: out/py}
   java: {out: out/java}
@@ -50,7 +50,10 @@ The file uses the same restricted YAML as the contract catalog: no anchors, alia
 `compile`, `run`, and `build` accept `--names=source|readable|compact` and
 `--name-collisions=rename|fail`. `compile` and `run` default to source names and
 do not load `goalchemy.yaml`; `build` uses the configuration's `names` and
-`name_collisions` unless a flag is explicitly present. The older
+`name_collisions` unless a flag is explicitly present. On the Go target,
+`--go-host=<file|dir>` (repeatable) or the target's `host` key names the Go
+files a project compiles into the generated package, so source names avoid
+the names they declare (see [Generated names](#generated-names)). The older
 `--compact-names` flag and `compact_names: true` key still select compact
 names; `--compact-names=false` selects the default.
 
@@ -153,6 +156,15 @@ collision:
   and `--name-collisions=fail` does not report these renames. Methods and
   fields keep their names, so Go interfaces such as `error` and
   `fmt.Stringer` are still satisfied.
+- A project that compiles its own Go files into the generated package lists
+  them under the Go target's `host` key in `goalchemy.yaml` (files or
+  directories, relative to the configuration file) or with the repeatable
+  `--go-host=<file|dir>` flag of `compile`, `run` and `build`. Every name
+  those files declare at package level, and every import name in their file
+  scope, is reserved: a source name that would take it is renamed
+  (`Log` becomes `log_2` next to a host `import "log"`), and
+  `--name-collisions=fail` reports it with the host file and line, even when
+  only lowercasing caused the collision.
 - Suffixes are assigned deterministically in source order, so output is stable
   across runs; adding an unrelated colliding name can rename an existing one,
   and internal names are not stable across compiler versions.

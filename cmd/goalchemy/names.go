@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"strings"
 )
 
 // nameFlags selects private identifiers: -names, -name-collisions, and the
@@ -19,6 +20,23 @@ func registerNameFlags(fs *flag.FlagSet) *nameFlags {
 		collisions: fs.String("name-collisions", "", "under source names, rename (default) or fail on a collision"),
 		compact:    fs.Bool("compact-names", false, "use short private generated identifiers (same as -names=compact)"),
 	}
+}
+
+// hostFlag collects the repeatable -go-host flag: Go files or directories
+// compiled into the generated Go package, whose names source names avoid.
+type hostFlag []string
+
+func (h *hostFlag) String() string { return strings.Join(*h, ",") }
+
+func (h *hostFlag) Set(value string) error {
+	*h = append(*h, value)
+	return nil
+}
+
+func registerHostFlag(fs *flag.FlagSet) *hostFlag {
+	var h hostFlag
+	fs.Var(&h, "go-host", "Go file or directory compiled into the generated Go package; repeatable")
+	return &h
 }
 
 // resolve applies the flags that were set over the configured mode and

@@ -264,6 +264,47 @@ func TestLowerSourceNames(t *testing.T) {
 	}
 }
 
+// Names declared by host files compiled into the generated package are
+// reserved for top-level source names, and a collision is reported even
+// when lowercasing caused it.
+func TestHostNames(t *testing.T) {
+	client := &ir.Type{ID: 1, Kind: ir.KNamed, Name: "svc.AttributesServiceClient", Pkg: "example.com/svc", Underlying: &ir.Type{ID: 2, Kind: ir.KStruct}}
+	p := &ir.Program{
+		HostNames: []ir.HostName{{Name: "attributesServiceClient", Pos: "services.go:108:6"}, {Name: "log", Pos: "options.go:18:2"}, {Name: "limit", Pos: "options.go:20:5"}},
+		Types:     &ir.Types{All: []*ir.Type{client}},
+		Globals:   []*ir.Global{{ID: 0, Name: "limit", Pkg: "example.com/svc", Sym: "svc_limit", Pos: 1}},
+		Funcs: []*ir.Func{
+			{ID: 0, Name: "slog.Log", Sym: "slog_Log", Pkg: "example.com/slog", Pos: 2, Locals: []*ir.Local{{ID: 0, Name: "log", Kind: ir.LVar}}},
+			{ID: 1, Name: "svc.Other", Sym: "svc_Other", Pkg: "example.com/svc", Pos: 3},
+		},
+	}
+	names := New(p, Rules{TypePrefix: "type_", Lower: true})
+	for _, tc := range []struct{ got, want string }{
+		{names.Type(client, "type_"), "attributesServiceClient_2"},
+		{names.Symbol("slog_Log"), "log_2"},
+		{names.Symbol("svc_limit"), "limit_2"},
+		{names.Symbol("svc_Other"), "other"},
+		{names.Local(p.Funcs[0].Locals[0], ""), "log"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("got %q, want %q", tc.got, tc.want)
+		}
+	}
+	cs := names.Collisions()
+	if len(cs) != 3 {
+		t.Fatalf("collisions = %v", cs)
+	}
+	for i, want := range []Collision{
+		{Name: "AttributesServiceClient", Emitted: "attributesServiceClient_2", Reason: "host declaration", OtherName: "attributesServiceClient", Where: "services.go:108:6"},
+		{Pos: 1, Name: "limit", Emitted: "limit_2", Reason: "host declaration", OtherName: "limit", Where: "options.go:20:5"},
+		{Pos: 2, Name: "Log", Emitted: "log_2", Reason: "host declaration", OtherName: "log", Where: "options.go:18:2"},
+	} {
+		if cs[i] != want {
+			t.Errorf("collision %d = %+v, want %+v", i, cs[i], want)
+		}
+	}
+}
+
 func TestRuntimeNames(t *testing.T) {
 	declared, called := map[string]bool{}, map[string]bool{}
 	scanRuntime("pub(super) fn chan_send(t: &Task) -> V {\n    let local = 1;\n    helper(local); // fn ignored()\n    \"fn quoted\";\n}\nconst LIMIT: usize = 3;\n", true, declared, called)

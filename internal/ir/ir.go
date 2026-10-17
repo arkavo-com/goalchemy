@@ -19,6 +19,9 @@ type Program struct {
 	// top-level source names avoid, such as host functions the runtime calls.
 	ReservedNames   []string
 	ReservedGlobals []string
+	// HostNames lists the names that host files compiled into the generated
+	// package declare, with their positions; top-level source names avoid them.
+	HostNames []HostName
 	// PauseModel selects how suspending functions are emitted: "frames"
 	// (resumable frames, the default) or "native" (target-native pausing).
 	PauseModel string
@@ -52,6 +55,13 @@ type Program struct {
 	SuspTypes   map[*Type]bool
 	SuspMethods map[string]bool
 	Fset        *token.FileSet
+}
+
+// HostName is a name declared by a host file that the project compiles into
+// the generated package, with its position as file:line:column.
+type HostName struct {
+	Name string
+	Pos  string
 }
 
 // Package describes an included source package independently of target layout.
