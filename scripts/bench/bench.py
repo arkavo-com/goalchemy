@@ -60,7 +60,7 @@ def toolchain_env():
     return env
 
 
-NATIVE_PAUSE = ('go', 'typescript', 'swift', 'csharp', 'python', 'rust')
+NATIVE_PAUSE = ('go', 'typescript', 'swift', 'csharp', 'python', 'rust', 'java')
 
 
 def csharp_build(out, env):
@@ -76,6 +76,7 @@ def micro(args, comps, work):
         'python': (None, ['python3', 'main.py']),
         'swift': (lambda out: swift_build(out, 'release', env, False), ['.build/prog-release']),
         'csharp': (lambda out: csharp_build(out, env), ['dotnet', 'bin/main.dll']),
+        'java': (lambda out: csharp_build(out, env), ['sh', '-c', 'exec $(sed -n "s/^exec //p" run.sh)']),
     }
     res = {}
     for prog in args.programs.split(','):

@@ -41,6 +41,7 @@ jobs:
           - {name: Runtime conformance all targets, suite: runtime}
           - {name: Native pause model, suite: pause}
           - {name: Native pause model (Python), suite: pause, target: python}
+          - {name: Native pause model (Java), suite: pause-java}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

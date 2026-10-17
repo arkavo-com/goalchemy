@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: d973a51672009574414745f973a06f85e58015261690632cfc985d50ea8a1199
 symbol: "ChanMake.makeChan"
 implementation: runtime/ChanMake.java
-implementation_hash: ebb0dda0c445ac865b33bea161645e53c3ea02d11b9c43e2bd9af79a2d69a6a6
+implementation_hash: 78e26eb01405d516d73b42aebe82d519ce1db10748e4641f8cfd5e219855cfe5
 summary: "make(chan T, size)."
 suspension: never
 determinism: deterministic

@@ -131,9 +131,9 @@ public final class HostOperationsTest {
             var wg=new StdSyncWaitgroupAdd.WaitGroup();wg.n=1;
             Object payload=new byte[1048576];ChanMake.Waiter stale=null;
             switch(mode){
-                case "send" -> {ChanSend.chanSend(t,ch,payload);stale=ch.sendq.get(0);}
-                case "recv" -> {ChanRecv.chanRecv(t,ch);stale=ch.recvq.get(0);}
-                case "select" -> {Select.select(t,false,Select.scase(ch,true,payload),Select.scase(second,false,null));stale=ch.sendq.get(0);}
+                case "send" -> {ChanSend.chanSend(t,ch,payload);stale=ch.sendq.peek();}
+                case "recv" -> {ChanRecv.chanRecv(t,ch);stale=ch.recvq.peek();}
+                case "select" -> {Select.select(t,false,Select.scase(ch,true,payload),Select.scase(second,false,null));stale=ch.sendq.peek();}
                 case "mutex" -> StdSyncMutexLock.stdSyncMutexLock(t,mutex);
                 case "waitgroup" -> StdSyncWaitgroupWait.stdSyncWaitgroupWait(t,wg);
                 case "nil-send" -> ChanSend.chanSend(t,null,payload);

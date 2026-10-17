@@ -81,6 +81,16 @@ func TestRustPauseModelsAgree(t *testing.T) {
 	})
 }
 
+func TestJavaPauseModelsAgree(t *testing.T) {
+	pauseModelsAgree(t, "java", func(t *testing.T, out string) []string {
+		cmd, err := testutil.BuildJava(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cmd
+	})
+}
+
 // pauseModelsAgree compiles every cooperative fixture for target under both
 // pause models; prepare returns the command that runs a compiled program.
 func pauseModelsAgree(t *testing.T, target string, prepare func(t *testing.T, out string) []string) {

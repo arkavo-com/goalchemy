@@ -158,6 +158,8 @@ func unsigned64(t *ir.Type) bool {
 
 func (e *emitter) susp(t *ir.Type) bool { return e.p.SuspTypes[t.U()] }
 
+func (e *emitter) native() bool { return e.p.PauseModel == "native" }
+
 func (e *emitter) adapt(f string, n int) string {
 	e.use("core.task.spawn")
 	return fmt.Sprintf("TaskSpawn.adapt(%s, %d)", f, n)
@@ -537,7 +539,10 @@ type fnEmitter struct {
 	order  map[*ir.Block]int
 	defers bool
 	frame  bool
-	folds  *structure.Folds
+	// task is set when f is a native-pause method taking the running task
+	// as its first parameter t.
+	task  bool
+	folds *structure.Folds
 }
 
 func (e *emitter) localName(l *ir.Local) string {
@@ -831,23 +836,47 @@ func rawParam(l *ir.Local) bool { return cell(l) && l.Kind != ir.LEnv }
 func (fe *fnEmitter) params() string {
 	var ps []string
 	for _, l := range append(append([]*ir.Local(nil), fe.f.Env...), fe.f.Params...) {
-		name := fe.e.localName(l)
 		t := fe.e.ltype(l)
 		if rawParam(l) {
-			name = "p$" + name
 			t = fe.e.jt(l.Type)
 		}
-		ps = append(ps, t+" "+name)
+		ps = append(ps, t+" "+fe.paramName(l))
 	}
 	return strings.Join(ps, ", ")
 }
 
+func (fe *fnEmitter) paramName(l *ir.Local) string {
+	if rawParam(l) {
+		return "p$" + fe.e.localName(l)
+	}
+	return fe.e.localName(l)
+}
+
+// starter renders the frame-convention overload of a native-pause method,
+// used by go, defer, function values and library calls.
+func (fe *fnEmitter) starter() string {
+	f := fe.f
+	args := []string{"t"}
+	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
+		args = append(args, fe.paramName(l))
+	}
+	sym := fe.e.names.Symbol(f.Sym)
+	call := sym + "(" + strings.Join(args, ", ") + ")"
+	switch len(f.Results) {
+	case 0:
+		call = "{ " + call + "; return new Object[0]; }"
+	case 1:
+		call = "new Object[] {" + call + "}"
+	}
+	return fmt.Sprintf("    static TaskSpawn.Frame %s(%s) {\n        return TaskSpawn.nativeTask(t -> %s);\n    }\n\n", sym, fe.params(), call)
+}
+
 func (e *emitter) function(f *ir.Func) string {
-	if f.MaySuspend {
+	if f.MaySuspend && !e.native() {
 		e.frameFunction(f)
 		return ""
 	}
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, task: f.MaySuspend}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
@@ -858,7 +887,12 @@ func (e *emitter) function(f *ir.Func) string {
 			}
 		}
 	}
-	fe.w("%s    static %s %s(%s) {\n", position(f.Pos), e.retType(f), e.names.Symbol(f.Sym), fe.params())
+	ps := fe.params()
+	if fe.task {
+		e.use("core.task.spawn")
+		ps = strings.TrimSuffix("TaskSpawn.Task t, "+ps, ", ")
+	}
+	fe.w("%s    static %s %s(%s) {\n", position(f.Pos), e.retType(f), e.names.Symbol(f.Sym), ps)
 	isParam := map[*ir.Local]bool{}
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
 		isParam[l] = !rawParam(l)
@@ -877,13 +911,32 @@ func (e *emitter) function(f *ir.Func) string {
 		fe.structured(2)
 	}
 	if fe.defers {
-		fe.w("        } catch (Throwable $e) {\n            $p = Program.catchPanic($e);\n        }\n        Program.runDefers($d, $p);\n")
+		run := "Program.runDefers($d, $p)"
+		if fe.pausingDefer() {
+			run = "TaskSpawn.runDefers(t, $d, $p)"
+		}
+		fe.w("        } catch (Throwable $e) {\n            $p = Program.catchPanic($e);\n        }\n        %s;\n", run)
 		if r := fe.results(); r != "" {
 			fe.w("        return %s;\n", r)
 		}
 	}
 	fe.w("    }\n\n")
+	if fe.task {
+		fe.b.WriteString(fe.starter())
+	}
 	return structure.Resolve(fe.b.String())
+}
+
+// pausingDefer reports whether a deferred call of f may pause.
+func (fe *fnEmitter) pausingDefer() bool {
+	for _, b := range fe.f.Blocks {
+		for _, in := range b.Instrs {
+			if d, ok := in.(*ir.Defer); ok && d.Call.Suspends {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // defaultOf renders a placeholder initial value satisfying Java's definite
@@ -944,7 +997,7 @@ var javaSyntax = structure.Syntax{
 // structured writes the function body as structured statements, with a
 // dispatch over the blocks a resumable frame resumes at.
 func (fe *fnEmitter) structured(depth int) {
-	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	body := structure.Build(fe.f, structure.Options{Inline: fe.task, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, fe.task) }})
 	syn := javaSyntax
 	syn.DispatchOpen = []string{"%sfor (;;) switch (" + fe.pcVar() + ") {"}
 	if !fe.frame {
@@ -955,7 +1008,7 @@ func (fe *fnEmitter) structured(depth int) {
 }
 
 func (fe *fnEmitter) analyze() {
-	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, javaProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.task, Order: structure.LeftToRight}, javaProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
 }
 
 func (fe *fnEmitter) capture(fn func()) string {
@@ -980,7 +1033,7 @@ type javaEmitter struct{ fe *fnEmitter }
 func (x javaEmitter) Code(b *ir.Block) string {
 	fe := x.fe
 	return fe.capture(func() {
-		if b.ResumeOf != nil {
+		if b.ResumeOf != nil && fe.frame {
 			fe.resume(b.ResumeOf)
 		}
 		for _, in := range b.Instrs {
@@ -999,7 +1052,16 @@ func (x javaEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
 	})
 }
 
-func (x javaEmitter) Pause(*ir.Pause) string    { panic("java: inline pause") }
+func (x javaEmitter) Pause(p *ir.Pause) string {
+	if x.fe.folds.FoldedPause(p) {
+		return ""
+	}
+	return x.fe.capture(func() {
+		x.fe.mark(p.Position())
+		x.fe.nativePause(p)
+	})
+}
+
 func (x javaEmitter) Cond(v ir.Value) string    { return x.fe.val(v) }
 func (x javaEmitter) Mark(pos token.Pos) string { return markText(pos) }
 
@@ -1007,7 +1069,7 @@ func (x javaEmitter) Mark(pos token.Pos) string { return markText(pos) }
 type javaProbe struct{ fe *fnEmitter }
 
 func (x javaProbe) Instr(in ir.Instr) string { return x.fe.capture(func() { x.fe.instr(in) }) }
-func (x javaProbe) Pause(*ir.Pause) string   { panic("java: inline pause") }
+func (x javaProbe) Pause(p *ir.Pause) string { return x.fe.capture(func() { x.fe.nativePause(p) }) }
 func (x javaProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
 func (x javaProbe) Leaf(b *ir.Block, t ir.Terminator) string {
 	return x.fe.capture(func() { x.fe.term(t) })
@@ -1098,22 +1160,26 @@ func (e *emitter) frameFunction(f *ir.Func) {
 
 func (fe *fnEmitter) resume(op ir.Instr) {
 	e := fe.e
+	sep, end := "; ", "\n"
+	if fe.task {
+		sep, end = ";\n", ""
+	}
 	switch i := op.(type) {
 	case *ir.Call:
 		for k, d := range i.Dsts {
 			if d != nil {
-				fe.w("%s; ", fe.assign(d, e.cast(d.Type, fmt.Sprintf("t.rv[%d]", k))))
+				fe.w("%s"+sep, fe.assign(d, e.cast(d.Type, fmt.Sprintf("t.rv[%d]", k))))
 			}
 		}
 	case *ir.Recv:
 		if i.Dst != nil {
-			fe.w("%s; ", fe.assign(i.Dst, e.cast(i.Dst.Type, "t.rv[0]")))
+			fe.w("%s"+sep, fe.assign(i.Dst, e.cast(i.Dst.Type, "t.rv[0]")))
 		}
 		if i.Ok != nil {
-			fe.w("%s; ", fe.assign(i.Ok, "((Boolean) t.rv[1])"))
+			fe.w("%s"+sep, fe.assign(i.Ok, "((Boolean) t.rv[1])"))
 		}
 	case *ir.Select:
-		fe.w("%s; ", fe.assign(i.Index, "((Long) t.rv[0])"))
+		fe.w("%s"+sep, fe.assign(i.Index, "((Long) t.rv[0])"))
 		for k, c := range i.Cases {
 			if c.Send || c.Dst == nil && c.Ok == nil {
 				continue
@@ -1125,10 +1191,10 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 			if c.Ok != nil {
 				fe.w(" %s;", fe.assign(c.Ok, "((Boolean) t.rv[2])"))
 			}
-			fe.w(" } ")
+			fe.b.WriteString(" }" + strings.TrimPrefix(sep, ";"))
 		}
 	}
-	fe.w("\n")
+	fe.b.WriteString(end)
 }
 
 // assign renders an assignment to a temp or local.
@@ -1170,6 +1236,61 @@ func (fe *fnEmitter) pause(p *ir.Pause) {
 		panic(fmt.Sprintf("java: pause on %T", p.Op))
 	}
 	fe.w("            return;\n")
+}
+
+// nativePause emits a pause point of a native-pause method: a generated
+// callee is called directly for its results; a runtime primitive either
+// completes at once or leaves the task blocked, and then the task waits
+// for the scheduler to choose it again. Primitive, function value and
+// method results arrive in t.rv.
+func (fe *fnEmitter) nativePause(p *ir.Pause) {
+	e := fe.e
+	const wait = "if (t.blocked) TaskSpawn.await(t);\n"
+	switch i := p.Op.(type) {
+	case *ir.Call:
+		switch i.Kind {
+		case ir.CallExtern:
+			args := append([]string{"t"}, fe.externArgs(i)...)
+			fe.w("%s(%s);\n"+wait, fe.externSym(i.Extern.Contract), strings.Join(args, ", "))
+		case ir.CallStatic:
+			call := e.symbol(i.Func.Sym) + "(" + strings.Join(append([]string{"t"}, fe.argList(i)...), ", ") + ")"
+			switch {
+			case len(i.Dsts) == 1 && i.Dsts[0] != nil:
+				fe.w("%s;\n", fe.assign(i.Dsts[0], call))
+			case len(i.Dsts) > 1:
+				fe.w("{ Object[] $r = %s;", call)
+				for k, d := range i.Dsts {
+					if d != nil {
+						fe.w(" %s;", fe.assign(d, e.cast(d.Type, fmt.Sprintf("$r[%d]", k))))
+					}
+				}
+				fe.w(" }\n")
+			default:
+				fe.w("%s;\n", call)
+			}
+			return
+		default:
+			fe.w("TaskSpawn.callFrame(t, (TaskSpawn.Frame) (%s));\n", fe.callExpr(i))
+		}
+	case *ir.Send:
+		fe.w("%s.chanSend(t, %s, %s);\n"+wait, e.rc("core.chan.send"), fe.val(i.Ch), fe.val(i.V))
+	case *ir.Recv:
+		fe.w("%s.chanRecv(t, %s);\n"+wait, e.rc("core.chan.recv"), fe.val(i.Ch))
+	case *ir.Select:
+		var cs []string
+		for _, c := range i.Cases {
+			if c.Send {
+				cs = append(cs, fmt.Sprintf("Select.scase(%s, true, %s)", fe.val(c.Ch), fe.val(c.V)))
+			} else {
+				cs = append(cs, fmt.Sprintf("Select.scase(%s, false, null)", fe.val(c.Ch)))
+			}
+		}
+		e.use("core.select")
+		fe.w("Select.select(t, %v%s);\n"+wait, i.Default, prefixComma(cs))
+	default:
+		panic(fmt.Sprintf("java: pause on %T", p.Op))
+	}
+	fe.resume(p.Op)
 }
 
 func prefixComma(xs []string) string {
@@ -1453,7 +1574,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		if fe.frame {
 			target = "fr.defers"
 		}
-		fe.w("%s.add(new Program.Deferred(%s, new Object[] {%s}, %s, %v));\n", target, fn, strings.Join(args, ", "), fid, i.Call.Suspends && fe.frame)
+		fe.w("%s.add(new Program.Deferred(%s, new Object[] {%s}, %s, %v));\n", target, fn, strings.Join(args, ", "), fid, i.Call.Suspends && (fe.frame || fe.task))
 	case *ir.Recover:
 		fe.w("%s;\n", fe.assign(i.Dst, fmt.Sprintf("Program.recover(%d)", fe.f.ID)))
 	case *ir.Rebind:

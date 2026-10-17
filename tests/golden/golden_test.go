@@ -27,6 +27,7 @@ var variants = []struct {
 	{"python", "python", ".py", "frames"},
 	{"python-native", "python", ".py", "native"},
 	{"java", "java", ".java", ""},
+	{"java-native", "java", ".java", "native"},
 	{"csharp", "csharp", ".cs", "frames"},
 	{"csharp-native", "csharp", ".cs", "native"},
 	{"rust", "rust", ".rs", ""},

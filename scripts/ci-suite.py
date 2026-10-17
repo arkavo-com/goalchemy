@@ -21,7 +21,7 @@ SPECIAL_PACKAGES = {
 FLOAT_FIXTURES = ('floats', 'co_floats', 'floats_panic32', 'floats_panic64',
                   'floats_panic_named32', 'floats_panic_named64')
 SUITES = ('core', 'language', 'contracts', 'integration', 'examples', 'memory', 'floats', 'naming', 'runtime', 'pause',
-          'pause-swift', 'pause-rust')
+          'pause-swift', 'pause-rust', 'pause-java')
 LANGUAGE_TARGET_SOURCES = ('tests/language/language_test.go', 'tests/corpus/corpus_test.go')
 TARGET_NAMES = {'go': 'Go', 'typescript': 'TypeScript', 'python': 'Python', 'java': 'Java',
                 'csharp': 'C#', 'rust': 'Rust', 'c': 'C', 'swift': 'Swift'}
@@ -193,6 +193,18 @@ def plan(suite, shard, target=None):
                      '-run', '^TestRegressions$', '-count=1'],
                     ['go', 'test', '-short', '-v', '-timeout', '40m', INTEGRATION,
                      '-run', '^(?:TestGeneratedSwift|TestSwift)', '-count=1']]
+    elif suite == 'pause-java':
+        # The Java target under the native pause model: fixtures, the
+        # frames/native agreement check, the corpus and the Java library and
+        # host integration.
+        environment['GOALCHEMY_TEST_TARGETS'] = 'java'
+        environment['GOALCHEMY_PAUSE_MODEL'] = 'native'
+        commands = [['go', 'test', '-v', '-timeout', '40m', './tests/language',
+                     '-run', '^(?:TestFixtures|TestJavaPauseModelsAgree)$', '-count=1'],
+                    ['go', 'test', '-v', '-timeout', '40m', './tests/corpus',
+                     '-run', '^TestRegressions$', '-count=1'],
+                    ['go', 'test', '-short', '-v', '-timeout', '30m', INTEGRATION,
+                     '-run', '^TestGeneratedJava', '-count=1']]
     else:
         # No -short or target filter: every canonical case runs on every harness.
         commands = [['go', 'test', '-v', '-timeout', '15m', './tests/contracts',
