@@ -141,6 +141,18 @@ collision:
   takes a suffix (`total`, `total_2`), as does a local that would hide a
   top-level name the function may use.
 - A method becomes `Type_Method` where the target needs a top-level function.
+- On Go every source package is emitted into one generated package, where an
+  initial capital exports a name, so package-level types, functions, globals
+  and constants start lowercase: the leading capitals become lowercase,
+  keeping the last of a run that starts a word (`ErrMissing` becomes
+  `errMissing`, `UTC` `utc`, `HTTPClient` `httpClient`). The generated package
+  then exports only the library's public API, and host files added to it do
+  not collide with source names. A name that is already lowercase keeps it
+  ahead of one that only becomes it (`is`, then `Is` as `is_2`), a name that
+  lowercases to a keyword or builtin takes a suffix (`Type` becomes `type_2`),
+  and `--name-collisions=fail` does not report these renames. Methods and
+  fields keep their names, so Go interfaces such as `error` and
+  `fmt.Stringer` are still satisfied.
 - Suffixes are assigned deterministically in source order, so output is stable
   across runs; adding an unrelated colliding name can rename an existing one,
   and internal names are not stable across compiler versions.

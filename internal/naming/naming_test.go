@@ -203,6 +203,67 @@ func TestSourceNamesAcrossPackages(t *testing.T) {
 	}
 }
 
+func TestLowerInitial(t *testing.T) {
+	for in, want := range map[string]string{
+		"ErrMissing": "errMissing", "UTC": "utc", "EOF": "eof", "HTTPClient": "httpClient", "X509Cert": "x509Cert",
+		"T_M": "t_M", "Type": "type", "count": "count", "x_hidden": "x_hidden", "A": "a", "": "",
+	} {
+		if got := LowerInitial(in); got != want {
+			t.Errorf("LowerInitial(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Under Lower rules package-level names start lowercase; a name already
+// lowercase keeps it ahead of one that only becomes it.
+func TestLowerSourceNames(t *testing.T) {
+	widget := &ir.Type{ID: 1, Kind: ir.KNamed, Name: "inner.Widget", Pkg: "example.com/inner", Underlying: &ir.Type{ID: 2, Kind: ir.KStruct}}
+	types := &ir.Type{ID: 3, Kind: ir.KNamed, Name: "inner.Type", Pkg: "example.com/inner", Underlying: &ir.Type{ID: 4, Kind: ir.KStruct}}
+	p := &ir.Program{
+		Types: &ir.Types{All: []*ir.Type{widget, types}},
+		Globals: []*ir.Global{
+			{ID: 0, Name: "ErrMissing", Pkg: "example.com/inner", Sym: "inner_ErrMissing", Pos: 1},
+			{ID: 1, Name: "errMissing", Pkg: "example.com/inner", Sym: "inner_errMissing", Pos: 2},
+			{ID: 2, Name: "UTC", Pkg: "example.com/inner", Sym: "inner_UTC", Pos: 3},
+			{ID: 3, Name: "EOF", Pkg: "example.com/left", Sym: "left_EOF", Pos: 4},
+			{ID: 4, Name: "EOF", Pkg: "example.com/Right", Sym: "Right_EOF", Pos: 5},
+		},
+		Funcs: []*ir.Func{
+			{ID: 0, Name: "inner.(*Widget).Run", Sym: "inner_Widget_Run", Pkg: "example.com/inner", Pos: 6, MethodID: "Run"},
+			{ID: 1, Name: "inner.Is", Sym: "inner_Is", Pkg: "example.com/inner", Pos: 7},
+			{ID: 2, Name: "inner.is", Sym: "inner_is", Pkg: "example.com/inner", Pos: 8},
+			{ID: 3, Name: "inner.New", Sym: "inner_New", Pkg: "example.com/inner", Pos: 9},
+			{ID: 4, Name: "inner.Exported", Sym: "inner_Exported", Pkg: "example.com/inner", Pos: 10},
+		},
+	}
+	rules := Rules{Reserved: []string{"type", "new", "Exported"}, TypePrefix: "type_", Lower: true}
+	names := New(p, rules)
+	for _, tc := range []struct{ got, want string }{
+		{names.Type(widget, "type_"), "widget"},
+		{names.Type(types, "type_"), "type_2"},
+		{names.Symbol("inner_ErrMissing"), "errMissing_2"},
+		{names.Symbol("inner_errMissing"), "errMissing"},
+		{names.Symbol("inner_UTC"), "utc"},
+		{names.Symbol("left_EOF"), "left_eof"},
+		{names.Symbol("Right_EOF"), "right_eof"},
+		{names.Symbol("inner_Widget_Run"), "widget_Run"},
+		{names.Symbol("inner_Is"), "is_2"},
+		{names.Symbol("inner_is"), "is"},
+		{names.Symbol("inner_New"), "new_2"},
+		{names.Symbol("inner_Exported"), "exported"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("got %q, want %q", tc.got, tc.want)
+		}
+	}
+	if cs := names.Collisions(); len(cs) != 0 {
+		t.Errorf("lowered names reported as collisions: %v", cs)
+	}
+	if got := New(p, Rules{TypePrefix: "type_"}).Symbol("inner_UTC"); got != "UTC" {
+		t.Errorf("without Lower = %q", got)
+	}
+}
+
 func TestRuntimeNames(t *testing.T) {
 	declared, called := map[string]bool{}, map[string]bool{}
 	scanRuntime("pub(super) fn chan_send(t: &Task) -> V {\n    let local = 1;\n    helper(local); // fn ignored()\n    \"fn quoted\";\n}\nconst LIMIT: usize = 3;\n", true, declared, called)

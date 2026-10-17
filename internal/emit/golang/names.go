@@ -10,7 +10,8 @@ import (
 
 // NameRules lists the names Go source identifiers avoid in generated Go:
 // keywords, predeclared identifiers, imported packages, the entry points and
-// a library's public names.
+// a library's public names. Package-level source names start lowercase, so
+// the generated package exports only the library's public API.
 func NameRules(p *ir.Program) naming.Rules {
 	reserved := []string{
 		"break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "for", "func",
@@ -25,7 +26,7 @@ func NameRules(p *ir.Program) naming.Rules {
 	if p != nil && p.Library {
 		reserved = append(reserved, publicNames(p)...)
 	}
-	return naming.Rules{Reserved: reserved, Members: []string{"FrameBase", "PC", "Defers", "Base", "Step", "Results"}, TypePrefix: "type_"}
+	return naming.Rules{Reserved: reserved, Members: []string{"FrameBase", "PC", "Defers", "Base", "Step", "Results"}, TypePrefix: "type_", Lower: true}
 }
 
 // publicNames lists the public names and parameter names of a library's

@@ -80,6 +80,9 @@ type Rules struct {
 	// TypePrefix is the category prefix of a type's own declaration. Under
 	// source names that declaration keeps the source type name.
 	TypePrefix string
+	// Lower starts every module-level source name with a lowercase letter,
+	// for targets where an initial capital exports a name.
+	Lower bool
 }
 
 // Collision describes a source name that could not be kept.
@@ -264,9 +267,18 @@ func (n *Names) assignModule() {
 			decls = append(decls, declaration{key: f, pos: f.Pos, pkg: f.Pkg, name: base, quiet: quiet})
 		}
 	}
+	spell := func(s string) string {
+		if n.rules.Lower {
+			return LowerInitial(s)
+		}
+		return s
+	}
+	sort.SliceStable(decls, func(i, j int) bool {
+		return !lowered(spell, decls[i].name) && lowered(spell, decls[j].name)
+	})
 	packages := map[string]map[string]bool{}
 	for _, d := range decls {
-		id := sourceIdent(d.name)
+		id := spell(sourceIdent(d.name))
 		if packages[id] == nil {
 			packages[id] = map[string]bool{}
 		}
@@ -278,12 +290,14 @@ func (n *Names) assignModule() {
 		if id != d.name || !plain(d.name) {
 			reason = "not a plain identifier"
 		}
+		quiet := d.quiet || lowered(spell, d.name)
+		id = spell(id)
 		if len(packages[id]) > 1 {
-			id = sourceIdent(path.Base(d.pkg)) + "_" + id
+			id = spell(sourceIdent(path.Base(d.pkg)) + "_" + id)
 			reason = "package clash"
 		}
 		name := claim(id, n.taken)
-		if (name != id || reason != "") && !d.quiet {
+		if (name != id || reason != "") && !quiet {
 			c := Collision{Pos: d.pos, Name: d.name, Emitted: name, Reason: reason}
 			if o, ok := n.used[id]; ok {
 				c.Reason, c.Other, c.OtherName = "duplicate name", o.pos, o.name
@@ -316,6 +330,25 @@ func (n *Names) assignModule() {
 			n.symbols[f.Sym] = n.gen("func\x00"+f.Sym, Prefix+Identifier(base))
 		}
 	}
+}
+
+func lowered(spell func(string) string, name string) bool {
+	id := sourceIdent(name)
+	return spell(id) != id
+}
+
+// LowerInitial lowercases the leading capitals of s, keeping the last one
+// of a run that starts a following word: ErrMissing becomes errMissing, UTC
+// utc and HTTPClient httpClient.
+func LowerInitial(s string) string {
+	i := 0
+	for i < len(s) && s[i] >= 'A' && s[i] <= 'Z' {
+		i++
+	}
+	if i > 1 && i < len(s) && s[i] >= 'a' && s[i] <= 'z' {
+		i--
+	}
+	return strings.ToLower(s[:i]) + s[i:]
 }
 
 // sourceType reports whether t is a type the source declares by name.
