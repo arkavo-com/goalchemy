@@ -16,7 +16,7 @@ func boundary(format string, args ...any) error {
 }
 
 func sourceContext(t *ir.Type) bool {
-	return t.U().Kind == ir.KOpaque && t.U().Name == "_context.Context"
+	return t.U().Kind == ir.KOpaque && t.U().Name == "context.Context"
 }
 func sourceError(t *ir.Type) bool { return t.Name == "error" }
 func cryptoKey(t *ir.Type) bool {
