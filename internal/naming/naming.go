@@ -4,12 +4,96 @@ package naming
 
 import (
 	"fmt"
+	"go/token"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/eugenioenko/goalchemy/internal/ir"
 )
+
+// Prefix starts every compiler-generated identifier. Source names never
+// start with it: a source name that does is renamed.
+const Prefix = "_"
+
+// Mode selects how private identifiers are spelled.
+type Mode string
+
+const (
+	// Source keeps source identifiers and renames only on a collision.
+	Source Mode = "source"
+	// Readable decorates every name with its category and identity.
+	Readable Mode = "readable"
+	// Compact uses short category letters and identities.
+	Compact Mode = "compact"
+)
+
+// Policies under source names: rename on a collision, or report it.
+const (
+	Rename = "rename"
+	Fail   = "fail"
+)
+
+// ParseMode accepts a mode name; the empty string is the default, Source.
+func ParseMode(s string) (Mode, error) {
+	switch Mode(s) {
+	case "", Source:
+		return Source, nil
+	case Readable, Compact:
+		return Mode(s), nil
+	}
+	return "", fmt.Errorf("unknown names mode %q (choose source, readable or compact)", s)
+}
+
+// ParsePolicy accepts a collision policy; the empty string is Rename.
+func ParsePolicy(s string) (string, error) {
+	switch s {
+	case "", Rename:
+		return Rename, nil
+	case Fail:
+		return Fail, nil
+	}
+	return "", fmt.Errorf("unknown name collision policy %q (choose rename or fail)", s)
+}
+
+func modeOf(p *ir.Program) Mode {
+	if p == nil {
+		return Source
+	}
+	m, err := ParseMode(p.Names)
+	if err != nil {
+		return Source
+	}
+	return m
+}
+
+// Rules are a target's constraints on source names.
+type Rules struct {
+	// Reserved lists names a source identifier never takes on the target:
+	// keywords, predeclared and builtin names, import aliases, fixed runtime
+	// names and public library names.
+	Reserved []string
+	// Members lists names a source local never takes because frames store
+	// locals as fields next to these runtime members.
+	Members []string
+	// TypePrefix is the category prefix of a type's own declaration. Under
+	// source names that declaration keeps the source type name.
+	TypePrefix string
+}
+
+// Collision describes a source name that could not be kept.
+type Collision struct {
+	Pos     token.Pos
+	Name    string
+	Emitted string
+	// Reason says why: "reserved word", "package clash", "shadowed local",
+	// "duplicate name" or "not a plain identifier".
+	Reason string
+	// Other is the earlier declaration holding the name, when there is one.
+	Other     token.Pos
+	OtherName string
+}
 
 // Identifier encodes a source fragment using ASCII identifier characters.
 // Callers add a category prefix and an identity suffix, so reserved words,
@@ -29,27 +113,74 @@ func Identifier(source string) string {
 	return b.String()
 }
 
-func compact(p *ir.Program) bool { return p != nil && p.CompactNames }
+// plain reports whether s can be emitted unchanged: ASCII identifier
+// characters, outside the generated namespace, not ending in an identity
+// suffix.
+func plain(s string) bool {
+	if s == "" || strings.HasPrefix(s, Prefix) || s[0] >= '0' && s[0] <= '9' {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
 
-// Names is an immutable naming index for one emission. Constructing it once
-// avoids rescanning the program at each function/global reference.
+// sourceIdent spells a source name outside the generated namespace.
+func sourceIdent(s string) string {
+	id := Identifier(s)
+	if id == "" || strings.HasPrefix(id, Prefix) || id[0] >= '0' && id[0] <= '9' {
+		id = "x" + id
+	}
+	return id
+}
+
+type owner struct {
+	pos  token.Pos
+	name string
+}
+
+// Names is an immutable naming index for one emission, except for the memo
+// of generated names, which are allocated on first use.
 type Names struct {
-	p       *ir.Program
-	symbols map[string]string
-	types   map[*ir.Type]*ir.Type
+	p          *ir.Program
+	mode       Mode
+	rules      Rules
+	reserved   map[string]bool
+	globals    map[string]bool
+	members    map[string]bool
+	symbols    map[string]string
+	types      map[*ir.Type]*ir.Type
+	typeNames  map[*ir.Type]string
+	locals     map[*ir.Local]string
+	used       map[string]owner
+	generated  map[string]string
+	collisions []Collision
 }
 
 // New indexes private symbols and canonical representatives without modifying p.
-func New(p *ir.Program) *Names {
-	n := &Names{p: p, symbols: map[string]string{}, types: map[*ir.Type]*ir.Type{}}
+func New(p *ir.Program, rules Rules) *Names {
+	n := &Names{p: p, mode: modeOf(p), rules: rules, reserved: map[string]bool{}, globals: map[string]bool{}, members: map[string]bool{},
+		symbols: map[string]string{}, types: map[*ir.Type]*ir.Type{}, typeNames: map[*ir.Type]string{},
+		locals: map[*ir.Local]string{}, used: map[string]owner{}, generated: map[string]string{}}
+	for _, r := range rules.Reserved {
+		n.reserved[r] = true
+	}
+	if p != nil {
+		for _, r := range p.ReservedNames {
+			n.reserved[r] = true
+		}
+		for _, r := range p.ReservedGlobals {
+			n.globals[r] = true
+		}
+	}
+	for _, m := range rules.Members {
+		n.members[m] = true
+	}
 	if p == nil {
 		return n
-	}
-	for _, f := range p.Funcs {
-		n.symbols[f.Sym] = function(p, f)
-	}
-	for _, g := range p.Globals {
-		n.symbols[g.Sym] = global(p, g)
 	}
 	if p.Types != nil {
 		for _, t := range p.Types.All {
@@ -62,47 +193,269 @@ func New(p *ir.Program) *Names {
 			}
 		}
 	}
+	if n.mode == Source {
+		n.assignModule()
+		for _, f := range p.Funcs {
+			n.assignLocals(f)
+		}
+		return n
+	}
+	for _, f := range p.Funcs {
+		n.symbols[f.Sym] = function(n.mode, f)
+	}
+	for _, g := range p.Globals {
+		n.symbols[g.Sym] = global(n.mode, g)
+	}
 	return n
 }
 
-func (n *Names) Type(t *ir.Type, prefix string) string {
-	representative := t
-	if t.Kind != ir.KNamed && n.types[t] != nil {
-		representative = n.types[t]
-	}
-	return typeName(n.p, t, representative, prefix)
+// Mode reports the naming mode of this emission.
+func (n *Names) Mode() Mode { return n.mode }
+
+// Collisions lists the source names that were renamed, in source order.
+func (n *Names) Collisions() []Collision {
+	out := append([]Collision(nil), n.collisions...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Pos < out[j].Pos })
+	return out
 }
 
-func (n *Names) Local(l *ir.Local, separator string) string { return Local(n.p, l, separator) }
-func (n *Names) Field(t *ir.Type, index int, prefix string) string {
-	return Field(n.p, t, index, prefix)
+func (n *Names) taken(name string) bool {
+	_, used := n.used[name]
+	return used || n.reserved[name] || n.globals[name]
 }
-func (n *Names) Symbol(oldSym string) string {
-	if s, ok := n.symbols[oldSym]; ok {
+
+func claim(want string, taken func(string) bool) string {
+	name := want
+	for i := 2; taken(name); i++ {
+		name = want + "_" + strconv.Itoa(i)
+	}
+	return name
+}
+
+type declaration struct {
+	key  any
+	pos  token.Pos
+	pkg  string
+	name string
+	// quiet declarations are renamed without a report: entry points and
+	// package initializers, which the source never names.
+	quiet bool
+}
+
+func (n *Names) assignModule() {
+	p := n.p
+	var decls []declaration
+	if p.Types != nil {
+		for _, t := range p.Types.All {
+			if sourceType(t) {
+				decls = append(decls, declaration{key: t, pkg: t.Pkg, name: typeBase(t)})
+			}
+		}
+	}
+	for _, g := range p.Globals {
+		if g.Name != "" {
+			decls = append(decls, declaration{key: g, pos: g.Pos, pkg: g.Pkg, name: g.Name})
+		}
+	}
+	for _, f := range p.Funcs {
+		if sourceFunc(f) {
+			base := funcBase(f.Name)
+			quiet := f == p.Main || base == "init" && f.MethodID == ""
+			decls = append(decls, declaration{key: f, pos: f.Pos, pkg: f.Pkg, name: base, quiet: quiet})
+		}
+	}
+	packages := map[string]map[string]bool{}
+	for _, d := range decls {
+		id := sourceIdent(d.name)
+		if packages[id] == nil {
+			packages[id] = map[string]bool{}
+		}
+		packages[id][d.pkg] = true
+	}
+	for _, d := range decls {
+		id := sourceIdent(d.name)
+		reason := ""
+		if id != d.name || !plain(d.name) {
+			reason = "not a plain identifier"
+		}
+		if len(packages[id]) > 1 {
+			id = sourceIdent(path.Base(d.pkg)) + "_" + id
+			reason = "package clash"
+		}
+		name := claim(id, n.taken)
+		if (name != id || reason != "") && !d.quiet {
+			c := Collision{Pos: d.pos, Name: d.name, Emitted: name, Reason: reason}
+			if o, ok := n.used[id]; ok {
+				c.Reason, c.Other, c.OtherName = "duplicate name", o.pos, o.name
+			} else if n.reserved[id] || n.globals[id] {
+				c.Reason = "reserved word"
+			}
+			n.collisions = append(n.collisions, c)
+		}
+		n.used[name] = owner{d.pos, d.name}
+		switch k := d.key.(type) {
+		case *ir.Type:
+			n.typeNames[k] = name
+		case *ir.Global:
+			n.symbols[k.Sym] = name
+		case *ir.Func:
+			n.symbols[k.Sym] = name
+		}
+	}
+	for _, g := range p.Globals {
+		if _, ok := n.symbols[g.Sym]; !ok {
+			n.symbols[g.Sym] = n.gen("global\x00"+g.Sym, Prefix+Identifier(flatten(g.Sym)))
+		}
+	}
+	for _, f := range p.Funcs {
+		if _, ok := n.symbols[f.Sym]; !ok {
+			base := flatten(funcBase(f.Name))
+			if base == "" {
+				base = flatten(f.Sym)
+			}
+			n.symbols[f.Sym] = n.gen("func\x00"+f.Sym, Prefix+Identifier(base))
+		}
+	}
+}
+
+// sourceType reports whether t is a type the source declares by name.
+func sourceType(t *ir.Type) bool { return t.Kind == ir.KNamed && t.Pkg != "" }
+
+// sourceFunc reports whether f is a function or method the source declares.
+func sourceFunc(f *ir.Func) bool {
+	return !f.Closure && !f.Wrapper && f.Pos.IsValid() && !strings.HasPrefix(f.Name, "$")
+}
+
+func typeBase(t *ir.Type) string {
+	head, args, generic := strings.Cut(t.Name, "[")
+	if i := strings.LastIndexByte(head, '.'); i >= 0 {
+		head = head[i+1:]
+	}
+	if generic {
+		head += "_" + flatten(args)
+	}
+	return head
+}
+
+// funcBase drops the package of a function name and joins a method's
+// receiver to its name: main.(*T).M becomes T_M.
+func funcBase(name string) string {
+	head, args, generic := strings.Cut(name, "[")
+	if i := strings.LastIndexByte(head, '/'); i >= 0 {
+		head = head[i+1:]
+	}
+	if i := strings.IndexByte(head, '.'); i >= 0 {
+		head = head[i+1:]
+	}
+	head = strings.NewReplacer("(*", "", ")", "", ".", "_").Replace(head)
+	if generic {
+		head += "_" + flatten(args)
+	}
+	return head
+}
+
+// flatten keeps letters and digits and turns every other run into one '_'.
+func flatten(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r > 0x7f {
+			b.WriteRune(r)
+		} else if b.Len() > 0 && !strings.HasSuffix(b.String(), "_") {
+			b.WriteByte('_')
+		}
+	}
+	return strings.TrimSuffix(b.String(), "_")
+}
+
+func (n *Names) assignLocals(f *ir.Func) {
+	seen := map[*ir.Local]bool{}
+	var all []*ir.Local
+	for _, group := range [][]*ir.Local{f.Params, f.Results, f.Env, f.Locals} {
+		for _, l := range group {
+			if !seen[l] {
+				seen[l] = true
+				all = append(all, l)
+			}
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+	scope := map[string]*ir.Local{}
+	taken := func(s string) bool {
+		_, top := n.used[s]
+		return scope[s] != nil || top || n.reserved[s] || n.members[s]
+	}
+	for _, l := range all {
+		if l.Name == "" || l.Name == "_" {
+			n.locals[l] = Prefix + strconv.Itoa(l.ID)
+			continue
+		}
+		id := sourceIdent(l.Name)
+		name := claim(id, taken)
+		if name != id || !plain(l.Name) {
+			c := Collision{Pos: l.Pos, Name: l.Name, Emitted: name, Reason: "not a plain identifier"}
+			if o := scope[id]; o != nil {
+				c.Reason, c.Other, c.OtherName = "shadowed local", o.Pos, o.Name
+			} else if o, ok := n.used[id]; ok {
+				c.Reason, c.Other, c.OtherName = "shadows a top-level name", o.pos, o.name
+			} else if n.reserved[id] || n.members[id] {
+				c.Reason = "reserved word"
+			}
+			n.collisions = append(n.collisions, c)
+		}
+		scope[name] = l
+		n.locals[l] = name
+	}
+}
+
+// gen allocates a generated name once per key; candidate must start with
+// Prefix or contain '$', so it never takes a source name.
+func (n *Names) gen(key, candidate string) string {
+	if s, ok := n.generated[key]; ok {
 		return s
 	}
-	return oldSym
+	s := claim(candidate, n.taken)
+	n.used[s] = owner{}
+	n.generated[key] = s
+	return s
+}
+
+// Derived names a module-level helper derived from another private name,
+// such as a frame class or an async body. kind is a short tag without
+// underscores; a kind containing '$' is used as a plain prefix.
+func (n *Names) Derived(kind, base string) string {
+	if strings.Contains(kind, "$") {
+		return n.gen(kind+"\x00"+base, kind+base)
+	}
+	return n.gen(kind+"\x00"+base, Prefix+kind+"_"+strings.TrimPrefix(base, Prefix))
 }
 
 // Type names a target representation of t. Pass the target's category prefix,
 // such as T_, S$, or S. For shared underlying representations, the smallest
 // source-qualified named type is the deterministic readable representative.
-func Type(p *ir.Program, t *ir.Type, prefix string) string {
-	n := t
-	if t.Kind != ir.KNamed && p != nil && p.Types != nil {
-		for _, candidate := range p.Types.All {
-			if candidate.Kind == ir.KNamed && candidate.U() == t &&
-				(n == t || candidate.Name+"\x00"+candidate.Pkg < n.Name+"\x00"+n.Pkg) {
-				n = candidate
-			}
-		}
+func (n *Names) Type(t *ir.Type, prefix string) string {
+	representative := t
+	if t.Kind != ir.KNamed && n.types[t] != nil {
+		representative = n.types[t]
 	}
-	return typeName(p, t, n, prefix)
+	if n.mode != Source {
+		return typeName(n.mode, t, representative, prefix)
+	}
+	if base, ok := n.typeNames[representative]; ok {
+		if prefix == n.rules.TypePrefix {
+			return base
+		}
+		return n.Derived(strings.TrimSuffix(prefix, "_"), base)
+	}
+	name := prefix + Identifier(typeDescription(representative, 0)) + "_" + strconv.Itoa(t.ID)
+	if !strings.Contains(prefix, "$") {
+		name = Prefix + name
+	}
+	return n.gen("type\x00"+prefix+"\x00"+strconv.Itoa(t.ID), name)
 }
 
-func typeName(p *ir.Program, t, representative *ir.Type, prefix string) string {
+func typeName(mode Mode, t, representative *ir.Type, prefix string) string {
 	id := strconv.Itoa(t.ID)
-	if compact(p) {
+	if mode == Compact {
 		return prefix + id
 	}
 	return prefix + Identifier(typeDescription(representative, 0)) + "_" + id
@@ -131,10 +484,16 @@ func typeDescription(t *ir.Type, depth int) string {
 }
 
 // Local names a function-scoped cell. separator must be legal in the target
-// language, normally "_" or "$". IDs distinguish shadowed source locals.
-func Local(p *ir.Program, l *ir.Local, separator string) string {
+// language, normally "_" or "$"; readable names use it before the identity.
+func (n *Names) Local(l *ir.Local, separator string) string {
+	if n.mode == Source {
+		if s, ok := n.locals[l]; ok {
+			return s
+		}
+		return Prefix + strconv.Itoa(l.ID)
+	}
 	id := strconv.Itoa(l.ID)
-	if compact(p) {
+	if n.mode == Compact {
 		return "v" + id
 	}
 	name := l.Name
@@ -158,28 +517,16 @@ func Local(p *ir.Program, l *ir.Local, separator string) string {
 // Symbol maps a lowered function or global symbol to its private target name.
 // Capability/runtime symbols and other unknown symbols pass through unchanged.
 // Public wrappers must keep their established API names independently of this.
-func Symbol(p *ir.Program, oldSym string) string {
-	if p == nil {
-		return oldSym
-	}
-	for _, f := range p.Funcs {
-		if f.Sym != oldSym {
-			continue
-		}
-		return function(p, f)
-	}
-	for _, g := range p.Globals {
-		if g.Sym != oldSym {
-			continue
-		}
-		return global(p, g)
+func (n *Names) Symbol(oldSym string) string {
+	if s, ok := n.symbols[oldSym]; ok {
+		return s
 	}
 	return oldSym
 }
 
-func function(p *ir.Program, f *ir.Func) string {
+func function(mode Mode, f *ir.Func) string {
 	id := strconv.Itoa(f.ID)
-	if compact(p) {
+	if mode == Compact {
 		return "f" + id
 	}
 	name := f.Name
@@ -195,9 +542,9 @@ func function(p *ir.Program, f *ir.Func) string {
 	return "fn_" + Identifier(name) + "_" + id
 }
 
-func global(p *ir.Program, g *ir.Global) string {
+func global(mode Mode, g *ir.Global) string {
 	id := strconv.Itoa(g.ID)
-	if compact(p) {
+	if mode == Compact {
 		return "g" + id
 	}
 	name := g.Sym
@@ -212,10 +559,27 @@ func global(p *ir.Program, g *ir.Global) string {
 
 // Field names private aggregate storage. Public fields and Go embedded fields
 // retain their API/embedding rules and should not use this helper directly.
-func Field(p *ir.Program, t *ir.Type, index int, prefix string) string {
+// Under source names a field keeps its name unless it is blank, starts with
+// the generated prefix, or is not plain; those add the field index.
+func (n *Names) Field(t *ir.Type, index int, prefix string) string {
 	id := strconv.Itoa(index)
-	if compact(p) {
+	if n.mode == Compact {
 		return prefix + id
 	}
-	return prefix + Identifier(t.U().Fields[index].Name) + "_" + id
+	name := t.U().Fields[index].Name
+	if n.mode == Source && plain(name) && !identitySuffix(name) {
+		return prefix + name
+	}
+	return prefix + Identifier(name) + "_" + id
+}
+
+// identitySuffix reports whether s ends in "_<digits>", the shape of an
+// index suffix.
+func identitySuffix(s string) bool {
+	i := strings.LastIndexByte(s, '_')
+	if i < 0 || i == len(s)-1 {
+		return false
+	}
+	_, err := strconv.Atoi(s[i+1:])
+	return err == nil
 }

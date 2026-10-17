@@ -42,7 +42,7 @@ func TestPackageOutput(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			p := *res.IR
-			p.CompactNames = compact
+			p.Names = testutil.Names(compact)
 			output, err := swift.Emit(&p, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -81,7 +81,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, f := range p.Funcs {
 				count := 0
-				declaration := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(naming.Symbol(&p, f.Sym)) + `\(_ args: \[GValue\], _ env: \[GCell\]\) -> GFrame \{`)
+				declaration := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(naming.New(&p, swift.NameRules(&p)).Symbol(f.Sym)) + `\(_ args: \[GValue\], _ env: \[GCell\]\) -> GFrame \{`)
 				for _, file := range output.Files {
 					if declaration.Match(file.Source) {
 						count++
@@ -96,7 +96,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, global := range p.Globals {
 				count := 0
-				declaration := fmt.Sprintf("let %s = GGlobalCell(GTypes.zero(%d))", naming.Symbol(&p, global.Sym), global.Type.ID)
+				declaration := fmt.Sprintf("let %s = GGlobalCell(GTypes.zero(%d))", naming.New(&p, swift.NameRules(&p)).Symbol(global.Sym), global.Type.ID)
 				for _, file := range output.Files {
 					for _, line := range strings.Split(string(file.Source), "\n") {
 						if strings.TrimSpace(line) == declaration {
@@ -115,7 +115,7 @@ func TestPackageOutput(t *testing.T) {
 				t.Fatal("duplicated canonical type registration")
 			}
 			out := t.TempDir()
-			if ds := driver.EmitWithOptions("swift", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("swift", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			data, err := os.ReadFile(filepath.Join(out, "goalchemy.manifest.json"))
@@ -194,7 +194,7 @@ func checkDeclarationMap(t *testing.T, p *ir.Program, source []byte, owner, out,
 	}
 	for _, global := range p.Globals {
 		if global.Pkg == owner {
-			declaration := fmt.Sprintf("let %s = GGlobalCell(GTypes.zero(%d))", naming.Symbol(p, global.Sym), global.Type.ID)
+			declaration := fmt.Sprintf("let %s = GGlobalCell(GTypes.zero(%d))", naming.New(p, swift.NameRules(p)).Symbol(global.Sym), global.Type.ID)
 			for index, line := range strings.Split(string(source), "\n") {
 				if strings.TrimSpace(line) == declaration {
 					expected := p.Fset.Position(global.Pos)

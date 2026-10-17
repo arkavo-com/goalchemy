@@ -12,6 +12,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
 	"github.com/eugenioenko/goalchemy/internal/driver"
 	"github.com/eugenioenko/goalchemy/internal/subset"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestGeneratedGoPackageLibrary(t *testing.T) {
@@ -26,7 +27,7 @@ func TestGeneratedGoPackageLibrary(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			out, consumer := t.TempDir(), t.TempDir()
-			if ds := driver.EmitWithOptions("go", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("go", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			mod := fmt.Sprintf("module independent\n\ngo 1.25\nrequire goalchemyout v0.0.0\nreplace goalchemyout => %s\n", out)

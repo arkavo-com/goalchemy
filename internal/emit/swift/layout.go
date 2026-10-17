@@ -19,7 +19,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), contracts: map[string]bool{}, symbols: symbols}
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), contracts: map[string]bool{}, symbols: symbols}
 	bodies := map[string]*bytes.Buffer{"": {}}
 	for _, pkg := range layout.Packages {
 		bodies[pkg.Path] = &bytes.Buffer{}

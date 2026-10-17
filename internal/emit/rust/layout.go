@@ -18,7 +18,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), symbols: symbols, contracts: map[string]bool{}, tds: map[*ir.Type]bool{},
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), symbols: symbols, contracts: map[string]bool{}, tds: map[*ir.Type]bool{},
 		seenHelp: map[*ir.Type]bool{}, zeros: map[*ir.Type]bool{}, externs: map[string]*ir.Extern{}, layout: layout,
 		locations: map[string]string{}, helpers: map[string]*bytes.Buffer{"shared": {}}}
 	bodies := map[string]*bytes.Buffer{"": {}}

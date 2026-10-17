@@ -10,6 +10,7 @@ import (
 
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
 	"github.com/eugenioenko/goalchemy/internal/driver"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 // Value-receiver methods of a handle type receive a copy of the handle's
@@ -31,7 +32,7 @@ func TestLibraryHandleValueReceivers(t *testing.T) {
  `)
 	for _, compact := range []bool{false, true} {
 		dir := t.TempDir()
-		if ds := driver.EmitWithOptions("go", res, dir, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+		if ds := driver.EmitWithOptions("go", res, dir, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 			t.Fatal(ds)
 		}
 		cmdDir := filepath.Join(dir, "cmd", "check")

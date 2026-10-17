@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"sort"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/link"
+	"github.com/eugenioenko/goalchemy/internal/naming"
 )
 
 // Emitter writes a complete target build directory.
@@ -29,8 +31,11 @@ func Targets() []string {
 
 // EmitOptions controls the presentation of generated private identifiers.
 type EmitOptions struct {
-	CompactNames bool
-	PauseModel   string
+	// Names is source (the default), readable or compact.
+	Names string
+	// NameCollisions is rename (the default) or fail.
+	NameCollisions string
+	PauseModel     string
 	// NoLineDirectives omits line directives, source maps and line tables.
 	NoLineDirectives bool
 }
@@ -41,7 +46,7 @@ var PauseModels = []string{"frames", "native"}
 // nativePause lists the targets that implement the native pause model.
 var nativePause = map[string]bool{"go": true, "typescript": true, "csharp": true, "swift": true, "python": true, "rust": true, "java": true, "ir": true}
 
-// Emit writes a target with readable private identifiers.
+// Emit writes a target with the default emission options.
 func Emit(name string, res *Result, out string) []diagnostics.Diagnostic {
 	return EmitWithOptions(name, res, out, EmitOptions{})
 }
@@ -56,10 +61,18 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 				Remedy:  "This is a compiler defect; please report it with the source program."}}
 		}
 	}()
+	mode, err := naming.ParseMode(opts.Names)
+	if err != nil {
+		return namesErr(err)
+	}
+	policy, err := naming.ParsePolicy(opts.NameCollisions)
+	if err != nil {
+		return namesErr(err)
+	}
 	if res != nil && res.IR != nil {
 		result := *res
 		program := *res.IR
-		program.CompactNames = opts.CompactNames
+		program.Names, program.NameCollisions = string(mode), policy
 		result.IR = &program
 		res = &result
 	}
@@ -87,6 +100,18 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 	if res != nil && res.IR != nil {
 		res.IR.PauseModel = opts.PauseModel
 		res.IR.NoLineDirectives = opts.NoLineDirectives
+		if mode == naming.Source && res.Catalog != nil && unqualifiedRuntime[name] {
+			declared, called, err := runtimeNames(res.Catalog.FS, name)
+			if err != nil {
+				return emitErr("GCE005", "runtime names: "+err.Error())
+			}
+			res.IR.ReservedNames, res.IR.ReservedGlobals = declared, called
+		}
+		if rules, ok := nameRules[name]; ok && mode == naming.Source && policy == naming.Fail {
+			if ds := collisions(res.IR, naming.New(res.IR, rules(res.IR)).Collisions()); len(ds) > 0 {
+				return ds
+			}
+		}
 	}
 	if res.IR != nil && res.IR.Library && name != "c" && name != "go" && name != "typescript" && name != "java" && name != "csharp" && name != "python" && name != "rust" && name != "swift" && name != "ir" {
 		return []diagnostics.Diagnostic{{Code: "GCE006", Severity: diagnostics.Error, Feature: "library build",
@@ -137,6 +162,51 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 	}
 	if err := cleanObsoleteFiles(out, previous); err != nil {
 		return emitErr("GCE005", "output cleanup: "+err.Error())
+	}
+	return ds
+}
+
+// unqualifiedRuntime lists targets whose generated code names runtime
+// declarations without a qualifier, so source names must avoid them.
+var unqualifiedRuntime = map[string]bool{"java": true, "csharp": true, "rust": true, "c": true, "swift": true}
+
+func runtimeNames(fsys fs.FS, target string) (declared, called []string, err error) {
+	var roots []string
+	for _, dir := range []string{"runtime", "types", "native"} {
+		root := "targets/" + target + "/" + dir
+		if _, err := fs.Stat(fsys, root); err == nil {
+			roots = append(roots, root)
+		}
+	}
+	return naming.RuntimeNames(fsys, roots...)
+}
+
+func namesErr(err error) []diagnostics.Diagnostic {
+	return []diagnostics.Diagnostic{{Code: "GCE009", Severity: diagnostics.Error, Feature: "names",
+		Message: err.Error(), Remedy: "Use -names=source, readable or compact and -name-collisions=rename or fail."}}
+}
+
+// collisions reports source names that source naming would have renamed.
+func collisions(p *ir.Program, cs []naming.Collision) []diagnostics.Diagnostic {
+	var ds []diagnostics.Diagnostic
+	for _, c := range cs {
+		d := diagnostics.Diagnostic{Code: "GCE009", Severity: diagnostics.Error, Feature: "names", Symbol: c.Name,
+			Remedy: "Rename the declaration, or use -name-collisions=rename to let the compiler rename it."}
+		where := ""
+		if p.Fset != nil && c.Pos.IsValid() {
+			pos := p.Fset.Position(c.Pos)
+			d.File, d.Line, d.Column = pos.Filename, pos.Line, pos.Column
+		}
+		if p.Fset != nil && c.Other.IsValid() {
+			where = " declared at " + p.Fset.Position(c.Other).String()
+		}
+		switch {
+		case c.OtherName != "":
+			d.Message = fmt.Sprintf("%s collides with %s%s (%s); it would be emitted as %s", c.Name, c.OtherName, where, c.Reason, c.Emitted)
+		default:
+			d.Message = fmt.Sprintf("%s cannot keep its name (%s); it would be emitted as %s", c.Name, c.Reason, c.Emitted)
+		}
+		ds = append(ds, d)
 	}
 	return ds
 }

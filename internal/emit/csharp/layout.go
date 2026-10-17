@@ -18,7 +18,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), symbols: symbols, contracts: map[string]bool{}, classes: map[*ir.Type]string{},
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), symbols: symbols, contracts: map[string]bool{}, classes: map[*ir.Type]string{},
 		tds: map[*ir.Type]string{}, seenHelp: map[*ir.Type]bool{}, layout: layout, helpers: map[string]*bytes.Buffer{"": {}}}
 	bodies := map[string]*bytes.Buffer{"": {}}
 	for _, pkg := range layout.Packages {

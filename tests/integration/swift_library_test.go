@@ -82,7 +82,7 @@ func PanicOutstanding(ctx context.Context)error{
 }
 func Panic()error{panic("deliberate")}
 `)
-	if ds := testutil.CompileGateOptions(source, "swift", out, "cooperative", driver.EmitOptions{CompactNames: compact}); len(ds) > 0 {
+	if ds := testutil.CompileGateOptions(source, "swift", out, "cooperative", driver.EmitOptions{Names: testutil.Names(compact)}); len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	write(consumer, "Package.swift", fmt.Sprintf(`// swift-tools-version: 6.0

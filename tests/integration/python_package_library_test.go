@@ -13,6 +13,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
 	"github.com/eugenioenko/goalchemy/internal/driver"
 	"github.com/eugenioenko/goalchemy/internal/subset"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestGeneratedPythonPackageLibrary(t *testing.T) {
@@ -62,7 +63,7 @@ func Hold(ctx context.Context)([]byte,error){return callback.Request(ctx,"hold",
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			parent, consumer := t.TempDir(), t.TempDir()
 			out := filepath.Join(parent, "probe")
-			if ds := driver.EmitWithOptions("python", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("python", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			if err := os.WriteFile(filepath.Join(consumer, "consumer.py"), []byte(pythonPackageLibraryConsumer), 0600); err != nil {

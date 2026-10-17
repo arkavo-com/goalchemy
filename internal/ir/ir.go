@@ -7,9 +7,18 @@ import (
 
 // Program is a whole lowered Goalchemy program.
 type Program struct {
-	// CompactNames requests short private identifiers during target emission.
-	// Source identities and public export names are independent of this option.
-	CompactNames bool
+	// Names selects private identifiers during target emission: "source"
+	// (the default when empty), "readable" or "compact". Source identities
+	// and public export names are independent of this option.
+	Names string
+	// NameCollisions is "rename" (the default) or "fail": under source names,
+	// fail reports each renamed source identifier instead of emitting.
+	NameCollisions string
+	// ReservedNames lists identifiers the target runtime declares or uses
+	// unqualified; source names avoid them. ReservedGlobals lists names only
+	// top-level source names avoid, such as host functions the runtime calls.
+	ReservedNames   []string
+	ReservedGlobals []string
 	// PauseModel selects how suspending functions are emitted: "frames"
 	// (resumable frames, the default) or "native" (target-native pausing).
 	PauseModel string

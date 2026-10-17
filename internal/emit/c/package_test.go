@@ -45,7 +45,7 @@ func TestPackageOutput(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			p := *res.IR
-			p.CompactNames = compact
+			p.Names = testutil.Names(compact)
 			output, err := c.Emit(&p, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -90,7 +90,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, f := range p.Funcs {
 				count := 0
-				declaration := regexp.MustCompile(`(?m)^gx_V f_` + regexp.QuoteMeta(naming.Symbol(&p, f.Sym)) + `\([^;\n]*\) \{`)
+				declaration := regexp.MustCompile(`(?m)^gx_V f_` + regexp.QuoteMeta(naming.New(&p, c.NameRules(&p)).Symbol(f.Sym)) + `\([^;\n]*\) \{`)
 				for _, file := range output.Files {
 					if declaration.Match(file.Source) {
 						count++
@@ -105,7 +105,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, global := range p.Globals {
 				count := 0
-				declaration := "gx_V " + naming.Symbol(&p, global.Sym) + ";"
+				declaration := "gx_V " + naming.New(&p, c.NameRules(&p)).Symbol(global.Sym) + ";"
 				for _, file := range output.Files {
 					for _, line := range strings.Split(string(file.Source), "\n") {
 						if strings.TrimSpace(line) == declaration {
@@ -122,7 +122,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, typ := range p.Types.All {
 				if typ.Boxed && typ.Kind != ir.KString {
-					if count := strings.Count(combined, "const gx_TypeDesc "+naming.Type(&p, typ, "td_")+" = "); count != 1 {
+					if count := strings.Count(combined, "const gx_TypeDesc "+naming.New(&p, c.NameRules(&p)).Type(typ, "td_")+" = "); count != 1 {
 						t.Fatalf("descriptor %d bindings %d", typ.ID, count)
 					}
 				}
@@ -135,7 +135,7 @@ func TestPackageOutput(t *testing.T) {
 				if typ.U().Kind != ir.KStruct && typ.U().Kind != ir.KArray {
 					continue
 				}
-				declaration := "gx_V " + naming.Type(&p, typ.U(), "z_") + "(void) {"
+				declaration := "gx_V " + naming.New(&p, c.NameRules(&p)).Type(typ.U(), "z_") + "(void) {"
 				count := 0
 				for _, file := range output.Files {
 					if strings.Contains(string(file.Source), declaration) {
@@ -150,7 +150,7 @@ func TestPackageOutput(t *testing.T) {
 				}
 			}
 			out := t.TempDir()
-			if ds := driver.EmitWithOptions("c", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("c", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			data, err := os.ReadFile(filepath.Join(out, "goalchemy.manifest.json"))
@@ -209,13 +209,13 @@ func TestPackageOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, f := range p.Funcs {
-					if f.Pkg == file.Owner && !strings.Contains(string(data), " T f_"+naming.Symbol(&p, f.Sym)+"\n") {
+					if f.Pkg == file.Owner && !strings.Contains(string(data), " T f_"+naming.New(&p, c.NameRules(&p)).Symbol(f.Sym)+"\n") {
 						t.Fatalf("%s lacks its native function %s", file.Path, f.Name)
 					}
 				}
 				if strings.HasSuffix(file.Owner, "/worker") {
 					for _, global := range p.Globals {
-						if strings.HasSuffix(global.Pkg, "/first/value") && global.Name == "Counter" && !strings.Contains(string(data), " U "+naming.Symbol(&p, global.Sym)+"\n") {
+						if strings.HasSuffix(global.Pkg, "/first/value") && global.Name == "Counter" && !strings.Contains(string(data), " U "+naming.New(&p, c.NameRules(&p)).Symbol(global.Sym)+"\n") {
 							t.Fatal("foreign mutable storage was duplicated instead of linked")
 						}
 					}
@@ -262,7 +262,7 @@ func checkDeclarationMap(t *testing.T, p *ir.Program, source []byte, owner, out,
 	}
 	for _, global := range p.Globals {
 		if global.Pkg == owner {
-			declaration := "gx_V " + naming.Symbol(p, global.Sym) + ";"
+			declaration := "gx_V " + naming.New(p, c.NameRules(p)).Symbol(global.Sym) + ";"
 			for index, line := range strings.Split(string(source), "\n") {
 				if strings.TrimSpace(line) == declaration {
 					expected := p.Fset.Position(global.Pos)

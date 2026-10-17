@@ -7,7 +7,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
-// Both modes must preserve package/type identity, shadowing, anonymous value
+// Every mode must preserve package/type identity, shadowing, anonymous value
 // semantics, closures, and cooperative frame behavior against the Go oracle.
 func TestNamingModes(t *testing.T) {
 	selected := targets
@@ -24,13 +24,9 @@ func TestNamingModes(t *testing.T) {
 			continue
 		}
 		delete(wanted, fixture.Name)
-		for _, compact := range []bool{false, true} {
-			mode := "readable"
-			if compact {
-				mode = "compact"
-			}
+		for _, mode := range []string{"source", "readable", "compact"} {
 			t.Run(fixture.Name+"/"+mode, func(t *testing.T) {
-				testutil.RunFixtureOptions(t, fixture, selected, driver.EmitOptions{CompactNames: compact})
+				testutil.RunFixtureOptions(t, fixture, selected, driver.EmitOptions{Names: mode})
 			})
 		}
 	}

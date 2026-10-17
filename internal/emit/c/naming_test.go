@@ -60,7 +60,7 @@ func TestNamingModes(t *testing.T) {
     `)
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
-			res.IR.CompactNames = compact
+			res.IR.Names = testutil.Names(compact)
 			boxed := make([]bool, len(res.IR.Types.All))
 			symbols := make([]string, len(res.IR.Funcs))
 			for i, typ := range res.IR.Types.All {
@@ -92,12 +92,12 @@ func TestNamingModes(t *testing.T) {
 			}
 			source := generatedSource(out)
 			for _, f := range res.IR.Funcs {
-				if !strings.Contains(source, naming.Symbol(res.IR, f.Sym)+"(") {
+				if !strings.Contains(source, naming.New(res.IR, c.NameRules(res.IR)).Symbol(f.Sym)+"(") {
 					t.Errorf("missing emitted function %s", f.Name)
 				}
 			}
 			for _, g := range res.IR.Globals {
-				if !strings.Contains(source, naming.Symbol(res.IR, g.Sym)) {
+				if !strings.Contains(source, naming.New(res.IR, c.NameRules(res.IR)).Symbol(g.Sym)) {
 					t.Errorf("missing global %s", g.Name)
 				}
 			}
@@ -115,7 +115,7 @@ func TestNamingModes(t *testing.T) {
 				}
 			}
 			dir := t.TempDir()
-			if ds := driver.EmitWithOptions("c", res, dir, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("c", res, dir, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatalf("emit: %v", ds)
 			}
 			got, err := testutil.Runners["c"](dir)
@@ -137,7 +137,7 @@ func TestLibraryPublicNamesStableAcrossNamingModes(t *testing.T) {
     `)
 	var facade []string
 	for _, compact := range []bool{false, true} {
-		res.IR.CompactNames = compact
+		res.IR.Names = testutil.Names(compact)
 		out, err := c.Emit(res.IR, nil)
 		if err != nil {
 			t.Fatal(err)

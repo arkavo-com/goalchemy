@@ -48,7 +48,7 @@ func TestGeneratedFloatLibraries(t *testing.T) {
 				}
 				write(source, "go.mod", fmt.Sprintf("module floatlibraryprobe\n\ngo 1.25\nrequire github.com/eugenioenko/goalchemy v0.0.0\nreplace github.com/eugenioenko/goalchemy => %q\n", root))
 				copyFixture("library.go.in", source, "library.go")
-				if ds := testutil.CompileGateOptions(source, target, out, "cooperative", driver.EmitOptions{CompactNames: compact}); len(ds) > 0 {
+				if ds := testutil.CompileGateOptions(source, target, out, "cooperative", driver.EmitOptions{Names: testutil.Names(compact)}); len(ds) > 0 {
 					t.Fatal(ds)
 				}
 				env := driver.ToolEnv()
