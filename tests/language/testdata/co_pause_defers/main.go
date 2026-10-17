@@ -83,7 +83,7 @@ func main() {
 	println("pausing defers", pausingDefers(ch))
 	drain()
 	println("rethrow", catchRethrow(ch))
-	println("depth", depth(ch, 5000))
+	println("depth", depth(ch, 500))
 	in, out := make(chan int), make(chan int, 10)
 	done := make(chan error)
 	go func() { done <- guarded(3, in, out) }()
