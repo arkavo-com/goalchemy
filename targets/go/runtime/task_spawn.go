@@ -97,6 +97,16 @@ type scheduler struct {
 	live int
 	// natives lists the native-pause tasks whose goroutines have started.
 	natives []*nativeTask
+	handoff handoff
+}
+
+// handoff passes the turn up the chain of native tasks resuming each other,
+// to the task to or, when to is nil, to the driver.
+type handoff struct {
+	pending bool
+	to      *Task
+	idle    bool
+	fault   any
 }
 
 // HostFault is an adapter implementation failure, never a source panic or
@@ -228,7 +238,9 @@ func (s *scheduler) shutdown() {
 	}
 	s.closed = true
 	for _, n := range s.natives {
-		n.kill()
+		if !n.active {
+			n.kill()
+		}
 	}
 	s.natives = nil
 	for _, op := range s.operations {
@@ -301,46 +313,76 @@ type fatalPanicSignal struct{ p *Panic }
 
 func (s *scheduler) next() *Task {
 	for {
-		if s.boundary != nil {
-			s.boundary()
+		if t := s.poll(); t != nil {
+			return t
 		}
-		if s.host {
-			s.fireDue(s.now())
-		}
-		s.drainHost()
-		if len(s.runq) != 0 {
-			break
-		}
-		if !s.host && len(s.timers) != 0 {
-			s.fireTimers()
-			continue
-		}
-		if len(s.operations) == 0 && len(s.timers) == 0 {
-			if s.harness {
-				panic(deadlockSignal{})
-			}
-			s.shutdown()
-			fatal("all goroutines are asleep - deadlock!")
-		}
-		m := s.mailbox()
-		if len(s.timers) == 0 {
-			<-m.wake
-			continue
-		}
-		at := s.timers[0].at
-		for _, t := range s.timers {
-			at = min(at, t.at)
-		}
-		alarm := time.NewTimer(time.Duration(max(0, at-s.now())))
-		select {
-		case <-m.wake:
-		case <-alarm.C:
-		}
-		alarm.Stop()
+		s.idle()
+	}
+}
+
+// poll dequeues the next runnable task, or returns nil when none is ready.
+func (s *scheduler) poll() *Task {
+	if s.boundary != nil {
+		s.boundary()
+	}
+	if s.host {
+		s.fireDue(s.now())
+	}
+	s.drainHost()
+	if len(s.runq) == 0 {
+		return nil
 	}
 	t := s.runq[0]
 	s.runq = s.runq[1:]
 	return t
+}
+
+// idle advances virtual time, waits for timers or host completions, or
+// reports a deadlock.
+func (s *scheduler) idle() {
+	if !s.host && len(s.timers) != 0 {
+		s.fireTimers()
+		return
+	}
+	if len(s.operations) == 0 && len(s.timers) == 0 {
+		if s.harness {
+			panic(deadlockSignal{})
+		}
+		s.shutdown()
+		fatal("all goroutines are asleep - deadlock!")
+	}
+	m := s.mailbox()
+	if len(s.timers) == 0 {
+		<-m.wake
+		return
+	}
+	at := s.timers[0].at
+	for _, t := range s.timers {
+		at = min(at, t.at)
+	}
+	alarm := time.NewTimer(time.Duration(max(0, at-s.now())))
+	select {
+	case <-m.wake:
+	case <-alarm.C:
+	}
+	alarm.Stop()
+}
+
+// drive runs the main task to completion. A native task that passes the
+// turn back to the driver leaves its reason in s.handoff.
+func (s *scheduler) drive() {
+	for !s.main.done {
+		s.run(s.next())
+		if h := s.handoff; h.pending {
+			s.handoff = handoff{}
+			if h.fault != nil {
+				panic(h.fault)
+			}
+			if h.idle {
+				s.idle()
+			}
+		}
+	}
 }
 
 func (s *scheduler) fireTimers() {
@@ -404,12 +446,7 @@ func fatal(msg string) {
 
 // run drives a task's frames until it blocks or finishes.
 func (s *scheduler) run(t *Task) {
-	s.cur = t
-	t.blocked = false
-	if c := t.cleanup; c != nil {
-		t.cleanup = nil
-		c()
-	}
+	s.enter(t)
 	for !t.blocked && t.Frame != nil {
 		if s.boundary != nil {
 			s.boundary()
@@ -422,6 +459,15 @@ func (s *scheduler) run(t *Task) {
 			}
 		}
 		s.step(t)
+	}
+}
+
+func (s *scheduler) enter(t *Task) {
+	s.cur = t
+	t.blocked = false
+	if c := t.cleanup; c != nil {
+		t.cleanup = nil
+		c()
 	}
 }
 
@@ -671,9 +717,7 @@ func runMain(entry Frame, host bool) {
 	main := &Task{Frame: entry, deferTarget: -1}
 	s.main = main
 	s.ready(main)
-	for !main.done {
-		s.run(s.next())
-	}
+	s.drive()
 }
 
 func yieldTask(t *Task) {
@@ -726,9 +770,7 @@ func Await(fn func(t *Task)) (rv []any, blocked bool) {
 			}
 		}
 	}()
-	for !main.done {
-		s.run(s.next())
-	}
+	s.drive()
 	return h.res, false
 }
 
@@ -741,10 +783,13 @@ func ResetScheduler() {
 }
 
 // Under the native pause model a task is a coroutine (iter.Pull) running
-// ordinary Go functions, and its only frame is a nativeTask. The driver
-// resumes it in Step and regains control when it parks at a pause point or
-// finishes, so exactly one task runs and the frame scheduler keeps choosing
-// who runs next. Panics leaving the task body propagate to Step.
+// ordinary Go functions, and its only frame is a nativeTask. A task that
+// blocks keeps the turn and runs the scheduler itself: it dequeues the next
+// task exactly as the driver would and resumes it directly, so coroutines
+// resume each other in a chain rooted at the driver. When the next task is
+// already in that chain, or only the driver can continue (idle, main done,
+// a fault), the turn is passed up the chain through s.handoff. Panics
+// leaving the task body propagate to Step.
 type nativeTask struct {
 	FrameBase
 	body   func(t *Task) []any
@@ -753,6 +798,8 @@ type nativeTask struct {
 	stop   func()
 	yield  func(struct{}) bool
 	killed bool
+	// active is set while the coroutine runs or is resuming another task.
+	active bool
 }
 
 // killSignal unwinds a parked task at scheduler shutdown.
@@ -773,7 +820,10 @@ func (n *nativeTask) Step(t *Task) {
 		})
 		sched.natives = append(sched.natives, n)
 	}
-	if _, parked := n.next(); parked {
+	n.active = true
+	_, parked := n.next()
+	n.active = false
+	if parked {
 		return
 	}
 	Ret(t, n)
@@ -796,20 +846,64 @@ func (n *nativeTask) kill() {
 	n.stop()
 }
 
-// Wait completes a pause primitive started by t: when the primitive blocked
-// t, the turn returns to the scheduler until t is resumed.
+// Wait completes a pause primitive started by t: while the primitive keeps
+// t blocked, t passes the turn until it is resumed.
 func Wait(t *Task) {
 	if !t.blocked {
 		return
 	}
-	n := t.Frame.(*nativeTask)
-	if !n.yield(struct{}{}) {
-		panic(killSignal{})
+	if sched.pass(t) {
+		if !t.Frame.(*nativeTask).yield(struct{}{}) {
+			panic(killSignal{})
+		}
 	}
 	if p := t.resumePanic; p != nil {
 		t.resumePanic = nil
 		panic(p)
 	}
+}
+
+// pass runs the driver's loop on blocked native task t until t is chosen
+// again, and reports false, or until the turn belongs further up the chain,
+// and reports true. Scheduler panics never unwind t: the driver raises them.
+func (s *scheduler) pass(t *Task) (up bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.handoff = handoff{pending: true, fault: r}
+			up = true
+		}
+	}()
+	for {
+		if h := &s.handoff; h.pending {
+			if h.to != t {
+				return true
+			}
+			*h = handoff{}
+			break
+		}
+		if s.main.done {
+			s.handoff = handoff{pending: true}
+			return true
+		}
+		u := s.poll()
+		if u == nil {
+			s.handoff = handoff{pending: true, idle: true}
+			return true
+		}
+		if u == t {
+			break
+		}
+		if n, ok := u.Frame.(*nativeTask); ok && n.active {
+			s.handoff = handoff{pending: true, to: u}
+			return true
+		}
+		s.run(u)
+	}
+	s.enter(t)
+	if s.boundary != nil {
+		s.boundary()
+	}
+	return false
 }
 
 // Defer runs a deferred call of a native-pause function, keeping the panic

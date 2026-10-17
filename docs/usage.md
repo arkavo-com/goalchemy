@@ -62,8 +62,9 @@ goalchemy build --compact-names=false
 (`build` overrides `pause_model`). `frames` emits suspending functions as
 resumable frames. `native`, implemented only by the Go target, emits them as
 ordinary Go functions that take the current task and block at pause points;
-a turn-passing scheduler keeps exactly one task goroutine running and grants
-the turn in the same FIFO order as frames, so output is identical. See
+a turn-passing scheduler keeps exactly one task goroutine running, and a
+task that blocks hands the turn directly to the next task in the same FIFO
+order as frames, so output is identical. See
 issue #92.
 
 `compile`, `run`, and `build` accept `--line-directives` (default on; `build`
