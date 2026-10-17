@@ -5,119 +5,119 @@ package main
 
 import "goalchemyout/rt"
 
-type type_main_Task_2 struct {
+type Task struct {
 	ID    int
 	Title string
 	Done  bool
 }
 
-func fn_main_produce_0(t *rt.Task, v_out_0 rt.Chan[type_main_Task_2], v_n_1 int) {
-	var v_i_2 int
-	_ = v_i_2
-	var v_temp_4 type_main_Task_2
-	_ = v_temp_4
-	v_i_2 = int(1)
-	for v_i_2 <= v_n_1 {
-		v_temp_4 = *new(type_main_Task_2)
-		v_temp_4.ID = v_i_2
-		v_temp_4.Title = "task"
-		v_temp_4.Done = (v_i_2 % int(3)) == int(0)
-		v_out_0.Send(t, v_temp_4)
-		rt.Wait(t)
-		v_i_2 = v_i_2 + int(1)
+func produce(_t *rt.Task, out rt.Chan[Task], n int) {
+	var i int
+	_ = i
+	var _4 Task
+	_ = _4
+	i = int(1)
+	for i <= n {
+		_4 = *new(Task)
+		_4.ID = i
+		_4.Title = "task"
+		_4.Done = (i % int(3)) == int(0)
+		out.Send(_t, _4)
+		rt.Wait(_t)
+		i = i + int(1)
 	}
-	v_out_0.Close()
+	out.Close()
 	return
 }
 
-func fn_main_fetchTasks_1(t *rt.Task, v_n_0 int) ([]type_main_Task_2, error) {
-	var v_result_1 []type_main_Task_2
-	_ = v_result_1
-	var v_result_2 error
-	_ = v_result_2
-	var v_temp_4 error
-	_ = v_temp_4
-	var v_ch_5 rt.Chan[type_main_Task_2]
-	_ = v_ch_5
-	var v_tasks_8 []type_main_Task_2
-	_ = v_tasks_8
-	var v_temp_9 type_main_Task_2
-	_ = v_temp_9
-	var v_temp_10 bool
-	_ = v_temp_10
-	var v_temp_11 rt.Chan[type_main_Task_2]
-	_ = v_temp_11
-	var v_t_12 type_main_Task_2
-	_ = v_t_12
-	v_result_1 = *new([]type_main_Task_2)
-	v_result_2 = *new(error)
-	if v_n_0 < int(0) {
-		v_temp_4 = rt.StdErrorsNew("negative count")
-		v_result_1 = ([]type_main_Task_2)(nil)
-		v_result_2 = v_temp_4
-		return v_result_1, v_result_2
+func fetchTasks(_t *rt.Task, n int) ([]Task, error) {
+	var _1 []Task
+	_ = _1
+	var _2 error
+	_ = _2
+	var _4 error
+	_ = _4
+	var ch rt.Chan[Task]
+	_ = ch
+	var tasks []Task
+	_ = tasks
+	var _9 Task
+	_ = _9
+	var _10 bool
+	_ = _10
+	var _11 rt.Chan[Task]
+	_ = _11
+	var t Task
+	_ = t
+	_1 = *new([]Task)
+	_2 = *new(error)
+	if n < int(0) {
+		_4 = rt.StdErrorsNew("negative count")
+		_1 = ([]Task)(nil)
+		_2 = _4
+		return _1, _2
 	}
-	v_ch_5 = rt.MakeChan[type_main_Task_2](int(0))
-	func(g0_ rt.Chan[type_main_Task_2], g1_ int) {
-		rt.Spawn(rt.NativeTask(func(t *rt.Task) []any { fn_main_produce_0(t, g0_, g1_); return nil }))
-	}(rt.Chan[type_main_Task_2](v_ch_5), v_n_0)
-	v_tasks_8 = *new([]type_main_Task_2)
-	v_temp_11 = v_ch_5
+	ch = rt.MakeChan[Task](int(0))
+	func(_g0 rt.Chan[Task], _g1 int) {
+		rt.Spawn(rt.NativeTask(func(_t *rt.Task) []any { produce(_t, _g0, _g1); return nil }))
+	}(rt.Chan[Task](ch), n)
+	tasks = *new([]Task)
+	_11 = ch
 	for {
-		v_temp_11.Recv(t)
-		rt.Wait(t)
-		v_temp_9 = rt.As[type_main_Task_2](t.RV[0])
-		v_temp_10 = t.RV[1].(bool)
-		if !v_temp_10 {
-			v_result_1 = v_tasks_8
-			v_result_2 = (error)(nil)
-			return v_result_1, v_result_2
+		_11.Recv(_t)
+		rt.Wait(_t)
+		_9 = rt.As[Task](_t.RV[0])
+		_10 = _t.RV[1].(bool)
+		if !_10 {
+			_1 = tasks
+			_2 = (error)(nil)
+			return _1, _2
 		}
-		v_t_12 = v_temp_9
-		if !v_t_12.Done {
-			v_tasks_8 = rt.Append(v_tasks_8, v_t_12)
+		t = _9
+		if !t.Done {
+			tasks = rt.Append(tasks, t)
 		}
 	}
 }
 
-func fn_main_main_2(t *rt.Task) {
-	var v_tasks_0 []type_main_Task_2
-	_ = v_tasks_0
-	var v_err_1 error
-	_ = v_err_1
-	var v_temp_2 []type_main_Task_2
-	_ = v_temp_2
-	var v_temp_3 error
-	_ = v_temp_3
-	var v_temp_7 int
-	_ = v_temp_7
-	var v_temp_8 int
-	_ = v_temp_8
-	var v_temp_9 []type_main_Task_2
-	_ = v_temp_9
-	var v_t_13 type_main_Task_2
-	_ = v_t_13
-	var v_temp_16 []type_main_Task_2
-	_ = v_temp_16
-	var v_temp_17 error
-	_ = v_temp_17
-	v_temp_2, v_temp_3 = fn_main_fetchTasks_1(t, int(7))
-	v_tasks_0 = v_temp_2
-	v_err_1 = v_temp_3
-	if v_err_1 != nil {
-		println("error:", v_err_1.Error())
+func main_2(_t *rt.Task) {
+	var tasks []Task
+	_ = tasks
+	var err error
+	_ = err
+	var _2 []Task
+	_ = _2
+	var _3 error
+	_ = _3
+	var _7 int
+	_ = _7
+	var _8 int
+	_ = _8
+	var _9 []Task
+	_ = _9
+	var t Task
+	_ = t
+	var _16 []Task
+	_ = _16
+	var _17 error
+	_ = _17
+	_2, _3 = fetchTasks(_t, int(7))
+	tasks = _2
+	err = _3
+	if err != nil {
+		println("error:", err.Error())
 		return
 	}
-	v_temp_9 = v_tasks_0
-	v_temp_8 = len(v_temp_9)
-	v_temp_7 = int(0)
-	for v_temp_7 < v_temp_8 {
-		v_t_13 = v_temp_9[v_temp_7]
-		println(v_t_13.ID, v_t_13.Title)
-		v_temp_7 = v_temp_7 + int(1)
+	_9 = tasks
+	_8 = len(_9)
+	_7 = int(0)
+	for _7 < _8 {
+		t = _9[_7]
+		println(t.ID, t.Title)
+		_7 = _7 + int(1)
 	}
-	v_temp_16, v_temp_17 = fn_main_fetchTasks_1(t, int(-1))
-	v_err_1 = v_temp_17
-	println(v_err_1.Error())
+	_16, _17 = fetchTasks(_t, int(-1))
+	err = _17
+	println(err.Error())
 	return
 }

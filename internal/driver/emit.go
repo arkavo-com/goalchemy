@@ -100,13 +100,10 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 	if res != nil && res.IR != nil {
 		res.IR.PauseModel = opts.PauseModel
 		res.IR.NoLineDirectives = opts.NoLineDirectives
-		if macros, ok := unqualifiedRuntime[name]; ok && mode == naming.Source && res.Catalog != nil {
-			declared, called, err := runtimeNames(res.Catalog.FS, name)
+		if scan, ok := unqualifiedRuntime[name]; ok && mode == naming.Source && res.Catalog != nil {
+			declared, called, err := runtimeNames(res.Catalog.FS, name, scan)
 			if err != nil {
 				return emitErr("GCE005", "runtime names: "+err.Error())
-			}
-			if macros {
-				declared = append(declared, called...)
 			}
 			res.IR.ReservedNames, res.IR.ReservedGlobals = declared, called
 		}
@@ -170,12 +167,16 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 }
 
 // unqualifiedRuntime lists targets whose generated code names runtime
-// declarations without a qualifier, so source names must avoid them. On C,
-// runtime macros expand to host calls inside generated functions, so locals
-// avoid the names the runtime calls as well.
-var unqualifiedRuntime = map[string]bool{"java": false, "csharp": false, "rust": false, "c": true, "swift": false}
+// declarations without a qualifier, so source names must avoid them. Java
+// and C# see only the runtime's top-level types; Rust, C and Swift share a
+// namespace with the runtime, so its own references to types count too, and
+// on C runtime macros expand to host calls inside generated functions.
+var unqualifiedRuntime = map[string]naming.RuntimeScan{
+	"java": {}, "csharp": {}, "rust": {Types: true, Calls: true}, "swift": {Types: true, Calls: true},
+	"c": {Types: true, Calls: true, LocalCalls: true},
+}
 
-func runtimeNames(fsys fs.FS, target string) (declared, called []string, err error) {
+func runtimeNames(fsys fs.FS, target string, scan naming.RuntimeScan) (declared, called []string, err error) {
 	var roots []string
 	for _, dir := range []string{"runtime", "types", "native"} {
 		root := "targets/" + target + "/" + dir
@@ -183,7 +184,7 @@ func runtimeNames(fsys fs.FS, target string) (declared, called []string, err err
 			roots = append(roots, root)
 		}
 	}
-	return naming.RuntimeNames(fsys, roots...)
+	return naming.RuntimeNames(fsys, scan, roots...)
 }
 
 func namesErr(err error) []diagnostics.Diagnostic {

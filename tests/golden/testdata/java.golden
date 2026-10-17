@@ -4,157 +4,157 @@ import rt.*;
 
 @SuppressWarnings({"unchecked", "unused", "rawtypes"})
 final class pkg_co_fetch_tasks_3350c4c42297f661 extends _GoalchemySupport {
-    static final class F$fn_main_produce_0 extends TaskSpawn.Frame {
-        ChanMake.Chan v_out$0 = null;
-        long v_n$1 = 0L;
-        long v_i$2 = 0L;
-        S$main_Task_3 v_temp$4 = null;
+    static final class F$produce extends TaskSpawn.Frame {
+        ChanMake.Chan out = null;
+        long n = 0L;
+        long i = 0L;
+        Task _4 = null;
         public Object[] results() {
-            final F$fn_main_produce_0 fr = this;
+            final F$produce _fr = this;
             return new Object[] {};
         }
-        public void step(TaskSpawn.Task t) {
-            final F$fn_main_produce_0 fr = this;
-            for (;;) switch (fr.pc) {
+        public void step(TaskSpawn.Task _t) {
+            final F$produce _fr = this;
+            for (;;) switch (_fr.pc) {
                 case 0:
-                    fr.v_i$2 = 1L;
+                    _fr.i = 1L;
                 case 1:
-                    if (fr.v_i$2 <= fr.v_n$1) {
-                        fr.v_temp$4 = new S$main_Task_3();
-                        fr.v_temp$4.f$ID_0 = fr.v_i$2;
-                        fr.v_temp$4.f$Title_1 = "task";
-                        fr.v_temp$4.f$Done_2 = IntegerRem.rem_i64(fr.v_i$2, 3L) == 0L;
-                        fr.pc = 5; ChanSend.chanSend(t, fr.v_out$0, fr.v_temp$4);
+                    if (_fr.i <= _fr.n) {
+                        _fr._4 = new Task();
+                        _fr._4.f$ID = _fr.i;
+                        _fr._4.f$Title = "task";
+                        _fr._4.f$Done = IntegerRem.rem_i64(_fr.i, 3L) == 0L;
+                        _fr.pc = 5; ChanSend.chanSend(_t, _fr.out, _fr._4);
                                     return;
                     }
-                    ChanClose.chanClose(fr.v_out$0);
-                    TaskSpawn.ret(t, fr); return;
+                    ChanClose.chanClose(_fr.out);
+                    TaskSpawn.ret(_t, _fr); return;
                 case 5:
-                    fr.v_i$2 = IntegerAdd.add_i64(fr.v_i$2, 1L);
-                    fr.pc = 1;
+                    _fr.i = IntegerAdd.add_i64(_fr.i, 1L);
+                    _fr.pc = 1;
                     continue;
                 default: throw Panics.fault("bad block");
             }
         }
     }
 
-    static TaskSpawn.Frame fn_main_produce_0(ChanMake.Chan v_out$0, long v_n$1) {
-        F$fn_main_produce_0 fr = new F$fn_main_produce_0();
-        fr.v_out$0 = v_out$0;
-        fr.v_n$1 = v_n$1;
-        return fr;
+    static TaskSpawn.Frame produce(ChanMake.Chan out, long n) {
+        F$produce _fr = new F$produce();
+        _fr.out = out;
+        _fr.n = n;
+        return _fr;
     }
 
-    static final class F$fn_main_fetchTasks_1 extends TaskSpawn.Frame {
-        long v_n$0 = 0L;
-        Slice v_result$1 = Slice.NIL;
-        Box v_result$2 = null;
-        Box v_temp$4 = null;
-        ChanMake.Chan v_ch$5 = null;
-        Slice v_tasks$8 = Slice.NIL;
-        S$main_Task_3 v_temp$9 = null;
-        boolean v_temp$10 = false;
-        ChanMake.Chan v_temp$11 = null;
-        S$main_Task_3 v_t$12 = null;
+    static final class F$fetchTasks extends TaskSpawn.Frame {
+        long n = 0L;
+        Slice _1 = Slice.NIL;
+        Box _2 = null;
+        Box _4 = null;
+        ChanMake.Chan ch = null;
+        Slice tasks = Slice.NIL;
+        Task _9 = null;
+        boolean _10 = false;
+        ChanMake.Chan _11 = null;
+        Task t = null;
         public Object[] results() {
-            final F$fn_main_fetchTasks_1 fr = this;
-            return new Object[] {fr.v_result$1, fr.v_result$2};
+            final F$fetchTasks _fr = this;
+            return new Object[] {_fr._1, _fr._2};
         }
-        public void step(TaskSpawn.Task t) {
-            final F$fn_main_fetchTasks_1 fr = this;
-            for (;;) switch (fr.pc) {
+        public void step(TaskSpawn.Task _t) {
+            final F$fetchTasks _fr = this;
+            for (;;) switch (_fr.pc) {
                 case 0:
-                    fr.v_result$1 = Slice.NIL;
-                    fr.v_result$2 = null;
-                    if (fr.v_n$0 < 0L) {
-                        fr.v_temp$4 = StdErrorsNew.stdErrorsNew("negative count");
-                        fr.v_result$1 = Slice.NIL;
-                        fr.v_result$2 = fr.v_temp$4;
-                        TaskSpawn.ret(t, fr); return;
+                    _fr._1 = Slice.NIL;
+                    _fr._2 = null;
+                    if (_fr.n < 0L) {
+                        _fr._4 = StdErrorsNew.stdErrorsNew("negative count");
+                        _fr._1 = Slice.NIL;
+                        _fr._2 = _fr._4;
+                        TaskSpawn.ret(_t, _fr); return;
                     }
-                    fr.v_ch$5 = ChanMake.makeChan(0L, () -> new S$main_Task_3());
-                    TaskSpawn.spawn((TaskSpawn.Frame) (fn_main_produce_0(fr.v_ch$5, fr.v_n$0)));
-                    fr.v_tasks$8 = Slice.NIL;
-                    fr.v_temp$11 = fr.v_ch$5;
+                    _fr.ch = ChanMake.makeChan(0L, () -> new Task());
+                    TaskSpawn.spawn((TaskSpawn.Frame) (produce(_fr.ch, _fr.n)));
+                    _fr.tasks = Slice.NIL;
+                    _fr._11 = _fr.ch;
                 case 3:
-                    fr.pc = 9; ChanRecv.chanRecv(t, fr.v_temp$11);
+                    _fr.pc = 9; ChanRecv.chanRecv(_t, _fr._11);
                                 return;
                 case 9:
-                    fr.v_temp$9 = ((S$main_Task_3) (t.rv[0])); fr.v_temp$10 = ((Boolean) t.rv[1]); 
-                    if (!fr.v_temp$10) {
-                        fr.v_result$1 = fr.v_tasks$8;
-                        fr.v_result$2 = null;
-                        TaskSpawn.ret(t, fr); return;
+                    _fr._9 = ((Task) (_t.rv[0])); _fr._10 = ((Boolean) _t.rv[1]);
+                    if (!_fr._10) {
+                        _fr._1 = _fr.tasks;
+                        _fr._2 = null;
+                        TaskSpawn.ret(_t, _fr); return;
                     }
-                    fr.v_t$12 = fr.v_temp$9;
-                    if (!fr.v_t$12.f$Done_2) {
-                        fr.v_tasks$8 = Slice.zeroAppendGrowth(SliceAppend.append(fr.v_tasks$8, new Object[] {fr.v_t$12.$clone()}, v -> ((S$main_Task_3) (v)).$clone()), fr.v_tasks$8, () -> new S$main_Task_3());
+                    _fr.t = _fr._9;
+                    if (!_fr.t.f$Done) {
+                        _fr.tasks = Slice.zeroAppendGrowth(SliceAppend.append(_fr.tasks, new Object[] {_fr.t.$clone()}, _v -> ((Task) (_v)).$clone()), _fr.tasks, () -> new Task());
                     }
-                    fr.pc = 3;
+                    _fr.pc = 3;
                     continue;
                 default: throw Panics.fault("bad block");
             }
         }
     }
 
-    static TaskSpawn.Frame fn_main_fetchTasks_1(long v_n$0) {
-        F$fn_main_fetchTasks_1 fr = new F$fn_main_fetchTasks_1();
-        fr.v_n$0 = v_n$0;
-        return fr;
+    static TaskSpawn.Frame fetchTasks(long n) {
+        F$fetchTasks _fr = new F$fetchTasks();
+        _fr.n = n;
+        return _fr;
     }
 
-    static final class F$fn_main_main_2 extends TaskSpawn.Frame {
-        Slice v_tasks$0 = Slice.NIL;
-        Box v_err$1 = null;
-        Slice v_temp$2 = Slice.NIL;
-        Box v_temp$3 = null;
-        long v_temp$7 = 0L;
-        long v_temp$8 = 0L;
-        Slice v_temp$9 = Slice.NIL;
-        S$main_Task_3 v_t$13 = null;
-        Slice v_temp$16 = Slice.NIL;
-        Box v_temp$17 = null;
+    static final class F$main_2 extends TaskSpawn.Frame {
+        Slice tasks = Slice.NIL;
+        Box err = null;
+        Slice _2 = Slice.NIL;
+        Box _3 = null;
+        long _7 = 0L;
+        long _8 = 0L;
+        Slice _9 = Slice.NIL;
+        Task t = null;
+        Slice _16 = Slice.NIL;
+        Box _17 = null;
         public Object[] results() {
-            final F$fn_main_main_2 fr = this;
+            final F$main_2 _fr = this;
             return new Object[] {};
         }
-        public void step(TaskSpawn.Task t) {
-            final F$fn_main_main_2 fr = this;
-            for (;;) switch (fr.pc) {
+        public void step(TaskSpawn.Task _t) {
+            final F$main_2 _fr = this;
+            for (;;) switch (_fr.pc) {
                 case 0:
-                    fr.pc = 7; TaskSpawn.call(t, (TaskSpawn.Frame) (fn_main_fetchTasks_1(7L)));
+                    _fr.pc = 7; TaskSpawn.call(_t, (TaskSpawn.Frame) (fetchTasks(7L)));
                                 return;
                 case 7:
-                    fr.v_temp$2 = ((Slice) (t.rv[0])); fr.v_temp$3 = ((Box) (t.rv[1])); 
-                    fr.v_tasks$0 = fr.v_temp$2;
-                    fr.v_err$1 = fr.v_temp$3;
-                    if (!Box.ifaceEq(fr.v_err$1, null)) {
-                        Print.print(true, "error:", ((String) (Program.icall(fr.v_err$1, "Error"))));
-                        TaskSpawn.ret(t, fr); return;
+                    _fr._2 = ((Slice) (_t.rv[0])); _fr._3 = ((Box) (_t.rv[1]));
+                    _fr.tasks = _fr._2;
+                    _fr.err = _fr._3;
+                    if (!Box.ifaceEq(_fr.err, null)) {
+                        Print.print(true, "error:", ((String) (Program.icall(_fr.err, "Error"))));
+                        TaskSpawn.ret(_t, _fr); return;
                     }
-                    fr.v_temp$9 = fr.v_tasks$0;
-                    fr.v_temp$8 = (long) fr.v_temp$9.l;
-                    fr.v_temp$7 = 0L;
-                    while (fr.v_temp$7 < fr.v_temp$8) {
-                        fr.v_t$13 = ((S$main_Task_3) (SliceIndex.sget(fr.v_temp$9, fr.v_temp$7))).$clone();
-                        Print.print(true, fr.v_t$13.f$ID_0, fr.v_t$13.f$Title_1);
-                        fr.v_temp$7 = IntegerAdd.add_i64(fr.v_temp$7, 1L);
+                    _fr._9 = _fr.tasks;
+                    _fr._8 = (long) _fr._9.l;
+                    _fr._7 = 0L;
+                    while (_fr._7 < _fr._8) {
+                        _fr.t = ((Task) (SliceIndex.sget(_fr._9, _fr._7))).$clone();
+                        Print.print(true, _fr.t.f$ID, _fr.t.f$Title);
+                        _fr._7 = IntegerAdd.add_i64(_fr._7, 1L);
                     }
-                    fr.pc = 8; TaskSpawn.call(t, (TaskSpawn.Frame) (fn_main_fetchTasks_1(-1L)));
+                    _fr.pc = 8; TaskSpawn.call(_t, (TaskSpawn.Frame) (fetchTasks(-1L)));
                                 return;
                 case 8:
-                    fr.v_temp$16 = ((Slice) (t.rv[0])); fr.v_temp$17 = ((Box) (t.rv[1])); 
-                    fr.v_err$1 = fr.v_temp$17;
-                    Print.print(true, ((String) (Program.icall(fr.v_err$1, "Error"))));
-                    TaskSpawn.ret(t, fr); return;
+                    _fr._16 = ((Slice) (_t.rv[0])); _fr._17 = ((Box) (_t.rv[1]));
+                    _fr.err = _fr._17;
+                    Print.print(true, ((String) (Program.icall(_fr.err, "Error"))));
+                    TaskSpawn.ret(_t, _fr); return;
                 default: throw Panics.fault("bad block");
             }
         }
     }
 
-    static TaskSpawn.Frame fn_main_main_2() {
-        F$fn_main_main_2 fr = new F$fn_main_main_2();
-        return fr;
+    static TaskSpawn.Frame main_2() {
+        F$main_2 _fr = new F$main_2();
+        return _fr;
     }
 
 }

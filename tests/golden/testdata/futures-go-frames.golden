@@ -5,124 +5,124 @@ package main
 
 import "goalchemyout/rt"
 
-func fn_main_total_0(v_n_0 int) int {
-	var v_result_1 int
-	_ = v_result_1
-	var v_sum_2 int
-	_ = v_sum_2
-	var v_i_3 int
-	_ = v_i_3
-	v_result_1 = *new(int)
-	v_sum_2 = int(0)
-	v_i_3 = int(1)
-	for v_i_3 <= v_n_0 {
-		if (v_i_3 % int(2)) == int(0) {
-			v_sum_2 = v_sum_2 + v_i_3
+func total(n int) int {
+	var _1 int
+	_ = _1
+	var sum int
+	_ = sum
+	var i int
+	_ = i
+	_1 = *new(int)
+	sum = int(0)
+	i = int(1)
+	for i <= n {
+		if (i % int(2)) == int(0) {
+			sum = sum + i
 		}
-		v_i_3 = v_i_3 + int(1)
+		i = i + int(1)
 	}
-	v_result_1 = v_sum_2
-	return v_result_1
+	_1 = sum
+	return _1
 }
 
-type frame_fn_main_main_1 struct {
+type _frame_main_2 struct {
 	rt.FrameBase
-	v_a_0     type_task_Future_4
-	v_temp_1  func() int
-	v_temp_2  func() []any
-	v_temp_4  rt.FutureState
-	v_temp_5  type_task_Future_4
-	v_b_6     type_task_Future_4
-	v_temp_7  func() int
-	v_temp_8  func() []any
-	v_temp_10 rt.FutureState
-	v_temp_11 type_task_Future_4
-	v_temp_13 rt.FutureState
-	v_temp_14 []any
-	v_temp_15 any
-	v_temp_16 int
-	v_temp_17 bool
-	v_temp_19 rt.FutureState
-	v_temp_20 []any
-	v_temp_21 any
-	v_temp_22 int
-	v_temp_23 bool
+	a   Future
+	_1  func() int
+	_2  func() []any
+	_4  rt.FutureState
+	_5  Future
+	b   Future
+	_7  func() int
+	_8  func() []any
+	_10 rt.FutureState
+	_11 Future
+	_13 rt.FutureState
+	_14 []any
+	_15 any
+	_16 int
+	_17 bool
+	_19 rt.FutureState
+	_20 []any
+	_21 any
+	_22 int
+	_23 bool
 }
 
-func fn_main_main_1() rt.Frame {
-	fr := &frame_fn_main_main_1{}
-	return fr
+func main_2() rt.Frame {
+	_fr := &_frame_main_2{}
+	return _fr
 }
 
-func (fr *frame_fn_main_main_1) Results() []any { return []any{} }
+func (_fr *_frame_main_2) Results() []any { return []any{} }
 
-func (fr *frame_fn_main_main_1) Step(t *rt.Task) {
-	switch fr.PC {
+func (_fr *_frame_main_2) Step(_t *rt.Task) {
+	switch _fr.PC {
 	case 1:
 		goto b1
 	case 2:
 		goto b2
 	}
-	fr.v_temp_1 = func() func() int {
+	_fr._1 = func() func() int {
 		return func() int {
-			var v_result_0 int
-			_ = v_result_0
-			v_result_0 = *new(int)
-			v_result_0 = fn_main_total_0(int(10))
-			return v_result_0
+			var _0 int
+			_ = _0
+			_0 = *new(int)
+			_0 = total(int(10))
+			return _0
 		}
 	}()
-	fr.v_temp_2 = func(r_ func() int) func() []any { return func() []any { return fn_task_Start_3(r_) } }(fr.v_temp_1)
-	fr.v_temp_4 = rt.LibTaskStart(any(fr.v_temp_2))
-	fr.v_temp_5 = *new(type_task_Future_4)
-	fr.v_temp_5.state = fr.v_temp_4
-	fr.v_a_0 = fr.v_temp_5
-	fr.v_temp_7 = func() func() int {
+	_fr._2 = func(_r func() int) func() []any { return func() []any { return _Start(_r) } }(_fr._1)
+	_fr._4 = rt.LibTaskStart(any(_fr._2))
+	_fr._5 = *new(Future)
+	_fr._5.state = _fr._4
+	_fr.a = _fr._5
+	_fr._7 = func() func() int {
 		return func() int {
-			var v_result_0 int
-			_ = v_result_0
-			v_result_0 = *new(int)
-			v_result_0 = fn_main_total_0(int(20))
-			return v_result_0
+			var _0 int
+			_ = _0
+			_0 = *new(int)
+			_0 = total(int(20))
+			return _0
 		}
 	}()
-	fr.v_temp_8 = func(r_ func() int) func() []any { return func() []any { return fn_task_Start_3(r_) } }(fr.v_temp_7)
-	fr.v_temp_10 = rt.LibTaskStart(any(fr.v_temp_8))
-	fr.v_temp_11 = *new(type_task_Future_4)
-	fr.v_temp_11.state = fr.v_temp_10
-	fr.v_b_6 = fr.v_temp_11
-	fr.v_temp_13 = fr.v_a_0.state
-	fr.PC = 1
-	rt.LibTaskAwait(t, fr.v_temp_13)
+	_fr._8 = func(_r func() int) func() []any { return func() []any { return _Start(_r) } }(_fr._7)
+	_fr._10 = rt.LibTaskStart(any(_fr._8))
+	_fr._11 = *new(Future)
+	_fr._11.state = _fr._10
+	_fr.b = _fr._11
+	_fr._13 = _fr.a.state
+	_fr.PC = 1
+	rt.LibTaskAwait(_t, _fr._13)
 	return
 b1:
-	fr.v_temp_14 = rt.As[[]any](t.RV[0])
-	fr.v_temp_15 = fr.v_temp_14[int(0)]
-	fr.v_temp_16, fr.v_temp_17 = fr.v_temp_15.(int)
-	fr.v_temp_19 = fr.v_b_6.state
-	fr.PC = 2
-	rt.LibTaskAwait(t, fr.v_temp_19)
+	_fr._14 = rt.As[[]any](_t.RV[0])
+	_fr._15 = _fr._14[int(0)]
+	_fr._16, _fr._17 = _fr._15.(int)
+	_fr._19 = _fr.b.state
+	_fr.PC = 2
+	rt.LibTaskAwait(_t, _fr._19)
 	return
 b2:
-	fr.v_temp_20 = rt.As[[]any](t.RV[0])
-	fr.v_temp_21 = fr.v_temp_20[int(0)]
-	fr.v_temp_22, fr.v_temp_23 = fr.v_temp_21.(int)
-	println(fr.v_temp_16, fr.v_temp_22)
-	rt.Ret(t, fr)
+	_fr._20 = rt.As[[]any](_t.RV[0])
+	_fr._21 = _fr._20[int(0)]
+	_fr._22, _fr._23 = _fr._21.(int)
+	println(_fr._16, _fr._22)
+	rt.Ret(_t, _fr)
 	return
 }
 
-func fn_task_Start_3(v_fn_0 func() int) []any {
-	var v_result_1 []any
-	_ = v_result_1
-	var v_temp_2 int
-	_ = v_temp_2
-	var v_temp_3 any
-	_ = v_temp_3
-	v_result_1 = *new([]any)
-	v_temp_2 = v_fn_0()
-	v_result_1 = make([]any, int(1), int(1))
-	v_temp_3 = any(v_temp_2)
-	v_result_1[int(0)] = v_temp_3
-	return v_result_1
+func _Start(fn func() int) []any {
+	var _1 []any
+	_ = _1
+	var _2 int
+	_ = _2
+	var _3 any
+	_ = _3
+	_1 = *new([]any)
+	_2 = fn()
+	_1 = make([]any, int(1), int(1))
+	_3 = any(_2)
+	_1[int(0)] = _3
+	return _1
 }

@@ -205,7 +205,7 @@ func TestSourceNamesAcrossPackages(t *testing.T) {
 
 func TestRuntimeNames(t *testing.T) {
 	declared, called := map[string]bool{}, map[string]bool{}
-	scanRuntime("pub(super) fn chan_send(t: &Task) -> V {\n    let local = 1;\n    helper(local); // fn ignored()\n    \"fn quoted\";\n}\nconst LIMIT: usize = 3;\n", declared, called)
+	scanRuntime("pub(super) fn chan_send(t: &Task) -> V {\n    let local = 1;\n    helper(local); // fn ignored()\n    \"fn quoted\";\n}\nconst LIMIT: usize = 3;\n", true, declared, called)
 	for _, name := range []string{"chan_send", "Task", "V", "LIMIT"} {
 		if !declared[name] {
 			t.Errorf("missing declared %s", name)

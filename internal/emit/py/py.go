@@ -1043,7 +1043,7 @@ func (fe *fnEmitter) callee(c *ir.Call) (fn string, args []string, fid string) {
 	case ir.CallExtern:
 		fe.e.use(c.Extern.Contract)
 		if c.Extern.Contract == "lib.task.start" && fe.e.native() {
-			args[0] = fmt.Sprintf("lambda fn=%s: rt.native_task(lambda t: rt.fnchk(rt.ichk(fn).v)(t), 1)", args[0])
+			args[0] = fmt.Sprintf("lambda _fn=%s: rt.native_task(lambda _t: rt.fnchk(rt.ichk(_fn).v)(_t), 1)", args[0])
 		}
 		for k, a := range c.Args {
 			if u := a.IRType().U(); u.Kind == ir.KSlice && u.Elem.U().Kind == ir.KFunc && !fe.e.susp(u.Elem) {

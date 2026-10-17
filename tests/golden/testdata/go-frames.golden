@@ -5,172 +5,172 @@ package main
 
 import "goalchemyout/rt"
 
-type type_main_Task_2 struct {
+type Task struct {
 	ID    int
 	Title string
 	Done  bool
 }
 
-type frame_fn_main_produce_0 struct {
+type _frame_produce struct {
 	rt.FrameBase
-	v_out_0  rt.Chan[type_main_Task_2]
-	v_n_1    int
-	v_i_2    int
-	v_temp_4 type_main_Task_2
+	out rt.Chan[Task]
+	n   int
+	i   int
+	_4  Task
 }
 
-func fn_main_produce_0(v_out_0 rt.Chan[type_main_Task_2], v_n_1 int) rt.Frame {
-	fr := &frame_fn_main_produce_0{}
-	fr.v_out_0 = v_out_0
-	fr.v_n_1 = v_n_1
-	return fr
+func produce(out rt.Chan[Task], n int) rt.Frame {
+	_fr := &_frame_produce{}
+	_fr.out = out
+	_fr.n = n
+	return _fr
 }
 
-func (fr *frame_fn_main_produce_0) Results() []any { return []any{} }
+func (_fr *_frame_produce) Results() []any { return []any{} }
 
-func (fr *frame_fn_main_produce_0) Step(t *rt.Task) {
-	switch fr.PC {
+func (_fr *_frame_produce) Step(_t *rt.Task) {
+	switch _fr.PC {
 	case 5:
 		goto b5
 	}
-	fr.v_i_2 = int(1)
+	_fr.i = int(1)
 b1:
-	if fr.v_i_2 <= fr.v_n_1 {
-		fr.v_temp_4 = *new(type_main_Task_2)
-		fr.v_temp_4.ID = fr.v_i_2
-		fr.v_temp_4.Title = "task"
-		fr.v_temp_4.Done = (fr.v_i_2 % int(3)) == int(0)
-		fr.PC = 5
-		fr.v_out_0.Send(t, fr.v_temp_4)
+	if _fr.i <= _fr.n {
+		_fr._4 = *new(Task)
+		_fr._4.ID = _fr.i
+		_fr._4.Title = "task"
+		_fr._4.Done = (_fr.i % int(3)) == int(0)
+		_fr.PC = 5
+		_fr.out.Send(_t, _fr._4)
 		return
 	}
-	fr.v_out_0.Close()
-	rt.Ret(t, fr)
+	_fr.out.Close()
+	rt.Ret(_t, _fr)
 	return
 b5:
-	fr.v_i_2 = fr.v_i_2 + int(1)
+	_fr.i = _fr.i + int(1)
 	goto b1
 }
 
-type frame_fn_main_fetchTasks_1 struct {
+type _frame_fetchTasks struct {
 	rt.FrameBase
-	v_n_0      int
-	v_result_1 []type_main_Task_2
-	v_result_2 error
-	v_temp_4   error
-	v_ch_5     rt.Chan[type_main_Task_2]
-	v_tasks_8  []type_main_Task_2
-	v_temp_9   type_main_Task_2
-	v_temp_10  bool
-	v_temp_11  rt.Chan[type_main_Task_2]
-	v_t_12     type_main_Task_2
+	n     int
+	_1    []Task
+	_2    error
+	_4    error
+	ch    rt.Chan[Task]
+	tasks []Task
+	_9    Task
+	_10   bool
+	_11   rt.Chan[Task]
+	t     Task
 }
 
-func fn_main_fetchTasks_1(v_n_0 int) rt.Frame {
-	fr := &frame_fn_main_fetchTasks_1{}
-	fr.v_n_0 = v_n_0
-	return fr
+func fetchTasks(n int) rt.Frame {
+	_fr := &_frame_fetchTasks{}
+	_fr.n = n
+	return _fr
 }
 
-func (fr *frame_fn_main_fetchTasks_1) Results() []any { return []any{fr.v_result_1, fr.v_result_2} }
+func (_fr *_frame_fetchTasks) Results() []any { return []any{_fr._1, _fr._2} }
 
-func (fr *frame_fn_main_fetchTasks_1) Step(t *rt.Task) {
-	switch fr.PC {
+func (_fr *_frame_fetchTasks) Step(_t *rt.Task) {
+	switch _fr.PC {
 	case 9:
 		goto b9
 	}
-	fr.v_result_1 = *new([]type_main_Task_2)
-	fr.v_result_2 = *new(error)
-	if fr.v_n_0 < int(0) {
-		fr.v_temp_4 = rt.StdErrorsNew("negative count")
-		fr.v_result_1 = ([]type_main_Task_2)(nil)
-		fr.v_result_2 = fr.v_temp_4
-		rt.Ret(t, fr)
+	_fr._1 = *new([]Task)
+	_fr._2 = *new(error)
+	if _fr.n < int(0) {
+		_fr._4 = rt.StdErrorsNew("negative count")
+		_fr._1 = ([]Task)(nil)
+		_fr._2 = _fr._4
+		rt.Ret(_t, _fr)
 		return
 	}
-	fr.v_ch_5 = rt.MakeChan[type_main_Task_2](int(0))
-	func(g0_ rt.Chan[type_main_Task_2], g1_ int) {
-		rt.Spawn(fn_main_produce_0(g0_, g1_))
-	}(rt.Chan[type_main_Task_2](fr.v_ch_5), fr.v_n_0)
-	fr.v_tasks_8 = *new([]type_main_Task_2)
-	fr.v_temp_11 = fr.v_ch_5
+	_fr.ch = rt.MakeChan[Task](int(0))
+	func(_g0 rt.Chan[Task], _g1 int) {
+		rt.Spawn(produce(_g0, _g1))
+	}(rt.Chan[Task](_fr.ch), _fr.n)
+	_fr.tasks = *new([]Task)
+	_fr._11 = _fr.ch
 b3:
-	fr.PC = 9
-	fr.v_temp_11.Recv(t)
+	_fr.PC = 9
+	_fr._11.Recv(_t)
 	return
 b9:
-	fr.v_temp_9 = rt.As[type_main_Task_2](t.RV[0])
-	fr.v_temp_10 = t.RV[1].(bool)
-	if !fr.v_temp_10 {
-		fr.v_result_1 = fr.v_tasks_8
-		fr.v_result_2 = (error)(nil)
-		rt.Ret(t, fr)
+	_fr._9 = rt.As[Task](_t.RV[0])
+	_fr._10 = _t.RV[1].(bool)
+	if !_fr._10 {
+		_fr._1 = _fr.tasks
+		_fr._2 = (error)(nil)
+		rt.Ret(_t, _fr)
 		return
 	}
-	fr.v_t_12 = fr.v_temp_9
-	if !fr.v_t_12.Done {
-		fr.v_tasks_8 = rt.Append(fr.v_tasks_8, fr.v_t_12)
+	_fr.t = _fr._9
+	if !_fr.t.Done {
+		_fr.tasks = rt.Append(_fr.tasks, _fr.t)
 	}
 	goto b3
 }
 
-type frame_fn_main_main_2 struct {
+type _frame_main_2 struct {
 	rt.FrameBase
-	v_tasks_0 []type_main_Task_2
-	v_err_1   error
-	v_temp_2  []type_main_Task_2
-	v_temp_3  error
-	v_temp_7  int
-	v_temp_8  int
-	v_temp_9  []type_main_Task_2
-	v_t_13    type_main_Task_2
-	v_temp_16 []type_main_Task_2
-	v_temp_17 error
+	tasks []Task
+	err   error
+	_2    []Task
+	_3    error
+	_7    int
+	_8    int
+	_9    []Task
+	t     Task
+	_16   []Task
+	_17   error
 }
 
-func fn_main_main_2() rt.Frame {
-	fr := &frame_fn_main_main_2{}
-	return fr
+func main_2() rt.Frame {
+	_fr := &_frame_main_2{}
+	return _fr
 }
 
-func (fr *frame_fn_main_main_2) Results() []any { return []any{} }
+func (_fr *_frame_main_2) Results() []any { return []any{} }
 
-func (fr *frame_fn_main_main_2) Step(t *rt.Task) {
-	switch fr.PC {
+func (_fr *_frame_main_2) Step(_t *rt.Task) {
+	switch _fr.PC {
 	case 7:
 		goto b7
 	case 8:
 		goto b8
 	}
-	fr.PC = 7
-	rt.Call(t, fn_main_fetchTasks_1(int(7)))
+	_fr.PC = 7
+	rt.Call(_t, fetchTasks(int(7)))
 	return
 b7:
-	fr.v_temp_2 = rt.As[[]type_main_Task_2](t.RV[0])
-	fr.v_temp_3 = rt.As[error](t.RV[1])
-	fr.v_tasks_0 = fr.v_temp_2
-	fr.v_err_1 = fr.v_temp_3
-	if fr.v_err_1 != nil {
-		println("error:", fr.v_err_1.Error())
-		rt.Ret(t, fr)
+	_fr._2 = rt.As[[]Task](_t.RV[0])
+	_fr._3 = rt.As[error](_t.RV[1])
+	_fr.tasks = _fr._2
+	_fr.err = _fr._3
+	if _fr.err != nil {
+		println("error:", _fr.err.Error())
+		rt.Ret(_t, _fr)
 		return
 	}
-	fr.v_temp_9 = fr.v_tasks_0
-	fr.v_temp_8 = len(fr.v_temp_9)
-	fr.v_temp_7 = int(0)
-	for fr.v_temp_7 < fr.v_temp_8 {
-		fr.v_t_13 = fr.v_temp_9[fr.v_temp_7]
-		println(fr.v_t_13.ID, fr.v_t_13.Title)
-		fr.v_temp_7 = fr.v_temp_7 + int(1)
+	_fr._9 = _fr.tasks
+	_fr._8 = len(_fr._9)
+	_fr._7 = int(0)
+	for _fr._7 < _fr._8 {
+		_fr.t = _fr._9[_fr._7]
+		println(_fr.t.ID, _fr.t.Title)
+		_fr._7 = _fr._7 + int(1)
 	}
-	fr.PC = 8
-	rt.Call(t, fn_main_fetchTasks_1(int(-1)))
+	_fr.PC = 8
+	rt.Call(_t, fetchTasks(int(-1)))
 	return
 b8:
-	fr.v_temp_16 = rt.As[[]type_main_Task_2](t.RV[0])
-	fr.v_temp_17 = rt.As[error](t.RV[1])
-	fr.v_err_1 = fr.v_temp_17
-	println(fr.v_err_1.Error())
-	rt.Ret(t, fr)
+	_fr._16 = rt.As[[]Task](_t.RV[0])
+	_fr._17 = rt.As[error](_t.RV[1])
+	_fr.err = _fr._17
+	println(_fr.err.Error())
+	rt.Ret(_t, _fr)
 	return
 }
