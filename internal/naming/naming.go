@@ -423,15 +423,15 @@ func (n *Names) gen(key, candidate string) string {
 // such as a frame class or an async body. kind is a short tag without
 // underscores; a kind containing '$' is used as a plain prefix.
 func (n *Names) Derived(kind, base string) string {
-	if strings.Contains(kind, "$") {
-		return n.gen(kind+"\x00"+base, kind+base)
-	}
-	return n.gen(kind+"\x00"+base, Prefix+kind+"_"+strings.TrimPrefix(base, Prefix))
+	return n.gen(kind+"\x00"+base, affix(kind, base))
 }
 
 // Type names a target representation of t. Pass the target's category prefix,
 // such as T_, S$, or S. For shared underlying representations, the smallest
 // source-qualified named type is the deterministic readable representative.
+// Under source names a type declared with the target's TypePrefix keeps its
+// source name, shared with its underlying struct; other prefixes derive a
+// generated name per type.
 func (n *Names) Type(t *ir.Type, prefix string) string {
 	representative := t
 	if t.Kind != ir.KNamed && n.types[t] != nil {
@@ -440,17 +440,25 @@ func (n *Names) Type(t *ir.Type, prefix string) string {
 	if n.mode != Source {
 		return typeName(n.mode, t, representative, prefix)
 	}
-	if base, ok := n.typeNames[representative]; ok {
-		if prefix == n.rules.TypePrefix {
-			return base
-		}
-		return n.Derived(strings.TrimSuffix(prefix, "_"), base)
+	base, ok := n.typeNames[t]
+	if !ok && t.Kind == ir.KStruct {
+		base, ok = n.typeNames[representative]
 	}
-	name := prefix + Identifier(typeDescription(representative, 0)) + "_" + strconv.Itoa(t.ID)
-	if !strings.Contains(prefix, "$") {
-		name = Prefix + name
+	if ok && prefix == n.rules.TypePrefix {
+		return base
 	}
-	return n.gen("type\x00"+prefix+"\x00"+strconv.Itoa(t.ID), name)
+	if !ok {
+		base = Identifier(typeDescription(t, 0))
+	}
+	return n.gen("type\x00"+prefix+"\x00"+strconv.Itoa(t.ID), affix(prefix, base))
+}
+
+// affix joins a category prefix to a name in the generated namespace.
+func affix(prefix, base string) string {
+	if strings.Contains(prefix, "$") {
+		return prefix + base
+	}
+	return Prefix + strings.TrimSuffix(prefix, "_") + "_" + strings.TrimPrefix(base, Prefix)
 }
 
 func typeName(mode Mode, t, representative *ir.Type, prefix string) string {

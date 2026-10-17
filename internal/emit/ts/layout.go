@@ -104,7 +104,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		if !p.Entry.MaySuspend {
 			start = "rt.sync(() => { " + e.symbol(p.Entry.Sym) + "(); return []; })"
 		} else if e.native() {
-			start = "rt.nativeTask((t: rt.Task) => " + e.symbol(p.Entry.Sym) + "(t), 0)"
+			start = "rt.nativeTask((_t: rt.Task) => " + e.symbol(p.Entry.Sym) + "(_t), 0)"
 		}
 		if e.native() {
 			run = "export function $run(): void | Promise<void> { return rt.runMain(%s); }"
