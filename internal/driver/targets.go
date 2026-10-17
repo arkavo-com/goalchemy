@@ -298,7 +298,11 @@ func init() {
 
 // javaBuildScript compiles precisely the emitted native source inventory.
 // Caller adapters and obsolete sources are not globbed into the build.
-func javaBuildScript(library bool, generated, runtime []string) []byte {
+// Native-pause task bodies run on virtual threads, whose stacks are bounded
+// by the default thread stack size, so native executables raise it to the
+// 1 GiB stack frames run on. Only one task runs at a time, so one carrier
+// thread serves them all and a handover stays on it.
+func javaBuildScript(library, native bool, generated, runtime []string) []byte {
 	var source strings.Builder
 	source.WriteString("#!/bin/sh\nset -eu\ncd \"$(dirname \"$0\")\"\nif [ -n \"${JAVA_HOME:-}\" ]; then PATH=\"$JAVA_HOME/bin:$PATH\"; fi\nmkdir -p classes\njavac -nowarn -encoding UTF-8 -d classes")
 	for _, name := range append(append([]string(nil), generated...), runtime...) {
@@ -310,7 +314,11 @@ func javaBuildScript(library bool, generated, runtime []string) []byte {
 	if library {
 		source.WriteString("jar --create --date=2026-01-01T00:00:00Z --file goalchemy-generated.jar -C classes .\n")
 	} else {
-		source.WriteString("exec java -cp classes Main\n")
+		jvm := ""
+		if native {
+			jvm = "-Xss1g -Djdk.virtualThreadScheduler.parallelism=1 "
+		}
+		source.WriteString("exec java " + jvm + "-cp classes Main\n")
 	}
 	return []byte(source.String())
 }
@@ -347,7 +355,7 @@ func emitJava(res *Result, out string) []diagnostics.Diagnostic {
 		if err != nil {
 			return emitErr("GCE005", err.Error())
 		}
-		gen := map[string][]byte{"build.sh": javaBuildScript(true, names, rtFiles), "README.md": []byte(readme("java", "sh build.sh; import io.goalchemy.generated.Generated from goalchemy-generated.jar", "JDK21; serialized cancellable value operations; production crypto additionally requires declared BC1.86."))}
+		gen := map[string][]byte{"build.sh": javaBuildScript(true, false, names, rtFiles), "README.md": []byte(readme("java", "sh build.sh; import io.goalchemy.generated.Generated from goalchemy-generated.jar", "JDK21; serialized cancellable value operations; production crypto additionally requires declared BC1.86."))}
 		for name, data := range gen {
 			if err := link.WriteFile(out, name, data); err != nil {
 				return emitErr("GCE005", err.Error())
@@ -364,7 +372,7 @@ func emitJava(res *Result, out string) []diagnostics.Diagnostic {
 	if err != nil {
 		return emitErr("GCE005", err.Error())
 	}
-	gen := map[string][]byte{"run.sh": javaBuildScript(false, names, rtFiles), "README.md": []byte(readme("java", "sh run.sh", "Requires a Java 21 or later JDK."))}
+	gen := map[string][]byte{"run.sh": javaBuildScript(false, res.IR.PauseModel == "native", names, rtFiles), "README.md": []byte(readme("java", "sh run.sh", "Requires a Java 21 or later JDK."))}
 	for name, data := range gen {
 		if err := link.WriteFile(out, name, data); err != nil {
 			return emitErr("GCE005", err.Error())
