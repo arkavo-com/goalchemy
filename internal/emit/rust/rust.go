@@ -825,7 +825,7 @@ var rustSyntax = structure.Syntax{
 }
 
 func (fe *fnEmitter) analyze() {
-	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.native, PauseAlone: fe.native, Order: structure.LeftToRight}, rustProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.native, PauseAlone: fe.native, CallAlone: true, Order: structure.LeftToRight}, rustProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
 }
 
 func (fe *fnEmitter) capture(fn func()) string {

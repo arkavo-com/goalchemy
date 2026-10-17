@@ -105,6 +105,52 @@ func TestFoldOrder(t *testing.T) {
 	}
 }
 
+func TestCallAlone(t *testing.T) {
+	cases := []struct {
+		name  string
+		first func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr)
+		want  bool
+	}{
+		{"allocated operand", func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr) {
+			t1 := f.NewLocal("t1", ts.IntT(), ir.LTemp)
+			return t1, call("alloc", t1)
+		}, false},
+		{"folded copy", func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr) {
+			x := f.NewLocal("x", ts.IntT(), ir.LVar)
+			t1 := f.NewLocal("t1", ts.IntT(), ir.LTemp)
+			return t1, &ir.Assign{Dst: t1, Src: x}
+		}, false},
+		{"rooted local", func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr) {
+			return f.NewLocal("x", ts.IntT(), ir.LVar), nil
+		}, true},
+		{"boxed local", func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr) {
+			x := f.NewLocal("x", ts.IntT(), ir.LVar)
+			x.Boxed = true
+			return x, nil
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, alone := range []bool{false, true} {
+				f := foldFunc(func(f *ir.Func, ts *ir.Types, b *ir.Block) {
+					first, def := tc.first(f, ts)
+					if def != nil {
+						b.Instrs = append(b.Instrs, def)
+					}
+					t2 := f.NewLocal("t2", ts.IntT(), ir.LTemp)
+					b.Instrs = append(b.Instrs, call("next", t2), call("consume", nil, first, t2))
+				})
+				p := &toyProbe{}
+				fs := Analyze(f, FoldOptions{CallAlone: alone, Order: LeftToRight}, p, func(fs *Folds) { p.fs = fs })
+				want := !alone || tc.want
+				if got := fs.Folded(f.Blocks[0].Instrs[len(f.Blocks[0].Instrs)-2]); got != want {
+					t.Errorf("CallAlone %t: folded %t, want %t", alone, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestFoldKeepsEffectsInPlace(t *testing.T) {
 	f := foldFunc(func(f *ir.Func, ts *ir.Types, b *ir.Block) {
 		x := f.NewLocal("x", ts.IntT(), ir.LVar)
