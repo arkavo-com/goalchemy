@@ -208,6 +208,28 @@ func BuildCSharp(out string) error {
 	return err
 }
 
+// BuildJava compiles a generated Java program to classes without running
+// it, and returns the command that runs it.
+func BuildJava(out string) ([]string, error) {
+	o, err := run(out, 3*time.Minute, "sh", "-c", "sed '/^exec /d' run.sh | sh")
+	if err == nil && o.Exit != 0 {
+		err = fmt.Errorf("java build failed:\n%s", o.Stderr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	script, err := os.ReadFile(filepath.Join(out, "run.sh"))
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(script), "\n") {
+		if cmd, ok := strings.CutPrefix(line, "exec "); ok {
+			return strings.Fields(cmd), nil
+		}
+	}
+	return nil, fmt.Errorf("java run.sh has no exec line")
+}
+
 var Runners = map[string]Runner{
 	"swift": func(out string) (Observation, error) {
 		swiftBuilds <- struct{}{}
