@@ -1,6 +1,6 @@
 package rt;
 
-import java.util.ArrayList;
+import java.util.ArrayDeque;
 
 /** std.sync.mutex.lock: acquire or wait FIFO; Unlock hands the lock over. */
 public final class StdSyncMutexLock {
@@ -8,7 +8,7 @@ public final class StdSyncMutexLock {
 
     public static final class Mutex {
         boolean locked;
-        ArrayList<TaskSpawn.Task> waiters = new ArrayList<>();
+        ArrayDeque<TaskSpawn.Task> waiters = new ArrayDeque<>();
 
         public Mutex $clone() {
             Mutex m = new Mutex();
@@ -18,7 +18,7 @@ public final class StdSyncMutexLock {
 
         public void $set(Mutex o) {
             locked = o.locked;
-            waiters = new ArrayList<>(o.waiters);
+            waiters = new ArrayDeque<>(o.waiters);
         }
     }
 

@@ -54,7 +54,7 @@ func TestNamingModes(t *testing.T) {
 	}
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
-			result.IR.CompactNames = compact
+			result.IR.Names = testutil.Names(compact)
 			first, err := swiftemit.Emit(result.IR, map[string]string{"lib.checksum.crc32_ieee": "Custom.crc32"})
 			if err != nil {
 				t.Fatal(err)
@@ -92,7 +92,7 @@ func TestNamingModes(t *testing.T) {
 				t.Fatal("compact names ignored")
 			}
 			dir := t.TempDir()
-			if ds := driver.EmitWithOptions("swift", result, dir, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("swift", result, dir, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			got, err := testutil.Runners["swift"](dir)
@@ -111,7 +111,7 @@ func TestReservedPublicNamesRenamed(t *testing.T) {
 		for _, name := range []string{"Error", "String", "Array", "Result", "Data", "Task", "GoalchemyKey", "GBuffer", "GCryptoKey", "DispatchTime"} {
 			t.Run(fmt.Sprintf("compact=%v/%s", compact, name), func(t *testing.T) {
 				result := buildSwift(t, "package boundary\ntype "+name+" struct { Value int };func Export(v "+name+")("+name+",error){return v,nil}")
-				result.IR.CompactNames = compact
+				result.IR.Names = testutil.Names(compact)
 				o, err := swiftemit.Emit(result.IR, nil)
 				if err != nil {
 					t.Fatalf("reserved public name must be renamed, not rejected: %v", err)
@@ -120,7 +120,7 @@ func TestReservedPublicNamesRenamed(t *testing.T) {
 				if !bytes.Contains(library, []byte("public struct `"+name+"_` {")) || !bytes.Contains(library, []byte("public func `Export`(_ a0: GoalchemyGenerated.`"+name+"_`")) {
 					t.Fatalf("missing renamed public struct %s_ in generated library", name)
 				}
-				if ds := driver.EmitWithOptions("swift", result, t.TempDir(), driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+				if ds := driver.EmitWithOptions("swift", result, t.TempDir(), driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 					t.Fatalf("unexpected diagnostics: %v", ds)
 				}
 			})
@@ -176,7 +176,7 @@ func TestBulkByteEmission(t *testing.T) {
  `)
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
-			result.IR.CompactNames = compact
+			result.IR.Names = testutil.Names(compact)
 			output, err := swiftemit.Emit(result.IR, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -194,10 +194,10 @@ func TestBulkByteEmission(t *testing.T) {
 					t.Fatalf("spread argument expands bytes to GValue elements: %s", line)
 				}
 			}
-			if !foundAppend || !strings.Contains(source, "return try GElements(v).map") {
+			if !foundAppend || !strings.Contains(source, "return try GElements(_v).map") {
 				t.Fatal("fixture must exercise byte spread append and unrelated generic conversion")
 			}
-			if !strings.Contains(source, "GBuffer(bytes: v, elem:") || !strings.Contains(source, "GSlice.byteSource(v)") {
+			if !strings.Contains(source, "GBuffer(bytes: _v, elem:") || !strings.Contains(source, "GSlice.byteSource(_v)") {
 				t.Fatal("byte public conversion lacks native buffer path")
 			}
 		})

@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: d432bb323379bd873c39346fa27f78ca8a93a8bc55125efd0418fa32c82e5e93
 symbol: "rt.StdSyncMutexUnlock"
 implementation: runtime/std_sync_mutex_unlock.go
-implementation_hash: 7c7309d1c2b062cc7f22ee8e74deab9fa9e6443fb3fdb4738cd0831ccbef4cac
+implementation_hash: c799503baa9e96a0fd7bcfae966216451312e10501fb9313f4ce785fb6a198c6
 summary: "sync.Mutex.Unlock: hand the lock to the first waiter or release it."
 suspension: never
 determinism: deterministic

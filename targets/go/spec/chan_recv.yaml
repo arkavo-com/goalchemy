@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 7884aaa6391af92a3e71d218978c60e702a3625e47011548ea1ec3fad575f8fd
 symbol: "(rt.Chan).Recv"
 implementation: runtime/chan_recv.go
-implementation_hash: 13eb6a63450afd20b98096acaf016851bd90123e6b55f23023fb6a871b6f38ed
+implementation_hash: 1135bdeb762b5e1c0eb93ffd2a5e6560dd3929e0b8e1abd9653d5736819fa5d3
 summary: "v, ok := <-ch: take a buffered or sent value, report closure, or wait."
 suspension: may
 determinism: controlled

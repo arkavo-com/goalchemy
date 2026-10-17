@@ -70,7 +70,7 @@ directories; others contain explicit target lists or dispatch tables.
 | [`internal/specgen/`](../internal/specgen) | Add and register a harness generator; shared spec generation discovers targets from the catalog. |
 | [`internal/contracts/`](../internal/contracts) | Catalog/schema validation; directory discovery already reads `targets/*/target.yaml`. |
 | [`internal/link/`](../internal/link) | Dependency closure, runtime copying, contract hashes, and build manifest generation. Reuse these mechanisms. |
-| [`internal/naming/`](../internal/naming) | Shared readable and compact private identifier support. |
+| [`internal/naming/`](../internal/naming) | Shared source, readable and compact private identifier support. |
 | [`assets.go`](../assets.go) | Embeds `specs`, `targets`, `lib`, and `std` in the compiler. Files under the existing embedded trees are included automatically, subject to Go embed rules. |
 | [`internal/testutil/fixture.go`](../internal/testutil/fixture.go) | Add a target runner that builds and runs generated fixtures and preserves exit/output observations. |
 | [`tests/language/language_test.go`](../tests/language/language_test.go), [`tests/corpus/corpus_test.go`](../tests/corpus/corpus_test.go) | Extend both explicit target lists once ready; `GOALCHEMY_TEST_TARGETS` supports focused development runs. |
@@ -198,8 +198,11 @@ changes must preserve existing backends; target-specific mechanics belong in
 the emitter/runtime. Missing capabilities should fail preflight before opaque
 native types become placeholder target objects.
 
-Use the shared naming index in `internal/naming`. Readable private names are
-the default; `--compact-names` is opt-in. Both modes must preserve public API
+Use the shared naming index in `internal/naming`. Source names are the
+default; `--names=readable` and `--names=compact` are opt-in. Give the emitter a
+`NameRules` with the target's reserved words, and start every identifier the
+emitter invents with `naming.Prefix` (or name it through `Names.Derived` or
+`Names.Type`), so source names never meet it. Every mode must preserve public API
 names, runtime/capability symbols, serialized type identities, and behavior.
 Choose legal target prefixes and separators; test reserved words, Unicode,
 shadowing, repeated names across packages, anonymous types, and synthesized
@@ -468,7 +471,7 @@ behavior, not as a support gate or an assumed property of the new language.
 - [ ] Integers, floats, byte strings, aggregates, slices, maps, interfaces, and panic behavior match the source contracts.
 - [ ] Cooperative frames and host I/O obey owner, cancellation, deadline, and cleanup rules for the advertised scope.
 - [ ] Native capabilities and dependencies build on a clean runner.
-- [ ] Public library consumers pass under readable and compact naming modes.
+- [ ] Public library consumers pass under source, readable and compact naming modes.
 - [ ] Generated specifications, harness bindings, and library reference are current.
 - [ ] Reproducible output, source locations, manifests, and standalone builds are verified.
 - [ ] Applicable memory/lifetime checks pass, including repeated calls and cyclic/retained values.

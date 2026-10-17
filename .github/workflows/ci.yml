@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, proto/go-native-pause]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,7 +14,7 @@ jobs:
   checks:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -25,7 +25,7 @@ jobs:
           - {name: Language and corpus (Python), suite: language, target: python}
           - {name: Language and corpus (Java), suite: language, target: java}
           - {name: Language and corpus (C#), suite: language, target: csharp}
-          - {name: Language and corpus (Rust), suite: language, target: rust}
+          - {name: Language and corpus (Rust), suite: language, target: rust, timeout: 60}
           - {name: Language and corpus (C), suite: language, target: c}
           - {name: Language and corpus (Swift), suite: language, target: swift}
           - {name: Native contracts and browser, suite: contracts}
@@ -39,6 +39,9 @@ jobs:
           - {name: Float differential all targets, suite: floats}
           - {name: Naming modes all targets, suite: naming}
           - {name: Runtime conformance all targets, suite: runtime}
+          - {name: Native pause model, suite: pause}
+          - {name: Native pause model (Python), suite: pause, target: python}
+          - {name: Native pause model (Java), suite: pause-java}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -90,6 +93,55 @@ jobs:
         run: bash scripts/ci-bootstrap.sh --with-browser-deps
       - name: Run selected checks
         run: python3 scripts/ci-suite.py '${{ matrix.suite }}' --shard '${{ matrix.shard || 0 }}' --target '${{ matrix.target || '' }}'
+
+  # Swift under the native pause model, including a collection at every
+  # safepoint. Optional: it is not part of the required check.
+  swift-native:
+    name: Native pause model (Swift, optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libcurl4-openssl-dev libssl-dev zlib1g-dev libedit2 libxml2
+      - name: Cache pinned toolchain downloads
+        uses: actions/cache@v5
+        with:
+          path: .toolchains/downloads
+          key: ${{ runner.os }}-native-tools-${{ hashFiles('toolchains.lock') }}
+      - name: Prepare the pinned Swift toolchain
+        run: bash scripts/fetch-toolchains.sh swift
+      - name: Run Swift native pause model checks
+        run: python3 scripts/ci-suite.py pause-swift
+
+  # Native Rust has its own optional job to keep Cargo builds out of the
+  # required native-pause suite while the parent redesign is in progress.
+  rust-native:
+    name: Native pause model (Rust, optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev cmake perl
+      - name: Cache locked Cargo dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('targets/rust/tests/harness/Cargo.lock') }}
+      - name: Run Rust native pause model checks
+        run: python3 scripts/ci-suite.py pause-rust
 
   # Preserve the existing required check name and fail if any shard fails or skips.
   test:

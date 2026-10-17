@@ -2,6 +2,7 @@ package rt
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"strconv"
 	"sync"
@@ -31,6 +32,7 @@ type FrameBase struct {
 	Defers    []Deferred
 	parent    Frame
 	panicking *Panic
+	complete  func(*Task, Frame, *Panic)
 }
 
 func (b *FrameBase) Base() *FrameBase { return b }
@@ -71,7 +73,7 @@ type timer struct {
 }
 
 type scheduler struct {
-	runq          []*Task
+	runq          taskQueue
 	cur           *Task
 	main          *Task
 	nextID        int
@@ -93,7 +95,21 @@ type scheduler struct {
 	boundary  func()
 	retire    []func()
 	// live counts spawned tasks that have not finished.
-	live int
+	live           int
+	unawaited      map[any]*Panic
+	unawaitedOrder []any
+	// natives lists the native-pause tasks whose goroutines have started.
+	natives []*nativeTask
+	handoff handoff
+}
+
+// handoff passes the turn up the chain of native tasks resuming each other,
+// to the task to or, when to is nil, to the driver.
+type handoff struct {
+	pending bool
+	to      *Task
+	idle    bool
+	fault   any
 }
 
 // HostFault is an adapter implementation failure, never a source panic or
@@ -224,6 +240,12 @@ func (s *scheduler) shutdown() {
 		return
 	}
 	s.closed = true
+	for _, n := range s.natives {
+		if !n.active {
+			n.kill()
+		}
+	}
+	s.natives = nil
 	for _, op := range s.operations {
 		if op.cancel != nil {
 			op.cancel()
@@ -248,7 +270,7 @@ func (s *scheduler) shutdown() {
 	s.retire = nil
 	s.boundary = nil
 	s.operations = nil
-	s.runq = nil
+	s.runq = taskQueue{}
 	s.timers = nil
 	s.cur = nil
 	s.main = nil
@@ -282,7 +304,51 @@ func (s *scheduler) choose(n int) int {
 	return int(x % uint32(n))
 }
 
-func (s *scheduler) ready(t *Task) { s.runq = append(s.runq, t) }
+func (s *scheduler) ready(t *Task) { s.runq.push(t) }
+
+// taskQueue is the FIFO run queue: a ring whose size is a power of two.
+type taskQueue struct {
+	buf  []*Task
+	head int
+	n    int
+}
+
+func (q *taskQueue) len() int { return q.n }
+
+func (q *taskQueue) at(i int) *Task { return q.buf[(q.head+i)&(len(q.buf)-1)] }
+
+func (q *taskQueue) push(t *Task) {
+	if q.n == len(q.buf) {
+		buf := make([]*Task, max(8, 2*len(q.buf)))
+		for i := range q.n {
+			buf[i] = q.at(i)
+		}
+		q.buf, q.head = buf, 0
+	}
+	q.buf[(q.head+q.n)&(len(q.buf)-1)] = t
+	q.n++
+}
+
+func (q *taskQueue) pop() *Task {
+	t := q.buf[q.head]
+	q.buf[q.head] = nil
+	q.head = (q.head + 1) & (len(q.buf) - 1)
+	q.n--
+	return t
+}
+
+// popFront removes the first element, reusing the storage once q drains.
+func popFront[T any](q *[]T) T {
+	v := (*q)[0]
+	var zero T
+	(*q)[0] = zero
+	if len(*q) == 1 {
+		*q = (*q)[:0]
+	} else {
+		*q = (*q)[1:]
+	}
+	return v
+}
 
 // block parks the current task until something readies it.
 func (s *scheduler) block(t *Task) { t.blocked = true }
@@ -294,46 +360,88 @@ type fatalPanicSignal struct{ p *Panic }
 
 func (s *scheduler) next() *Task {
 	for {
-		if s.boundary != nil {
-			s.boundary()
+		if t := s.poll(); t != nil {
+			return t
 		}
-		if s.host {
-			s.fireDue(s.now())
+		s.idle()
+	}
+}
+
+// poll dequeues the next runnable task, or returns nil when none is ready.
+func (s *scheduler) poll() *Task {
+	if s.boundary != nil {
+		s.boundary()
+	}
+	if s.host {
+		s.fireDue(s.now())
+	}
+	s.drainHost()
+	if s.runq.len() == 0 {
+		return nil
+	}
+	return s.runq.pop()
+}
+
+// idle advances virtual time, waits for timers or host completions, or
+// reports a deadlock.
+func (s *scheduler) idle() {
+	if !s.host && len(s.timers) != 0 {
+		s.fireTimers()
+		return
+	}
+	if len(s.operations) == 0 && len(s.timers) == 0 {
+		s.checkFuturePanics()
+		if s.harness {
+			panic(deadlockSignal{})
 		}
-		s.drainHost()
-		if len(s.runq) != 0 {
-			break
+		s.shutdown()
+		fatal("all goroutines are asleep - deadlock!")
+	}
+	m := s.mailbox()
+	if len(s.timers) == 0 {
+		<-m.wake
+		return
+	}
+	at := s.timers[0].at
+	for _, t := range s.timers {
+		at = min(at, t.at)
+	}
+	alarm := time.NewTimer(time.Duration(max(0, at-s.now())))
+	select {
+	case <-m.wake:
+	case <-alarm.C:
+	}
+	alarm.Stop()
+}
+
+// drive runs the main task to completion. A native task that passes the
+// turn back to the driver leaves its reason in s.handoff.
+func (s *scheduler) drive() {
+	for !s.main.done {
+		s.run(s.next())
+		if h := s.handoff; h.pending {
+			s.handoff = handoff{}
+			if h.fault != nil {
+				panic(h.fault)
+			}
+			if h.idle {
+				s.idle()
+			}
 		}
-		if !s.host && len(s.timers) != 0 {
-			s.fireTimers()
-			continue
-		}
-		if len(s.operations) == 0 && len(s.timers) == 0 {
+	}
+	s.checkFuturePanics()
+}
+
+func (s *scheduler) checkFuturePanics() {
+	for _, key := range s.unawaitedOrder {
+		if p := s.unawaited[key]; p != nil {
 			if s.harness {
-				panic(deadlockSignal{})
+				panic(fatalPanicSignal{p})
 			}
 			s.shutdown()
-			fatal("all goroutines are asleep - deadlock!")
+			reportChain(p)
 		}
-		m := s.mailbox()
-		if len(s.timers) == 0 {
-			<-m.wake
-			continue
-		}
-		at := s.timers[0].at
-		for _, t := range s.timers {
-			at = min(at, t.at)
-		}
-		alarm := time.NewTimer(time.Duration(max(0, at-s.now())))
-		select {
-		case <-m.wake:
-		case <-alarm.C:
-		}
-		alarm.Stop()
 	}
-	t := s.runq[0]
-	s.runq = s.runq[1:]
-	return t
 }
 
 func (s *scheduler) fireTimers() {
@@ -397,22 +505,28 @@ func fatal(msg string) {
 
 // run drives a task's frames until it blocks or finishes.
 func (s *scheduler) run(t *Task) {
-	s.cur = t
-	t.blocked = false
-	if c := t.cleanup; c != nil {
-		t.cleanup = nil
-		c()
-	}
+	s.enter(t)
 	for !t.blocked && t.Frame != nil {
 		if s.boundary != nil {
 			s.boundary()
 		}
 		if p := t.resumePanic; p != nil {
-			t.resumePanic = nil
-			s.exit(t, t.Frame, p)
-			continue
+			if _, ok := t.Frame.(*nativeTask); !ok {
+				t.resumePanic = nil
+				s.exit(t, t.Frame, p)
+				continue
+			}
 		}
 		s.step(t)
+	}
+}
+
+func (s *scheduler) enter(t *Task) {
+	s.cur = t
+	t.blocked = false
+	if c := t.cleanup; c != nil {
+		t.cleanup = nil
+		c()
 	}
 }
 
@@ -422,6 +536,10 @@ func (s *scheduler) step(t *Task) {
 		if r := recover(); r != nil {
 			if _, ok := r.(HostFault); ok {
 				panic(r)
+			}
+			if p, ok := r.(*Panic); ok {
+				s.exit(t, f, p)
+				return
 			}
 			s.exit(t, f, &Panic{Value: r})
 		}
@@ -459,6 +577,10 @@ func (s *scheduler) finish(t *Task, f Frame) {
 		t.done = true
 		if t != s.main {
 			s.live--
+		}
+		if b.complete != nil {
+			b.complete(t, f, p)
+			return
 		}
 		if p != nil {
 			if s.harness {
@@ -658,9 +780,7 @@ func runMain(entry Frame, host bool) {
 	main := &Task{Frame: entry, deferTarget: -1}
 	s.main = main
 	s.ready(main)
-	for !main.done {
-		s.run(s.next())
-	}
+	s.drive()
 }
 
 func yieldTask(t *Task) {
@@ -713,9 +833,7 @@ func Await(fn func(t *Task)) (rv []any, blocked bool) {
 			}
 		}
 	}()
-	for !main.done {
-		s.run(s.next())
-	}
+	s.drive()
 	return h.res, false
 }
 
@@ -725,4 +843,176 @@ func ResetScheduler() {
 	sched.shutdown()
 	sched = &scheduler{rng: seed(), nextID: 1, harness: true}
 	sched.cur = &Task{deferTarget: -1}
+}
+
+// Under the native pause model a task is a coroutine (iter.Pull) running
+// ordinary Go functions, and its only frame is a nativeTask. A task that
+// blocks keeps the turn and runs the scheduler itself: it dequeues the next
+// task exactly as the driver would and resumes it directly, so coroutines
+// resume each other in a chain rooted at the driver. When the next task is
+// already in that chain, or only the driver can continue (idle, main done,
+// a fault), the turn is passed up the chain through s.handoff. Panics
+// leaving the task body propagate to Step.
+type nativeTask struct {
+	FrameBase
+	body   func(t *Task) []any
+	res    []any
+	next   func() (struct{}, bool)
+	stop   func()
+	yield  func(struct{}) bool
+	killed bool
+	// active is set while the coroutine runs or is resuming another task.
+	active bool
+}
+
+// killSignal unwinds a parked task at scheduler shutdown.
+type killSignal struct{}
+
+// NativeTask adapts a native-pause task body to the frame scheduler.
+func NativeTask(body func(t *Task) []any) Frame {
+	return &nativeTask{body: body}
+}
+
+func (n *nativeTask) Results() []any { return n.res }
+
+func (n *nativeTask) Step(t *Task) {
+	if n.next == nil {
+		n.next, n.stop = iter.Pull(func(yield func(struct{}) bool) {
+			n.yield = yield
+			n.res = n.body(t)
+		})
+		sched.natives = append(sched.natives, n)
+	}
+	n.active = true
+	_, parked := n.next()
+	n.active = false
+	if parked {
+		return
+	}
+	Ret(t, n)
+}
+
+// kill ends a parked task without running source code: its wrapped
+// deferred calls are skipped.
+func (n *nativeTask) kill() {
+	if n.stop == nil {
+		return
+	}
+	n.killed = true
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(killSignal); !ok {
+				panic(r)
+			}
+		}
+	}()
+	n.stop()
+}
+
+// Wait completes a pause primitive started by t: while the primitive keeps
+// t blocked, t passes the turn until it is resumed.
+func Wait(t *Task) {
+	if !t.blocked {
+		return
+	}
+	if sched.pass(t) {
+		if !t.Frame.(*nativeTask).yield(struct{}{}) {
+			panic(killSignal{})
+		}
+	}
+	if p := t.resumePanic; p != nil {
+		t.resumePanic = nil
+		panic(p)
+	}
+}
+
+// pass runs the driver's loop on blocked native task t until t is chosen
+// again, and reports false, or until the turn belongs further up the chain,
+// and reports true. Scheduler panics never unwind t: the driver raises them.
+func (s *scheduler) pass(t *Task) (up bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.handoff = handoff{pending: true, fault: r}
+			up = true
+		}
+	}()
+	for {
+		if h := &s.handoff; h.pending {
+			if h.to != t {
+				return true
+			}
+			*h = handoff{}
+			break
+		}
+		if s.main.done {
+			s.handoff = handoff{pending: true}
+			return true
+		}
+		u := s.poll()
+		if u == nil {
+			s.handoff = handoff{pending: true, idle: true}
+			return true
+		}
+		if u == t {
+			break
+		}
+		if n, ok := u.Frame.(*nativeTask); ok && n.active {
+			s.handoff = handoff{pending: true, to: u}
+			return true
+		}
+		s.run(u)
+	}
+	s.enter(t)
+	if s.boundary != nil {
+		s.boundary()
+	}
+	return false
+}
+
+// Defer runs a deferred call of a native-pause function, keeping the panic
+// chain and recover identity that frames keep in deferRunner.
+func Defer(t *Task, fid int, fn func()) {
+	r := recover()
+	if n, ok := t.Frame.(*nativeTask); ok && n.killed {
+		if r != nil {
+			panic(r)
+		}
+		return
+	}
+	if r == nil {
+		fn()
+		return
+	}
+	if _, ok := r.(HostFault); ok {
+		panic(r)
+	}
+	p, ok := r.(*Panic)
+	if !ok {
+		p = &Panic{Value: r}
+	}
+	saved, savedFid := t.curPanic, t.deferTarget
+	t.curPanic, t.deferTarget = p, fid
+	func() {
+		defer func() {
+			if x := recover(); x != nil {
+				t.curPanic, t.deferTarget = saved, savedFid
+				if _, ok := x.(HostFault); ok {
+					panic(x)
+				}
+				q, ok := x.(*Panic)
+				if !ok {
+					q = &Panic{Value: x}
+				}
+				if q.Prev == nil && q != p {
+					q.Prev = p
+				}
+				panic(q)
+			}
+		}()
+		fn()
+	}()
+	t.curPanic, t.deferTarget = saved, savedFid
+	if !p.Recovered {
+		panic(p)
+	}
 }

@@ -20,8 +20,15 @@ func runCompile(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	sf.register(fs)
 	target := fs.String("target", "go", "output target: "+targetNames()+", or ir")
 	out := fs.String("out", "", "output directory")
-	compactNames := fs.Bool("compact-names", false, "use short private generated identifiers")
+	nf := registerNameFlags(fs)
+	pauseModel := fs.String("pause-model", "frames", "suspending function form: frames or native")
+	lineDirectives := fs.Bool("line-directives", true, "annotate generated code with source positions")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	names, collisions, err := nf.resolve(fs, "", "")
+	if err != nil {
+		fmt.Fprintln(stderr, "compile:", err)
 		return 2
 	}
 	res, ds := driver.Build(ctx, driver.Options{Dir: sf.dir, Patterns: fs.Args(), Tags: sf.tagList(), Gate: subset.Gate(sf.gate)})
@@ -42,7 +49,7 @@ func runCompile(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	eds := driver.EmitWithOptions(*target, res, *out, driver.EmitOptions{CompactNames: *compactNames})
+	eds := driver.EmitWithOptions(*target, res, *out, driver.EmitOptions{Names: names, NameCollisions: collisions, PauseModel: *pauseModel, NoLineDirectives: !*lineDirectives})
 	if len(eds) > 0 {
 		_ = diagnostics.Write(stderr, eds, sf.json)
 		return 1

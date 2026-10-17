@@ -29,6 +29,17 @@ func calleeIdent(fun ast.Expr) *ast.Ident {
 // types the compiler and std/fmt can handle without it.
 func (c *checker) libraryCall(n *ast.CallExpr, fun ast.Expr) {
 	id := calleeIdent(fun)
+	if id != nil && catalog.TaskIntrinsic(c.info.Uses[id]) != "" {
+		c.called[id] = true
+		c.cooperative(n, "task."+id.Name)
+		if id.Name == "Start" && len(n.Args) == 1 {
+			sig, ok := c.info.TypeOf(n.Args[0]).Underlying().(*types.Signature)
+			if !ok || sig.Params().Len() != 0 {
+				c.unsupported(n.Args[0], "GCS006", "task.Start function", "Pass a zero-argument function with any result list.")
+			}
+		}
+		return
+	}
 	if id == nil {
 		return
 	}
@@ -96,7 +107,18 @@ func (c *checker) errorsAs(n *ast.CallExpr, fn *types.Func) {
 }
 
 func (c *checker) deferredIntrinsic(call *ast.CallExpr, stmt string) {
-	id := calleeIdent(call.Fun)
+	fun := ast.Unparen(call.Fun)
+	if inner, ok := fun.(*ast.CallExpr); ok {
+		if id := calleeIdent(inner.Fun); id != nil && catalog.TaskIntrinsic(c.info.Uses[id]) == "Await" {
+			c.unsupported(call, "GCS006", stmt+" task.Await", "Call task.Await inside a zero-argument function instead.")
+			return
+		}
+	}
+	id := calleeIdent(fun)
+	if id != nil && catalog.TaskIntrinsic(c.info.Uses[id]) != "" {
+		c.unsupported(call, "GCS006", stmt+" task."+id.Name, "Call the intrinsic inside a zero-argument function instead.")
+		return
+	}
 	if id == nil {
 		return
 	}

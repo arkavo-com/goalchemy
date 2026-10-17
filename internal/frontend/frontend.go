@@ -4,6 +4,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"go/ast"
 	"go/token"
 	"go/types"
 	"go/version"
@@ -70,6 +71,9 @@ func Load(ctx context.Context, opts Options) (*Program, []diagnostics.Diagnostic
 		Dir:     opts.Dir,
 		Fset:    fset,
 		Env:     env,
+		ParseFile: func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
+			return ParseFutureFile(fset, filename, src, false)
+		},
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule |
 			packages.NeedImports | packages.NeedDeps,

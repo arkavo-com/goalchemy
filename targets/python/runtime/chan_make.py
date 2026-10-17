@@ -1,6 +1,8 @@
 """core.chan.make: make(chan T, size), and the channel state shared by the
 channel and select runtime functions."""
 
+from collections import deque
+
 from ..types.panic import plain_panic
 from .task_spawn import sched, HostFault
 
@@ -62,18 +64,18 @@ class Chan:
     __slots__ = ("buf", "size", "closed", "recvq", "sendq", "zero", "__weakref__")
 
     def __init__(self, size, zero):
-        self.buf = []
+        self.buf = deque()
         self.size = size
         self.closed = False
-        self.recvq = []
-        self.sendq = []
+        self.recvq = deque()
+        self.sendq = deque()
         self.zero = zero
 
 
 def dequeue(q):
     sched().check()
     while q:
-        w = q.pop(0)
+        w = q.popleft()
         if w.live():
             return w
         w.detach()
@@ -88,7 +90,7 @@ def try_recv(ch):
     """Receives without blocking: (value, ok, done)."""
     sched().check()
     if ch.buf:
-        v = ch.buf.pop(0)
+        v = ch.buf.popleft()
         w = dequeue(ch.sendq)
         if w is not None:
             ch.buf.append(w.val)

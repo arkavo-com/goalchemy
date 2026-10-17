@@ -28,7 +28,7 @@ export function decChan<T>(raw: any, dec: (r: any) => T, zero: () => T): rt.Chan
 
 export function encChan<T>(ch: rt.Chan | null, enc: (v: T) => unknown): unknown {
   if (ch === null) return { nil: true };
-  return { chan: ch.buf.map((v) => enc(v as T)), cap: String(ch.size), closed: ch.closed };
+  return { chan: ch.buf.toArray().map((v) => enc(v as T)), cap: String(ch.size), closed: ch.closed };
 }
 
 export function encZero(_: unknown): unknown {

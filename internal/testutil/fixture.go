@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/format"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,7 +155,54 @@ var buildMu sync.Mutex
 func Native(fixtureDir, work string) (Observation, error) {
 	bin := filepath.Join(work, "native")
 	abs, _ := filepath.Abs(fixtureDir)
-	if o, err := run(abs, 2*time.Minute, "go", "build", "-o", bin, "."); err != nil || o.Exit != 0 {
+	args := []string{"build", "-o", bin}
+	replace := map[string]string{}
+	err := filepath.WalkDir(abs, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(src, []byte(frontend.TaskPackage)) {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, err := frontend.ParseFutureFile(fset, path, src, true)
+		if err != nil {
+			return err
+		}
+		var buf bytes.Buffer
+		if err := format.Node(&buf, fset, file); err != nil {
+			return err
+		}
+		copy := filepath.Join(work, fmt.Sprintf("reference-%d.go", len(replace)))
+		if err := os.WriteFile(copy, buf.Bytes(), 0600); err != nil {
+			return err
+		}
+		replace[path] = copy
+		return nil
+	})
+	if err != nil {
+		return Observation{}, err
+	}
+	if len(replace) > 0 {
+		data, err := json.Marshal(struct{ Replace map[string]string }{replace})
+		if err != nil {
+			return Observation{}, err
+		}
+		overlay := filepath.Join(work, "reference-overlay.json")
+		if err := os.WriteFile(overlay, data, 0600); err != nil {
+			return Observation{}, err
+		}
+		args = append(args, "-overlay", overlay)
+	}
+	args = append(args, ".")
+	if o, err := run(abs, 2*time.Minute, "go", args...); err != nil || o.Exit != 0 {
 		return o, fmt.Errorf("native build failed: %v\n%s", err, o.Stderr)
 	}
 	return run(work, time.Minute, bin)
@@ -185,6 +234,50 @@ type Runner func(out string) (Observation, error)
 // Fixture subtests run in parallel. Limit Swift frontend builds so a full
 // language matrix does not exhaust memory on a two-core CI runner.
 var swiftBuilds = make(chan struct{}, 2)
+
+// BuildSwift builds a compiled Swift program to .build/program without
+// running it, sharing the fixture runner's build limit.
+func BuildSwift(out string) error {
+	swiftBuilds <- struct{}{}
+	defer func() { <-swiftBuilds }()
+	o, err := run(out, 5*time.Minute, "sh", "-c", "sed '/^exec /d' run.sh | sh")
+	if err == nil && o.Exit != 0 {
+		err = fmt.Errorf("swift build failed:\n%s", o.Stderr)
+	}
+	return err
+}
+
+// BuildCSharp compiles a generated C# program to bin/main.dll without
+// running it.
+func BuildCSharp(out string) error {
+	o, err := run(out, 3*time.Minute, "sh", "-c", "sed '/^exec /d' run.sh | sh")
+	if err == nil && o.Exit != 0 {
+		err = fmt.Errorf("csharp build failed:\n%s", o.Stderr)
+	}
+	return err
+}
+
+// BuildJava compiles a generated Java program to classes without running
+// it, and returns the command that runs it.
+func BuildJava(out string) ([]string, error) {
+	o, err := run(out, 3*time.Minute, "sh", "-c", "sed '/^exec /d' run.sh | sh")
+	if err == nil && o.Exit != 0 {
+		err = fmt.Errorf("java build failed:\n%s", o.Stderr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	script, err := os.ReadFile(filepath.Join(out, "run.sh"))
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(script), "\n") {
+		if cmd, ok := strings.CutPrefix(line, "exec "); ok {
+			return strings.Fields(cmd), nil
+		}
+	}
+	return nil, fmt.Errorf("java run.sh has no exec line")
+}
 
 var Runners = map[string]Runner{
 	"swift": func(out string) (Observation, error) {
@@ -375,4 +468,13 @@ func HasDirective(src, name string) bool {
 		}
 	}
 	return false
+}
+
+// Names selects compact or readable private names, the two decorated modes
+// that tests compare against each other.
+func Names(compact bool) string {
+	if compact {
+		return "compact"
+	}
+	return "readable"
 }

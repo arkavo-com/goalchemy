@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: b95b2428b3ab5c697525d462a523f9e704a073ab22c84388681219cb3e0bbf79
 symbol: "rt.Spawn"
 implementation: runtime/task_spawn.go
-implementation_hash: fbf34b283dd0c801c4082ab14a6c8627d29e7ce256ad7d92ea94bae920a2991b
+implementation_hash: fb2bafa39d1eef7bdf8d505a4ee9557baffe51153a9741efd8b6cf3f5b667e38
 summary: "go f(args): enqueue a new task after evaluating its callee and arguments; the parent continues."
 suspension: may
 determinism: controlled

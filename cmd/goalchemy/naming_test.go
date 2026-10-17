@@ -3,11 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"github.com/eugenioenko/goalchemy/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestNamingFlagsAndConfigOverride(t *testing.T) {
@@ -25,15 +26,17 @@ func TestNamingFlagsAndConfigOverride(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
-		want bool
+		want string
 	}{
-		{"compile default", []string{"compile", "-C", dir, "-target", target, "-out", filepath.Join(dir, "output"), "."}, false},
-		{"compile compact", []string{"compile", "-C", dir, "-target", target, "-out", filepath.Join(dir, "output"), "--compact-names", "."}, true},
-		{"run default", []string{"run", "-C", dir, "-target", target, "--keep", "."}, false},
-		{"run compact", []string{"run", "-C", dir, "-target", target, "--keep", "--compact-names", "."}, true},
-		{"build config", []string{"build", "-config", filepath.Join(dir, "goalchemy.yaml")}, true},
-		{"build readable override", []string{"build", "-config", filepath.Join(dir, "goalchemy.yaml"), "--compact-names=false"}, false},
-		{"build compact override", []string{"build", "-config", filepath.Join(dir, "goalchemy.yaml"), "--compact-names"}, true},
+		{"compile default", []string{"compile", "-C", dir, "-target", target, "-out", filepath.Join(dir, "output"), "."}, "source"},
+		{"compile compact", []string{"compile", "-C", dir, "-target", target, "-out", filepath.Join(dir, "output"), "--compact-names", "."}, "compact"},
+		{"compile readable", []string{"compile", "-C", dir, "-target", target, "-out", filepath.Join(dir, "output"), "--names=readable", "."}, "readable"},
+		{"run default", []string{"run", "-C", dir, "-target", target, "--keep", "."}, "source"},
+		{"run compact", []string{"run", "-C", dir, "-target", target, "--keep", "--names=compact", "."}, "compact"},
+		{"build config", []string{"build", "-config", filepath.Join(dir, "goalchemy.yaml")}, "compact"},
+		{"build default override", []string{"build", "-config", filepath.Join(dir, "goalchemy.yaml"), "--compact-names=false"}, "source"},
+		{"build readable override", []string{"build", "-config", filepath.Join(dir, "goalchemy.yaml"), "--names=readable"}, "readable"},
+		{"build compact override", []string{"build", "-config", filepath.Join(dir, "goalchemy.yaml"), "--compact-names"}, "compact"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -60,9 +63,22 @@ func TestNamingFlagsAndConfigOverride(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if readable := strings.Contains(string(source), "fn_main_main_"); readable == tc.want {
-				t.Fatalf("generated readable=%v, want compact=%v\n%s", readable, tc.want, source)
+			mode := "compact"
+			if strings.Contains(string(source), "fn_main_main_") {
+				mode = "readable"
+			} else if strings.Contains(string(source), "func CountBinding(binding PolicyBinding) int {") {
+				mode = "source"
+			}
+			if mode != tc.want {
+				t.Fatalf("generated %s names, want %s\n%s", mode, tc.want, source)
 			}
 		})
+	}
+}
+
+func TestNamingFlagConflicts(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"compile", "-target", "go", "-out", t.TempDir(), "--compact-names", "--names=source", "."}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "conflicts") {
+		t.Fatalf("exit %d: %s", code, &stderr)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/driver"
 	"github.com/eugenioenko/goalchemy/internal/link"
 	"github.com/eugenioenko/goalchemy/internal/subset"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestGeneratedCPackageLibrary(t *testing.T) {
@@ -70,7 +71,7 @@ func CRC(ctx context.Context,data []byte)(uint32,error){return checksum.CRC32IEE
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			out, consumer := t.TempDir(), t.TempDir()
-			if ds := driver.EmitWithOptions("c", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("c", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			adapter := `#include "goalchemy.h"

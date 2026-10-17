@@ -20,7 +20,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), symbols: symbols, contracts: map[string]bool{}, classes: map[*ir.Type]string{},
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), symbols: symbols, contracts: map[string]bool{}, classes: map[*ir.Type]string{},
 		tds: map[*ir.Type]string{}, seenHelp: map[*ir.Type]bool{}, locations: map[string]string{}, imports: map[string]map[string]bool{}}
 	bodies := map[string]*bytes.Buffer{"_shared.py": {}, "main.py": {}}
 	owners := map[string]string{}
@@ -151,6 +151,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		source.WriteByte('\n')
 		source.Write(bodies[file].Bytes())
 		src, lines := e.resolveMarkers(source.String())
+		if e.p.NoLineDirectives {
+			lines = nil
+		}
 		files = append(files, artifact.File{Path: file, Source: []byte(src), Owner: owners[file], Lines: lines})
 	}
 	var contracts []string

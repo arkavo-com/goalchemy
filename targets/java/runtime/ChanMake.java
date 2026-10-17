@@ -1,8 +1,8 @@
 package rt;
 
+import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.LinkedList;
-import java.util.ArrayList;
 import java.util.function.Supplier;
 
 /** core.chan.make: make(chan T, size), and the channel state shared by the
@@ -60,8 +60,8 @@ public final class ChanMake {
         final Deque<Object> buf = new LinkedList<>();
         public final int size;
         public boolean closed;
-        ArrayList<Waiter> recvq = new ArrayList<>();
-        ArrayList<Waiter> sendq = new ArrayList<>();
+        ArrayDeque<Waiter> recvq = new ArrayDeque<>();
+        ArrayDeque<Waiter> sendq = new ArrayDeque<>();
         final Supplier<Object> zero;
 
         Chan(int size, Supplier<Object> zero) {
@@ -74,16 +74,16 @@ public final class ChanMake {
         }
     }
 
-    static Waiter dequeue(ArrayList<Waiter> q) {
+    static Waiter dequeue(ArrayDeque<Waiter> q) {
         while (!q.isEmpty()) {
-            Waiter w = q.remove(0);
+            Waiter w = q.poll();
             if (w.live()) return w;
             w.clear();
         }
         return null;
     }
 
-    static boolean hasLive(ArrayList<Waiter> q) {
+    static boolean hasLive(ArrayDeque<Waiter> q) {
         for (Waiter w : q) if (w.live()) return true;
         return false;
     }

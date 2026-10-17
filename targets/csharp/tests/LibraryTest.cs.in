@@ -85,7 +85,13 @@ static class LibraryTest
  [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
  static WeakReference SourceRoot()
  {
-  Frame frame=R.sched.cur.frame;while(frame!=null){foreach(var field in frame.GetType().GetFields(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)){var value=field.GetValue(frame);if(value!=null&&value.GetType().DeclaringType==typeof(Generated)&&value.GetType().IsNestedPrivate&&value.GetType().GetMethod("_clone",BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly)!=null)return new WeakReference(value);}frame=frame.parent;}throw new Exception("actual source root not found");
+  Frame frame=R.sched.cur.frame;while(frame!=null){var value=SourceIn(frame,true);if(value!=null)return new WeakReference(value);frame=frame.parent;}throw new Exception("actual source root not found");
+ }
+ // Frames hold source values in fields; native-pause frames in their body closure.
+ static object SourceIn(object holder,bool closures)
+ {
+  foreach(var field in holder.GetType().GetFields(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance)){var value=field.GetValue(holder);if(value is Delegate d){if(closures&&d.Target!=null&&SourceIn(d.Target,false) is object inner)return inner;}else if(value!=null&&value.GetType().DeclaringType==typeof(Generated)&&value.GetType().IsNestedPrivate&&value.GetType().GetMethod("_clone",BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly)!=null)return value;}
+  return null;
  }
  static void GCRelease()
  {

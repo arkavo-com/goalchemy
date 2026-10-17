@@ -26,7 +26,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if p.Cooperative && !p.Library {
 		entry = "program.ts"
 	}
-	e := &emitter{p: p, names: naming.New(p), symbols: symbols,
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), symbols: symbols,
 		contracts: map[string]bool{}, classes: map[*ir.Type]string{}, arrays: map[*ir.Type]bool{},
 		tds: map[*ir.Type]string{}, seenHelp: map[*ir.Type]bool{}, locations: map[string]string{},
 		globals: map[string]bool{}, imports: map[string]map[string]bool{}}
@@ -100,10 +100,16 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	} else if p.Cooperative {
 		e.use("core.task.spawn")
 		start := e.symbol(p.Entry.Sym) + "()"
+		run := "export function $run(): void { rt.runMain(%s); }"
 		if !p.Entry.MaySuspend {
 			start = "rt.sync(() => { " + e.symbol(p.Entry.Sym) + "(); return []; })"
+		} else if e.native() {
+			start = "rt.nativeTask((_t: rt.Task) => " + e.symbol(p.Entry.Sym) + "(_t), 0)"
 		}
-		fmt.Fprintf(bodies[entry], "\nexport function $run(): void { rt.runMain(%s); }\nexport function $runHost(host: rt.RuntimeHost = rt.runtimeHost): Promise<void> { return rt.runMainHost(%s, host); }\n", start, start)
+		if e.native() {
+			run = "export function $run(): void | Promise<void> { return rt.runMain(%s); }"
+		}
+		fmt.Fprintf(bodies[entry], "\n"+run+"\nexport function $runHost(host: rt.RuntimeHost = rt.runtimeHost): Promise<void> { return rt.runMainHost(%s, host); }\n", start, start)
 	} else {
 		fmt.Fprintf(bodies[entry], "\nrt.main(() => {\n  %s();\n", e.symbol(p.Init.Sym))
 		if p.Main != nil {
@@ -157,7 +163,11 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		b.Write(bodies[file].Bytes())
 		src, sm := e.resolveMarkers(b.String())
 		sm.File = path.Base(file)
-		src += "//# sourceMappingURL=" + path.Base(file) + ".map\n"
+		if e.p.NoLineDirectives {
+			sm = nil
+		} else {
+			src += "//# sourceMappingURL=" + path.Base(file) + ".map\n"
+		}
 		files = append(files, artifact.File{Path: file, Source: []byte(src), Owner: owners[file], SourceMap: sm})
 	}
 	var cs []string

@@ -138,7 +138,7 @@ func (e *emitter) library() (string, error) {
 			}
 			b.WriteString("}\n")
 		}
-		fmt.Fprintf(&b, "fn input_%s(v: %s) -> V {\n", e.names.Type(u, ""), typ(u))
+		fmt.Fprintf(&b, "fn %s(v: %s) -> V {\n", e.names.Type(u, "input_"), typ(u))
 		switch u.Kind {
 		case ir.KFloat:
 			b.WriteString("V::Float(v as f64)\n")
@@ -151,7 +151,7 @@ func (e *emitter) library() (string, error) {
 		case ir.KStruct:
 			var fields []string
 			for _, f := range u.Fields {
-				fields = append(fields, fmt.Sprintf("input_%s(v.%s)", e.names.Type(f.Type.U(), ""), f.Name))
+				fields = append(fields, fmt.Sprintf("%s(v.%s)", e.names.Type(f.Type.U(), "input_"), f.Name))
 			}
 			fmt.Fprintf(&b, "vals(vec![%s])\n", strings.Join(fields, ","))
 		case ir.KArray, ir.KSlice:
@@ -166,7 +166,7 @@ func (e *emitter) library() (string, error) {
 					b.WriteString("library_bytes(v)\n")
 				}
 			} else {
-				fmt.Fprintf(&b, "let h=vals(v.into_iter().map(input_%s).collect()).h();\n", e.names.Type(u.Elem.U(), ""))
+				fmt.Fprintf(&b, "let h=vals(v.into_iter().map(%s).collect()).h();\n", e.names.Type(u.Elem.U(), "input_"))
 				if u.Kind == ir.KArray {
 					b.WriteString("V::Obj(h)\n")
 				} else {
@@ -175,7 +175,7 @@ func (e *emitter) library() (string, error) {
 			}
 		}
 		b.WriteString("}\n")
-		fmt.Fprintf(&b, "fn output_%s(v: V) -> %s {\n", e.names.Type(u, ""), typ(u))
+		fmt.Fprintf(&b, "fn %s(v: V) -> %s {\n", e.names.Type(u, "output_"), typ(u))
 		switch u.Kind {
 		case ir.KFloat:
 			fmt.Fprintf(&b, "v.f() as f%d\n", u.FloatBits)
@@ -188,7 +188,7 @@ func (e *emitter) library() (string, error) {
 		case ir.KStruct:
 			fmt.Fprintf(&b, "%s {\n", typ(u))
 			for i, f := range u.Fields {
-				fmt.Fprintf(&b, "%s:output_%s(fld(&v,%d)),\n", f.Name, e.names.Type(f.Type.U(), ""), i)
+				fmt.Fprintf(&b, "%s:%s(fld(&v,%d)),\n", f.Name, e.names.Type(f.Type.U(), "output_"), i)
 			}
 			b.WriteString("}\n")
 		case ir.KArray, ir.KSlice:
@@ -200,9 +200,9 @@ func (e *emitter) library() (string, error) {
 				}
 			} else {
 				if u.Kind == ir.KArray {
-					fmt.Fprintf(&b, "(0..%d).map(|i|output_%s(slot(v.h(),i))).collect()\n", u.Len, e.names.Type(u.Elem.U(), ""))
+					fmt.Fprintf(&b, "(0..%d).map(|i|%s(slot(v.h(),i))).collect()\n", u.Len, e.names.Type(u.Elem.U(), "output_"))
 				} else {
-					fmt.Fprintf(&b, "let(h,o,n,_,_)=slice_parts(&v);(0..n as usize).map(|i|output_%s(slot(h,o as usize+i))).collect()\n", e.names.Type(u.Elem.U(), ""))
+					fmt.Fprintf(&b, "let(h,o,n,_,_)=slice_parts(&v);(0..n as usize).map(|i|%s(slot(h,o as usize+i))).collect()\n", e.names.Type(u.Elem.U(), "output_"))
 				}
 			}
 		}
@@ -276,7 +276,7 @@ func (e *emitter) library() (string, error) {
 	}
 	owner := func(f *ir.Func, args []string, output string) string {
 		c := call(f, args)
-		return fmt.Sprintf("library_owner_call(%d, init_zero_globals, options, &inst, fresh, move |ctx| {\nlet _ = &ctx;\nif fresh { library_sequence(%s, move || %s) } else { library_call(move || %s) }\n}, |rv, inst| {\nlet _ = inst;\n%s\n})", len(e.p.Globals), init, c, c, output)
+		return fmt.Sprintf("library_owner_call(%d, _init_zero_globals, options, &inst, fresh, move |ctx| {\nlet _ = &ctx;\nif fresh { library_sequence(%s, move || %s) } else { library_call(move || %s) }\n}, |rv, inst| {\nlet _ = inst;\n%s\n})", len(e.p.Globals), init, c, c, output)
 	}
 	streamOps := func(name string, ops ir.StreamOps, obj func(*ir.Type) string, closeBody string) {
 		op := func(fn string, params []string, result, out string) string {
@@ -284,7 +284,7 @@ func (e *emitter) library() (string, error) {
 			args := []string{obj(f.Sig.Params[0])}
 			var ps []string
 			for i, p := range params {
-				args = append(args, fmt.Sprintf("input_%s(%s)", e.names.Type(f.Sig.Params[i+1].U(), ""), p))
+				args = append(args, fmt.Sprintf("%s(%s)", e.names.Type(f.Sig.Params[i+1].U(), "input_"), p))
 				ps = append(ps, fmt.Sprintf("%s: %s", p, typ(f.Sig.Params[i+1])))
 			}
 			last := len(f.Sig.Results) - 1
@@ -295,7 +295,7 @@ func (e *emitter) library() (string, error) {
 		}
 		res := func(fn string, i int) string {
 			t := e.p.HostIOFunc(fn).Sig.Results[i]
-			return fmt.Sprintf("output_%s(rv[%d].clone())", e.names.Type(t.U(), ""), i)
+			return fmt.Sprintf("%s(rv[%d].clone())", e.names.Type(t.U(), "output_"), i)
 		}
 		read, write, seek := "None", "None", "None"
 		if ops.Read {
@@ -411,7 +411,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 			args = append(args, fmt.Sprintf("library_obj(&h%d)", i+1))
 			continue
 		}
-		args = append(args, fmt.Sprintf("input_%s(%s)", e.names.Type(t.U(), ""), a))
+		args = append(args, fmt.Sprintf("%s(%s)", e.names.Type(t.U(), "input_"), a))
 	}
 	results := f.Sig.Results
 	n := len(results)
@@ -430,7 +430,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 			outs = append(outs, fmt.Sprintf("library_wrap(inst, rv[%d].clone(), \"io.%s\").map(|h| SourceStream::new(h, &STREAM_OPS_%s))", i, k, strings.ToUpper(k)))
 			continue
 		}
-		outs = append(outs, fmt.Sprintf("output_%s(rv[%d].clone())", e.names.Type(results[i].U(), ""), i))
+		outs = append(outs, fmt.Sprintf("%s(rv[%d].clone())", e.names.Type(results[i].U(), "output_"), i))
 	}
 	result, out := "()", "()"
 	if n == 1 {

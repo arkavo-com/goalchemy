@@ -16,6 +16,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -41,21 +42,21 @@ type emitter struct {
 
 const marker = "\x00@"
 
-const spawnHelper = `    static void spawnCall(Fn f, object[] a) {
-        Fn g = Program.fnchk(f);
+const spawnHelper = `    static void _spawnCall(Fn _f, object[] _a) {
+        Fn g = Program.fnchk(_f);
         R.spawn(R.sync(() => {
-            g.F(a);
+            g.F(_a);
             return Array.Empty<object>();
         }));
     }
 
 `
 
-const mainHelpers = `    static Fn envFn(object[] env, Func<object[], object[], object> f) => new Fn(a => f(env, a));
+const mainHelpers = `    static Fn _envFn(object[] _env, Func<object[], object[], object> _f) => new Fn(_a => _f(_env, _a));
 
-    static string missing(Box x, string[] ids, string[] names) {
-        string id = Box.implementsAll(x.t, ids);
-        for (int i = 0; i < ids.Length; i++) if (ids[i] == id) return names[i];
+    static string _missing(Box _x, string[] ids, string[] names) {
+        string id = Box.implementsAll(_x.t, ids);
+        for (int _i = 0; _i < ids.Length; _i++) if (ids[_i] == id) return names[_i];
         return id;
     }
 
@@ -98,11 +99,12 @@ func (e *emitter) rc(contract string) string {
 }
 
 var opaque = map[string][2]string{
-	"sync.Mutex":      {"GoMutex", "std.sync.mutex.lock"},
-	"sync.WaitGroup":  {"WaitGroup", "std.sync.waitgroup.add"},
-	"context.Context": {"GoContext", "std.context.err"},
-	"crypto.Key":      {"Native.Key", "lib.crypto.close"},
-	"http.Exchange":   {"R.Exchange", "lib.http.exchange_close"},
+	"task.FutureState": {"FutureState", "lib.task.start"},
+	"sync.Mutex":       {"GoMutex", "std.sync.mutex.lock"},
+	"sync.WaitGroup":   {"WaitGroup", "std.sync.waitgroup.add"},
+	"context.Context":  {"GoContext", "std.context.err"},
+	"crypto.Key":       {"Native.Key", "lib.crypto.close"},
+	"http.Exchange":    {"R.Exchange", "lib.http.exchange_close"},
 }
 
 func intKind(t *ir.Type) string { return t.U().Int.String() }
@@ -125,6 +127,8 @@ func unsigned64(t *ir.Type) bool {
 }
 
 func (e *emitter) susp(t *ir.Type) bool { return e.p.SuspTypes[t.U()] }
+
+func (e *emitter) native() bool { return e.p.PauseModel == "native" }
 
 func (e *emitter) adapt(f string, n int) string {
 	e.use("core.task.spawn")
@@ -241,24 +245,24 @@ func (e *emitter) structClass(t *ir.Type) {
 		fmt.Fprintf(&b, "            %s = %s;\n", e.fieldProp(t, i), e.zero(f.Type))
 	}
 	b.WriteString("        }\n")
-	fmt.Fprintf(&b, "        public %s _clone() {\n            %s r = new %s();\n            r._set(this);\n            return r;\n        }\n", n, n, n)
-	fmt.Fprintf(&b, "        public void _set(%s o) {\n", n)
+	fmt.Fprintf(&b, "        public %s _clone() {\n            %s _r = new %s();\n            _r._set(this);\n            return _r;\n        }\n", n, n, n)
+	fmt.Fprintf(&b, "        public void _set(%s _o) {\n", n)
 	for i, f := range t.Fields {
 		p := e.fieldProp(t, i)
 		if f.Type.IsAggregate() {
-			fmt.Fprintf(&b, "            %s;\n", e.setStmt(f.Type, "this."+p, "o."+p))
+			fmt.Fprintf(&b, "            %s;\n", e.setStmt(f.Type, "this."+p, "_o."+p))
 		} else {
-			fmt.Fprintf(&b, "            this.%s = o.%s;\n", p, p)
+			fmt.Fprintf(&b, "            this.%s = _o.%s;\n", p, p)
 		}
 	}
 	b.WriteString("        }\n")
-	fmt.Fprintf(&b, "        public bool _eq(%s o) {\n            return true", n)
+	fmt.Fprintf(&b, "        public bool _eq(%s _o) {\n            return true", n)
 	for i, f := range t.Fields {
 		if f.Name == "_" {
 			continue
 		}
 		p := e.fieldProp(t, i)
-		fmt.Fprintf(&b, " && %s", e.eqExpr(f.Type, "this."+p, "o."+p))
+		fmt.Fprintf(&b, " && %s", e.eqExpr(f.Type, "this."+p, "_o."+p))
 	}
 	b.WriteString(";\n        }\n")
 	b.WriteString("        public object _key() {\n            return new KeyList(new object[] {")
@@ -277,23 +281,23 @@ func (e *emitter) structClass(t *ir.Type) {
 func (e *emitter) arrayHelpers(t *ir.Type) {
 	if byteContainer(t) {
 		fmt.Fprintf(&e.helperOut, "    static byte[] %s() => new byte[%d];\n", e.names.Type(t, "zero_"), t.Len)
-		fmt.Fprintf(&e.helperOut, "    static byte[] %s(byte[] s) => (byte[])s.Clone();\n", e.names.Type(t, "clone_"))
-		fmt.Fprintf(&e.helperOut, "    static void %s(byte[] d, byte[] s) { Array.Copy(s, d, %d); }\n", e.names.Type(t, "set_"), t.Len)
-		fmt.Fprintf(&e.helperOut, "    static bool %s(byte[] x, byte[] y) { for (int i = 0; i < %d; i++) if (x[i] != y[i]) return false; return true; }\n", e.names.Type(t, "eq_"), t.Len)
-		fmt.Fprintf(&e.helperOut, "    static object %s(byte[] x) => System.Text.Encoding.Latin1.GetString(x);\n\n", e.names.Type(t, "key_"))
+		fmt.Fprintf(&e.helperOut, "    static byte[] %s(byte[] _s) => (byte[])_s.Clone();\n", e.names.Type(t, "clone_"))
+		fmt.Fprintf(&e.helperOut, "    static void %s(byte[] _d, byte[] _s) { Array.Copy(_s, _d, %d); }\n", e.names.Type(t, "set_"), t.Len)
+		fmt.Fprintf(&e.helperOut, "    static bool %s(byte[] _x, byte[] _y) { for (int _i = 0; _i < %d; _i++) if (_x[_i] != _y[_i]) return false; return true; }\n", e.names.Type(t, "eq_"), t.Len)
+		fmt.Fprintf(&e.helperOut, "    static object %s(byte[] _x) => System.Text.Encoding.Latin1.GetString(_x);\n\n", e.names.Type(t, "key_"))
 		return
 	}
 	el := t.Elem
 	var b strings.Builder
-	fmt.Fprintf(&b, "    static object[] %s() {\n        object[] a = new object[%d];\n        for (int i = 0; i < %d; i++) a[i] = %s;\n        return a;\n    }\n", e.names.Type(t, "zero_"), t.Len, t.Len, e.zero(el))
-	fmt.Fprintf(&b, "    static object[] %s(object[] s) {\n        object[] a = new object[%d];\n        for (int i = 0; i < %d; i++) a[i] = %s;\n        return a;\n    }\n", e.names.Type(t, "clone_"), t.Len, t.Len, e.cloneExpr(el, e.cast(el, "s[i]")))
+	fmt.Fprintf(&b, "    static object[] %s() {\n        object[] _a = new object[%d];\n        for (int _i = 0; _i < %d; _i++) _a[_i] = %s;\n        return _a;\n    }\n", e.names.Type(t, "zero_"), t.Len, t.Len, e.zero(el))
+	fmt.Fprintf(&b, "    static object[] %s(object[] _s) {\n        object[] _a = new object[%d];\n        for (int _i = 0; _i < %d; _i++) _a[_i] = %s;\n        return _a;\n    }\n", e.names.Type(t, "clone_"), t.Len, t.Len, e.cloneExpr(el, e.cast(el, "_s[_i]")))
 	if el.IsAggregate() {
-		fmt.Fprintf(&b, "    static void %s(object[] d, object[] s) {\n        for (int i = 0; i < %d; i++) %s;\n    }\n", e.names.Type(t, "set_"), t.Len, e.setStmt(el, e.cast(el, "d[i]"), e.cast(el, "s[i]")))
+		fmt.Fprintf(&b, "    static void %s(object[] _d, object[] _s) {\n        for (int _i = 0; _i < %d; _i++) %s;\n    }\n", e.names.Type(t, "set_"), t.Len, e.setStmt(el, e.cast(el, "_d[_i]"), e.cast(el, "_s[_i]")))
 	} else {
-		fmt.Fprintf(&b, "    static void %s(object[] d, object[] s) {\n        Array.Copy(s, d, %d);\n    }\n", e.names.Type(t, "set_"), t.Len)
+		fmt.Fprintf(&b, "    static void %s(object[] _d, object[] _s) {\n        Array.Copy(_s, _d, %d);\n    }\n", e.names.Type(t, "set_"), t.Len)
 	}
-	fmt.Fprintf(&b, "    static bool %s(object[] x, object[] y) {\n        for (int i = 0; i < %d; i++) if (!(%s)) return false;\n        return true;\n    }\n", e.names.Type(t, "eq_"), t.Len, e.eqExpr(el, e.cast(el, "x[i]"), e.cast(el, "y[i]")))
-	fmt.Fprintf(&b, "    static object %s(object[] x) {\n        object[] k = new object[%d];\n        for (int i = 0; i < %d; i++) k[i] = %s;\n        return new KeyList(k);\n    }\n\n", e.names.Type(t, "key_"), t.Len, t.Len, e.keyExpr(el, e.cast(el, "x[i]")))
+	fmt.Fprintf(&b, "    static bool %s(object[] _x, object[] _y) {\n        for (int _i = 0; _i < %d; _i++) if (!(%s)) return false;\n        return true;\n    }\n", e.names.Type(t, "eq_"), t.Len, e.eqExpr(el, e.cast(el, "_x[_i]"), e.cast(el, "_y[_i]")))
+	fmt.Fprintf(&b, "    static object %s(object[] _x) {\n        object[] _k = new object[%d];\n        for (int _i = 0; _i < %d; _i++) _k[_i] = %s;\n        return new KeyList(_k);\n    }\n\n", e.names.Type(t, "key_"), t.Len, t.Len, e.keyExpr(el, e.cast(el, "_x[_i]")))
 	e.helperOut.WriteString(b.String())
 }
 
@@ -348,7 +352,7 @@ func (e *emitter) cloneFn(t *ir.Type) string {
 	if !t.IsAggregate() {
 		return "null"
 	}
-	return "v => " + e.cloneExpr(t, e.cast(t, "v"))
+	return "_v => " + e.cloneExpr(t, e.cast(t, "_v"))
 }
 
 func (e *emitter) setStmt(t *ir.Type, dst, src string) string {
@@ -409,7 +413,7 @@ func (e *emitter) keyExpr(t *ir.Type, x string) string {
 func (e *emitter) keyFn(t *ir.Type) string {
 	switch t.U().Kind {
 	case ir.KFloat, ir.KStruct, ir.KArray, ir.KInterface, ir.KPointer, ir.KChan, ir.KOpaque:
-		return "k => " + e.keyExpr(t, e.cast(t, "k"))
+		return "_k => " + e.keyExpr(t, e.cast(t, "_k"))
 	}
 	return "GoMap.identityKey"
 }
@@ -428,7 +432,7 @@ func (e *emitter) td(t *ir.Type) string {
 func (e *emitter) fnLit(f *ir.Func, cloneRecv *ir.Type) string {
 	var as []string
 	for i, p := range f.Params {
-		a := e.cast(p.Type, fmt.Sprintf("a[%d]", i))
+		a := e.cast(p.Type, fmt.Sprintf("_a[%d]", i))
 		if i == 0 && cloneRecv != nil {
 			a = e.cloneExpr(cloneRecv, a)
 		}
@@ -436,9 +440,9 @@ func (e *emitter) fnLit(f *ir.Func, cloneRecv *ir.Type) string {
 	}
 	call := e.symbol(f.Sym) + "(" + strings.Join(as, ", ") + ")"
 	if len(f.Results) == 0 && !f.MaySuspend {
-		return "new Fn(a => { " + call + "; return null; })"
+		return "new Fn(_a => { " + call + "; return null; })"
 	}
-	return "new Fn(a => " + call + ")"
+	return "new Fn(_a => " + call + ")"
 }
 
 func (e *emitter) typeDescs(b *bytes.Buffer) {
@@ -468,12 +472,12 @@ func (e *emitter) typeDescs(b *bytes.Buffer) {
 		case ir.KFloat:
 			basic = strconv.Quote(u.Basic)
 		}
-		eq := "(a, b) => " + e.eqExpr(t, e.cast(t, "a"), e.cast(t, "b"))
-		key := "a => " + e.keyExpr(t, e.cast(t, "a"))
+		eq := "(_a, _b) => " + e.eqExpr(t, e.cast(t, "_a"), e.cast(t, "_b"))
+		key := "_a => " + e.keyExpr(t, e.cast(t, "_a"))
 		comparable := "true"
 		if !t.Comparable() {
-			eq = fmt.Sprintf("(a, b) => Panics.uncomparableEq(%q)", name)
-			key = fmt.Sprintf("a => Panics.unhashableKey(%q)", name)
+			eq = fmt.Sprintf("(_a, _b) => Panics.uncomparableEq(%q)", name)
+			key = fmt.Sprintf("_a => Panics.unhashableKey(%q)", name)
 			comparable = "false"
 		}
 		var ms []string
@@ -503,6 +507,10 @@ type fnEmitter struct {
 	order  map[*ir.Block]int
 	defers bool
 	frame  bool
+	// task is set when f is an async method of the native pause model,
+	// taking the running task as its first parameter t.
+	task  bool
+	folds *structure.Folds
 }
 
 func (e *emitter) localName(l *ir.Local) string {
@@ -516,10 +524,14 @@ func (e *emitter) symbol(sym string) string {
 func (fe *fnEmitter) w(format string, args ...any) { fmt.Fprintf(&fe.b, format, args...) }
 
 func (fe *fnEmitter) local(l *ir.Local) string {
-	if fe.frame {
-		return "fr." + fe.e.localName(l)
+	name := fe.e.localName(l)
+	if n, ok := fe.folds.Name(l); ok {
+		name = n
 	}
-	return fe.e.localName(l)
+	if fe.frame {
+		return "_fr." + name
+	}
+	return name
 }
 
 func cell(l *ir.Local) bool { return l.Boxed && !l.Type.IsAggregate() }
@@ -535,6 +547,9 @@ func (e *emitter) ltype(l *ir.Local) string {
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if cell(v) {
 			return fe.e.cast(v.Type, fe.local(v)+".v")
 		}
@@ -764,7 +779,7 @@ func (fe *fnEmitter) addrOf(p *ir.Place) string {
 	last := p.Path[len(p.Path)-1]
 	cls := fe.e.jt(bt)
 	f := fe.e.fieldProp(bt, last.Field)
-	return fmt.Sprintf("Program.fieldRef(%s, %q, o => ((%s) o).%s, (o, v) => ((%s) o).%s = %s)", base, f, cls, f, cls, f, fe.e.cast(last.Type, "v"))
+	return fmt.Sprintf("Program.fieldRef(%s, %q, _o => ((%s) _o).%s, (_o, _v) => ((%s) _o).%s = %s)", base, f, cls, f, cls, f, fe.e.cast(last.Type, "_v"))
 }
 
 func (e *emitter) retType(f *ir.Func) string {
@@ -784,23 +799,52 @@ func rawParam(l *ir.Local) bool { return cell(l) && l.Kind != ir.LEnv }
 func (fe *fnEmitter) params() string {
 	var ps []string
 	for _, l := range append(append([]*ir.Local(nil), fe.f.Env...), fe.f.Params...) {
-		name := fe.e.localName(l)
 		t := fe.e.ltype(l)
 		if rawParam(l) {
-			name = "p_" + name
 			t = fe.e.jt(l.Type)
 		}
-		ps = append(ps, t+" "+name)
+		ps = append(ps, t+" "+fe.paramName(l))
 	}
 	return strings.Join(ps, ", ")
 }
 
+func (fe *fnEmitter) paramName(l *ir.Local) string {
+	if rawParam(l) {
+		return "_p_" + fe.e.localName(l)
+	}
+	return fe.e.localName(l)
+}
+
+// asyncType renders the return type of f as an async method.
+func (e *emitter) asyncType(f *ir.Func) string {
+	if len(f.Results) == 0 {
+		return "Async"
+	}
+	return "Async<" + e.retType(f) + ">"
+}
+
+// starter renders the frame-convention overload of an async method, used
+// by go, defer, function values and library calls.
+func (fe *fnEmitter) starter() string {
+	f := fe.f
+	args := []string{"_t"}
+	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
+		args = append(args, fe.paramName(l))
+	}
+	n := ""
+	if len(f.Results) > 0 {
+		n = fmt.Sprintf(", %d", len(f.Results))
+	}
+	sym := fe.e.symbol(f.Sym)
+	return fmt.Sprintf("    static Frame %s(%s) => R.nativeTask(_t => %s(%s)%s);\n\n", sym, fe.params(), sym, strings.Join(args, ", "), n)
+}
+
 func (e *emitter) function(f *ir.Func) string {
-	if f.MaySuspend {
+	if f.MaySuspend && !e.native() {
 		e.frameFunction(f)
 		return ""
 	}
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, task: f.MaySuspend}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
@@ -811,41 +855,59 @@ func (e *emitter) function(f *ir.Func) string {
 			}
 		}
 	}
-	fe.w("%s    static %s %s(%s) {\n        using var _sourceDepth = Program.enterSource();\n", position(f.Pos), e.retType(f), e.symbol(f.Sym), fe.params())
+	if fe.task {
+		e.use("core.task.spawn")
+		ps := "GoTask _t"
+		if p := fe.params(); p != "" {
+			ps += ", " + p
+		}
+		fe.w("%s    static async %s %s(%s) {\n        Program.checkStack();\n", position(f.Pos), e.asyncType(f), e.symbol(f.Sym), ps)
+	} else {
+		fe.w("%s    static %s %s(%s) {\n        using var _sourceDepth = Program.enterSource();\n", position(f.Pos), e.retType(f), e.symbol(f.Sym), fe.params())
+	}
 	isParam := map[*ir.Local]bool{}
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
 		isParam[l] = !rawParam(l)
 	}
+	fe.analyze()
 	for _, l := range f.Locals {
-		if !isParam[l] {
+		if !isParam[l] && !fe.folds.Temp(l) {
 			fe.w("        %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
 		}
 	}
 	if fe.defers {
 		fe.w("        var _d = new List<Deferred>();\n        GoPanic _p = null;\n        try {\n")
-	}
-	if len(f.Blocks) == 1 {
-		fe.block(f.Blocks[0], -1)
+		fe.structured(3)
 	} else {
-		fe.w("        int _pc = 0;\n        for (;;) switch (_pc) {\n")
-		for i, b := range f.Blocks {
-			fe.w("        case %d:\n", i)
-			next := -1
-			if i+1 < len(f.Blocks) {
-				next = i + 1
-			}
-			fe.block(b, next)
-		}
-		fe.w("        default: throw Panics.fault(\"bad block\");\n        }\n")
+		fe.structured(2)
 	}
 	if fe.defers {
-		fe.w("        _end: ;\n        } catch (Exception _e) {\n            _p = Program.catchPanic(_e);\n        }\n        Program.runDefers(_d, _p);\n")
+		run := "Program.runDefers(_d, _p)"
+		if fe.pausingDefer() {
+			run = "await R.runDefersAsync(_t, _d, _p)"
+		}
+		fe.w("        _end: ;\n        } catch (Exception _e) {\n            _p = Program.catchPanic(_e);\n        }\n        %s;\n", run)
 		if r := fe.results(); r != "" {
 			fe.w("        return %s;\n", r)
 		}
 	}
 	fe.w("    }\n\n")
-	return fe.b.String()
+	if fe.task {
+		fe.b.WriteString(fe.starter())
+	}
+	return structure.Resolve(fe.b.String())
+}
+
+// pausingDefer reports whether a deferred call of f may pause.
+func (fe *fnEmitter) pausingDefer() bool {
+	for _, b := range fe.f.Blocks {
+		for _, in := range b.Instrs {
+			if d, ok := in.(*ir.Defer); ok && d.Call.Suspends {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // defaultOf renders a placeholder initial value satisfying Java's definite
@@ -895,49 +957,113 @@ func (fe *fnEmitter) mark(pos token.Pos) {
 	}
 }
 
-func (fe *fnEmitter) block(b *ir.Block, next int) {
-	if b.ResumeOf != nil {
-		fe.w("            ")
-		fe.resume(b.ResumeOf)
-	}
-	for _, in := range b.Instrs {
-		fe.w("            ")
-		fe.mark(in.Position())
-		fe.instr(in)
-	}
-	fe.w("            ")
-	fe.mark(b.Term.Position())
-	fe.term(b.Term, next)
+var csSyntax = structure.Syntax{
+	Indent: "    ", If: "if (%s) {", ElseIf: "} else if (%s) {", Else: "} else {", End: "}",
+	Loop: "for (;;) {", While: "while (%s) {", LabelName: "L%d",
+	Break: "break;", Continue: "continue;", Goto: "goto %s;", Label: "%s: ;", GotoLoops: true,
+	Not: "!%s", And: "%s && %s", Or: "%s || %s", EntryLabel: "_b%d: ;", GotoEntry: "goto _b%d;",
+	Resume: func(heads []*ir.Block) string {
+		var b strings.Builder
+		b.WriteString("switch (_fr.pc) {\n")
+		for _, h := range heads {
+			fmt.Fprintf(&b, "case %d: goto _b%d;\n", h.ID, h.ID)
+		}
+		b.WriteString("}")
+		return b.String()
+	},
 }
+
+// structured writes the function body as structured statements; a
+// resumable frame first jumps to the block it resumes at.
+func (fe *fnEmitter) structured(depth int) {
+	body := structure.Build(fe.f, structure.Options{Inline: fe.task, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, fe.task) }})
+	fe.b.WriteString(structure.Print(body, csSyntax, csEmitter{fe}, depth))
+}
+
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.task, Order: structure.LeftToRight}, csProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	fe.b = strings.Builder{}
+	fn()
+	out := fe.b.String()
+	fe.b = saved
+	return out
+}
+
+func markText(pos token.Pos) string {
+	if !pos.IsValid() {
+		return ""
+	}
+	return fmt.Sprintf("%s%d\x00", marker, int(pos))
+}
+
+// csEmitter prints the target-specific statements of a structured body.
+type csEmitter struct{ fe *fnEmitter }
+
+func (x csEmitter) Code(b *ir.Block) string {
+	fe := x.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil && fe.frame {
+			fe.resume(b.ResumeOf)
+		}
+		for _, in := range b.Instrs {
+			if !fe.folds.Folded(in) {
+				fe.mark(in.Position())
+				fe.instr(in)
+			}
+		}
+	})
+}
+
+func (x csEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() {
+		x.fe.mark(t.Position())
+		x.fe.term(t)
+	})
+}
+
+func (x csEmitter) Pause(p *ir.Pause) string {
+	if x.fe.folds.FoldedPause(p) {
+		return ""
+	}
+	return x.fe.capture(func() {
+		x.fe.mark(p.Position())
+		x.fe.nativePause(p)
+	})
+}
+
+func (x csEmitter) Cond(v ir.Value) string    { return x.fe.val(v) }
+func (x csEmitter) Mark(pos token.Pos) string { return markText(pos) }
+
+// csProbe renders statements for fold analysis.
+type csProbe struct{ fe *fnEmitter }
+
+func (x csProbe) Instr(in ir.Instr) string { return x.fe.capture(func() { x.fe.instr(in) }) }
+func (x csProbe) Pause(p *ir.Pause) string { return x.fe.capture(func() { x.fe.nativePause(p) }) }
+func (x csProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
+func (x csProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() { x.fe.term(t) })
+}
+func (x csProbe) Assign(l *ir.Local) (string, string) { return x.fe.assign(l, ""), ";" }
 
 func (fe *fnEmitter) pcVar() string {
 	if fe.frame {
-		return "fr.pc"
+		return "_fr.pc"
 	}
 	return "_pc"
 }
 
-func (fe *fnEmitter) goTo(target *ir.Block, next int) {
-	if fe.order[target] == next {
-		fe.w("goto case %d;\n", next)
-		return
-	}
-	fe.w("%s = %d; continue;\n", fe.pcVar(), fe.order[target])
-}
-
-func (fe *fnEmitter) term(t ir.Terminator, next int) {
+func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.goTo(t.Target, next)
-	case *ir.If:
-		fe.w("if (%s) { %s = %d; continue; }\n            ", fe.val(t.Cond), fe.pcVar(), fe.order[t.Then])
-		fe.goTo(t.Else, next)
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
 		switch {
 		case fe.frame:
-			fe.w("R.ret(t, fr); return;\n")
+			fe.w("R.ret(_t, _fr); return;\n")
 		case fe.defers:
 			fe.w("goto _end;\n")
 		default:
@@ -961,18 +1087,22 @@ func (fe *fnEmitter) term(t ir.Terminator, next int) {
 // frameFunction emits a suspending function as a resumable frame class and
 // a starter binding the arguments.
 func (e *emitter) frameFunction(f *ir.Func) {
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, frame: true}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
-	cls := "F_" + e.symbol(f.Sym)
+	fe.analyze()
+	fe.frame = false
+	cls := e.names.Derived("F", e.symbol(f.Sym))
 	fe.w("%s    sealed class %s : Frame {\n", position(f.Pos), cls)
 	for _, l := range f.Locals {
-		fe.w("        public %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
+		if !fe.folds.Temp(l) {
+			fe.w("        public %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
+		}
 	}
 	for _, l := range f.Params {
 		if rawParam(l) {
-			fe.w("        public %s p_%s;\n", e.jt(l.Type), e.localName(l))
+			fe.w("        public %s _p_%s;\n", e.jt(l.Type), e.localName(l))
 		}
 	}
 	fe.frame = true
@@ -984,63 +1114,60 @@ func (e *emitter) frameFunction(f *ir.Func) {
 		}
 		rs = append(rs, v)
 	}
-	fe.w("        public override object[] results() {\n            var fr = this;\n            return new object[] {%s};\n        }\n", strings.Join(rs, ", "))
-	fe.w("        public override void step(GoTask t) {\n            var fr = this;\n            for (;;) switch (fr.pc) {\n")
-	for i, b := range f.Blocks {
-		fe.w("        case %d:\n", i)
-		next := -1
-		if i+1 < len(f.Blocks) {
-			next = i + 1
-		}
-		fe.block(b, next)
-	}
-	fe.w("        default: throw Panics.fault(\"bad block\");\n            }\n        }\n    }\n\n")
+	fe.w("        public override object[] results() {\n            var _fr = this;\n            return new object[] {%s};\n        }\n", strings.Join(rs, ", "))
+	fe.w("        public override void step(GoTask _t) {\n            var _fr = this;\n")
+	fe.structured(3)
+	fe.w("        }\n    }\n\n")
 	fe.frame = false
-	fe.w("%s    static Frame %s(%s) {\n        %s fr = new %s();\n", position(f.Pos), e.symbol(f.Sym), fe.params(), cls, cls)
+	fe.w("%s    static Frame %s(%s) {\n        %s _fr = new %s();\n", position(f.Pos), e.symbol(f.Sym), fe.params(), cls, cls)
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
 		if rawParam(l) {
-			fe.w("        fr.p_%s = p_%s;\n", e.localName(l), e.localName(l))
+			fe.w("        _fr._p_%s = _p_%s;\n", e.localName(l), e.localName(l))
 		} else {
-			fe.w("        fr.%s = %s;\n", e.localName(l), e.localName(l))
+			fe.w("        _fr.%s = %s;\n", e.localName(l), e.localName(l))
 		}
 	}
-	fe.w("        return fr;\n    }\n\n")
-	e.frames.WriteString(fe.b.String())
+	fe.w("        return _fr;\n    }\n\n")
+	e.frames.WriteString(structure.Resolve(fe.b.String()))
 }
 
 func (fe *fnEmitter) resume(op ir.Instr) {
 	e := fe.e
+	sep, end := "; ", "\n"
+	if fe.task {
+		sep, end = ";\n", ""
+	}
 	switch i := op.(type) {
 	case *ir.Call:
 		for k, d := range i.Dsts {
 			if d != nil {
-				fe.w("%s; ", fe.assign(d, e.cast(d.Type, fmt.Sprintf("t.rv[%d]", k))))
+				fe.w("%s"+sep, fe.assign(d, e.cast(d.Type, fmt.Sprintf("_t.rv[%d]", k))))
 			}
 		}
 	case *ir.Recv:
 		if i.Dst != nil {
-			fe.w("%s; ", fe.assign(i.Dst, e.cast(i.Dst.Type, "t.rv[0]")))
+			fe.w("%s"+sep, fe.assign(i.Dst, e.cast(i.Dst.Type, "_t.rv[0]")))
 		}
 		if i.Ok != nil {
-			fe.w("%s; ", fe.assign(i.Ok, "((bool) t.rv[1])"))
+			fe.w("%s"+sep, fe.assign(i.Ok, "((bool) _t.rv[1])"))
 		}
 	case *ir.Select:
-		fe.w("%s; ", fe.assign(i.Index, "((long) t.rv[0])"))
+		fe.w("%s"+sep, fe.assign(i.Index, "((long) _t.rv[0])"))
 		for k, c := range i.Cases {
 			if c.Send || c.Dst == nil && c.Ok == nil {
 				continue
 			}
-			fe.w("if ((long) t.rv[0] == %d) {", k)
+			fe.w("if ((long) _t.rv[0] == %d) {", k)
 			if c.Dst != nil {
-				fe.w(" %s;", fe.assign(c.Dst, e.cast(c.Dst.Type, "t.rv[1]")))
+				fe.w(" %s;", fe.assign(c.Dst, e.cast(c.Dst.Type, "_t.rv[1]")))
 			}
 			if c.Ok != nil {
-				fe.w(" %s;", fe.assign(c.Ok, "((bool) t.rv[2])"))
+				fe.w(" %s;", fe.assign(c.Ok, "((bool) _t.rv[2])"))
 			}
-			fe.w(" } ")
+			fe.b.WriteString(" }" + strings.TrimPrefix(sep, ";"))
 		}
 	}
-	fe.w("\n")
+	fe.b.WriteString(end)
 }
 
 // assign renders an assignment to a temp or local.
@@ -1053,20 +1180,20 @@ func (fe *fnEmitter) assign(l *ir.Local, v string) string {
 
 func (fe *fnEmitter) pause(p *ir.Pause) {
 	e := fe.e
-	fe.w("fr.pc = %d; ", fe.order[p.Next])
+	fe.w("_fr.pc = %d; ", fe.order[p.Next])
 	switch i := p.Op.(type) {
 	case *ir.Call:
 		switch i.Kind {
 		case ir.CallExtern:
-			args := append([]string{"t"}, fe.externArgs(i)...)
+			args := append([]string{"_t"}, fe.externArgs(i)...)
 			fe.w("%s(%s);\n", fe.externSym(i.Extern.Contract), strings.Join(args, ", "))
 		default:
-			fe.w("R.call(t, (Frame) (%s));\n", fe.callExpr(i))
+			fe.w("R.call(_t, (Frame) (%s));\n", fe.callExpr(i))
 		}
 	case *ir.Send:
-		fe.w("%s.chanSend(t, %s, %s);\n", e.rc("core.chan.send"), fe.val(i.Ch), fe.val(i.V))
+		fe.w("%s.chanSend(_t, %s, %s);\n", e.rc("core.chan.send"), fe.val(i.Ch), fe.val(i.V))
 	case *ir.Recv:
-		fe.w("%s.chanRecv(t, %s);\n", e.rc("core.chan.recv"), fe.val(i.Ch))
+		fe.w("%s.chanRecv(_t, %s);\n", e.rc("core.chan.recv"), fe.val(i.Ch))
 	case *ir.Select:
 		var cs []string
 		for _, c := range i.Cases {
@@ -1077,11 +1204,66 @@ func (fe *fnEmitter) pause(p *ir.Pause) {
 			}
 		}
 		e.use("core.select")
-		fe.w("R.select(t, %v%s);\n", i.Default, prefixComma(cs))
+		fe.w("R.select(_t, %v%s);\n", i.Default, prefixComma(cs))
 	default:
 		panic(fmt.Sprintf("csharp: pause on %T", p.Op))
 	}
 	fe.w("            return;\n")
+}
+
+// nativePause emits a pause point of an async method: a generated callee
+// is awaited for its results; a runtime primitive either completes at once
+// or leaves the task blocked, and then the task waits for the scheduler to
+// choose it again. Primitive, function value and method results arrive in
+// t.rv.
+func (fe *fnEmitter) nativePause(p *ir.Pause) {
+	e := fe.e
+	const wait = "if (_t.blocked) await R.wait(_t);\n"
+	switch i := p.Op.(type) {
+	case *ir.Call:
+		switch i.Kind {
+		case ir.CallExtern:
+			args := append([]string{"_t"}, fe.externArgs(i)...)
+			fe.w("%s(%s);\n"+wait, fe.externSym(i.Extern.Contract), strings.Join(args, ", "))
+		case ir.CallStatic:
+			call := "await " + e.symbol(i.Func.Sym) + "(" + strings.Join(append([]string{"_t"}, fe.argList(i)...), ", ") + ")"
+			switch len(i.Dsts) {
+			case 0:
+				fe.w("%s;\n", call)
+			case 1:
+				fe.w("%s;\n", fe.assign(i.Dsts[0], call))
+			default:
+				fe.w("{ object[] _r = %s;", call)
+				for k, d := range i.Dsts {
+					if d != nil {
+						fe.w(" %s;", fe.assign(d, e.cast(d.Type, fmt.Sprintf("_r[%d]", k))))
+					}
+				}
+				fe.w(" }\n")
+			}
+			return
+		default:
+			fe.w("await R.awaitFrame(_t, (Frame) (%s));\n", fe.callExpr(i))
+		}
+	case *ir.Send:
+		fe.w("%s.chanSend(_t, %s, %s);\n"+wait, e.rc("core.chan.send"), fe.val(i.Ch), fe.val(i.V))
+	case *ir.Recv:
+		fe.w("%s.chanRecv(_t, %s);\n"+wait, e.rc("core.chan.recv"), fe.val(i.Ch))
+	case *ir.Select:
+		var cs []string
+		for _, c := range i.Cases {
+			if c.Send {
+				cs = append(cs, fmt.Sprintf("R.scase(%s, true, %s)", fe.val(c.Ch), fe.val(c.V)))
+			} else {
+				cs = append(cs, fmt.Sprintf("R.scase(%s, false, null)", fe.val(c.Ch)))
+			}
+		}
+		e.use("core.select")
+		fe.w("R.select(_t, %v%s);\n"+wait, i.Default, prefixComma(cs))
+	default:
+		panic(fmt.Sprintf("csharp: pause on %T", p.Op))
+	}
+	fe.resume(p.Op)
 }
 
 func prefixComma(xs []string) string {
@@ -1234,17 +1416,17 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		}
 		var as []string
 		for j, l := range i.Func.Env {
-			as = append(as, fmt.Sprintf("(%s) env[%d]", e.ltype(l), j))
+			as = append(as, fmt.Sprintf("(%s) _env[%d]", e.ltype(l), j))
 		}
 		for j, p := range i.Func.Params {
-			as = append(as, e.cast(p.Type, fmt.Sprintf("a[%d]", j)))
+			as = append(as, e.cast(p.Type, fmt.Sprintf("_a[%d]", j)))
 		}
 		call := fe.e.symbol(i.Func.Sym) + "(" + strings.Join(as, ", ") + ")"
 		body := call
 		if len(i.Func.Results) == 0 && !i.Func.MaySuspend {
 			body = "{ " + call + "; return null; }"
 		}
-		v := fmt.Sprintf("Program.closure(%d, GoProgram.envFn(new object[] {%s}, (env, a) => %s))", i.Func.ID, strings.Join(env, ", "), body)
+		v := fmt.Sprintf("Program.closure(%d, GoProgram._envFn(new object[] {%s}, (_env, _a) => %s))", i.Func.ID, strings.Join(env, ", "), body)
 		if e.susp(i.Dst.Type) && !i.Func.MaySuspend {
 			v = e.adapt(v, len(i.Func.Results))
 		}
@@ -1363,9 +1545,9 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		}
 		target := "_d"
 		if fe.frame {
-			target = "fr.defers"
+			target = "_fr.defers"
 		}
-		fe.w("%s.Add(new Deferred(%s, new object[] {%s}, %s, %v));\n", target, fn, strings.Join(args, ", "), fid, i.Call.Suspends && fe.frame)
+		fe.w("%s.Add(new Deferred(%s, new object[] {%s}, %s, %v));\n", target, fn, strings.Join(args, ", "), fid, i.Call.Suspends && (fe.frame || fe.task))
 	case *ir.Recover:
 		fe.w("%s;\n", fe.assign(i.Dst, fmt.Sprintf("Program.recover(%d)", fe.f.ID)))
 	case *ir.Rebind:
@@ -1381,9 +1563,9 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		if rawParam(i.L) {
 			pfx := ""
 			if fe.frame {
-				pfx = "fr."
+				pfx = "_fr."
 			}
-			fe.w("%s = new Cell(%sp_%s);\n", fe.local(i.L), pfx, fe.e.localName(i.L))
+			fe.w("%s = new Cell(%s_p_%s);\n", fe.local(i.L), pfx, fe.e.localName(i.L))
 		} else {
 			fe.w(";\n")
 		}
@@ -1411,7 +1593,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		if c.Kind == ir.CallExtern {
 			args = fe.externArgs(c)
 		}
-		fe.w("GoProgram.spawnCall(%s, new object[] {%s});\n", fn, strings.Join(args, ", "))
+		fe.w("GoProgram._spawnCall(%s, new object[] {%s});\n", fn, strings.Join(args, ", "))
 	default:
 		panic(fmt.Sprintf("csharp: unsupported instruction %T", in))
 	}
@@ -1431,17 +1613,17 @@ func (fe *fnEmitter) deferredFn(c *ir.Call) (string, string) {
 		sig := c.Extern.Sig
 		var as []string
 		for j, p := range sig.Params {
-			as = append(as, e.cast(p, fmt.Sprintf("a[%d]", j)))
+			as = append(as, e.cast(p, fmt.Sprintf("_a[%d]", j)))
 		}
 		if c.Suspends {
 			call := fe.externSym(c.Extern.Contract) + "(_nativeTask" + prefixComma(as) + ")"
-			return "new Fn(a => R.nativeFrame(_nativeTask => { " + call + "; }))", "null"
+			return "new Fn(_a => R.nativeFrame(_nativeTask => { " + call + "; }))", "null"
 		}
 		call := fe.externSym(c.Extern.Contract) + "(" + strings.Join(as, ", ") + ")"
 		if len(sig.Results) == 0 {
-			return "new Fn(a => { " + call + "; return null; })", "null"
+			return "new Fn(_a => { " + call + "; return null; })", "null"
 		}
-		return "new Fn(a => " + call + ")", "null"
+		return "new Fn(_a => " + call + ")", "null"
 	}
 	panic("csharp: deferred interface call")
 }
@@ -1661,7 +1843,7 @@ func (fe *fnEmitter) typeAssert(i *ir.TypeAssert) {
 			fe.w("%s; %s;\n", fe.assign(i.Ok, test), fe.assign(i.Dst, fmt.Sprintf("%s ? %s : null", fe.val(i.Ok), x)))
 			return
 		}
-		fe.w("if (!%s) throw Program.assertPanic(%s, %s, %s, %s == null ? null : GoProgram.missing(%s, new string[] {%s}, new string[] {%s}));\n",
+		fe.w("if (!%s) throw Program.assertPanic(%s, %s, %s, %s == null ? null : GoProgram._missing(%s, new string[] {%s}, new string[] {%s}));\n",
 			test, x, csString(ir.TypeString(i.X.IRType())), csString(ir.TypeString(i.T)), x, x, strings.Join(ids, ", "), strings.Join(names, ", "))
 		fe.w("            %s;\n", fe.assign(i.Dst, x))
 		return

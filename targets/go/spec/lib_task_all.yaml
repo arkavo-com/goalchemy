@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 859eeb085109dec70bc14ac6a84439f051d6b1568ab0ab878704802816c82384
 symbol: "rt.LibTaskAll"
 implementation: runtime/lib_task_all.go
-implementation_hash: 077e03a3bf18bf258a98c1299c0347e7a5f24ae4f80beeddb73d977d461f1eef
+implementation_hash: 56eede7d2b43fbbcb28d63d11b71f37fab166d40d7a854dd1073b93e7709a148
 summary: "task.All: run each function as a task, in order, and resume the caller when all have finished."
 suspension: may
 determinism: controlled

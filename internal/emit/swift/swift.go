@@ -1,5 +1,6 @@
-// Package swift emits native Swift with explicit Go storage and a stack-safe
-// resumable calling convention shared by sequential and cooperative code.
+// Package swift emits native Swift with explicit Go storage. Functions that
+// cannot pause are plain Swift functions; the others are resumable frames
+// driven by the cooperative scheduler.
 package swift
 
 import (
@@ -15,6 +16,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -60,6 +62,25 @@ func id(t *ir.Type) int {
 	return t.ID
 }
 func (e *emitter) use(s string) { e.contracts[s] = true }
+
+func (e *emitter) native() bool { return e.p.PauseModel == "native" }
+
+// async reports whether f is an async function: it may pause, under the
+// native pause model.
+func (e *emitter) async(f *ir.Func) bool { return f.MaySuspend && e.native() }
+
+// function returns a function value of f with the given captured cells.
+func (e *emitter) functionValue(f *ir.Func, env string) string {
+	sym := e.names.Symbol(f.Sym)
+	args := []string{strconv.Itoa(f.ID), sym}
+	if env != "" {
+		args = append(args, env)
+	}
+	if e.async(f) {
+		args = append(args, "native: "+e.names.Derived("n", sym))
+	}
+	return "GFunction(" + strings.Join(args, ", ") + ")"
+}
 func (e *emitter) types(b *bytes.Buffer) {
 	// Preserve Go's complete method signatures, including aliases and receiver
 	// method sets. Native errors have negative IDs and use declared signatures.
@@ -88,12 +109,14 @@ func (e *emitter) types(b *bytes.Buffer) {
 	}
 	const typeRowsPerFunc = 32
 	chunks := (len(e.p.Types.All) + typeRowsPerFunc - 1) / typeRowsPerFunc
+	missingTables := map[string]string{}
+	var missingDeclarations strings.Builder
 	for i, t := range e.p.Types.All {
 		if i%typeRowsPerFunc == 0 {
 			if i > 0 {
 				b.WriteString("}\n\n")
 			}
-			fmt.Fprintf(b, "private func gTypeRows%d(_ table: inout [GType]) {\n", i/typeRowsPerFunc)
+			fmt.Fprintf(b, "private func _gTypeRows%d(_ _table: inout [GType]) {\n", i/typeRowsPerFunc)
 		}
 		u := t.U()
 		var fields, names, blank []string
@@ -125,7 +148,15 @@ func (e *emitter) types(b *bytes.Buffer) {
 		}
 		missing := strings.Join(missingMethods, ", ")
 		if missing == "" {
-			missing = ":"
+			missing = "[:]"
+		} else {
+			symbol, ok := missingTables[missing]
+			if !ok {
+				symbol = fmt.Sprintf("_gMissingInterfaceMethods%d", len(missingTables))
+				missingTables[missing] = symbol
+				fmt.Fprintf(&missingDeclarations, "private let %s: [Int: String] = [%s]\n", symbol, missing)
+			}
+			missing = symbol
 		}
 		bits := 0
 		signed := false
@@ -137,16 +168,17 @@ func (e *emitter) types(b *bytes.Buffer) {
 			bits = u.FloatBits
 		}
 		comparable := t.Go != nil && t.Comparable()
-		fmt.Fprintf(b, "    table.append(GType(%s, %s, %d, %t, %d, %d, %d, [%s], [%s], [%s], [%s], %t, [%s], [%s], [%s])) // %s\n", quote(ir.TypeString(t)), quote(u.Kind.String()), bits, signed, id(u.Elem), id(u.Key), u.Len, strings.Join(fields, ", "), strings.Join(names, ", "), strings.Join(blank, ", "), strings.Join(methods, ", "), comparable, strings.Join(implementations, ", "), missing, strings.Join(nativeMethods, ", "), e.names.Type(t, "T_"))
+		fmt.Fprintf(b, "    _table.append(GType(%s, %s, %d, %t, %d, %d, %d, [%s], [%s], [%s], [%s], %t, [%s], %s, [%s])) // %s\n", quote(ir.TypeString(t)), quote(u.Kind.String()), bits, signed, id(u.Elem), id(u.Key), u.Len, strings.Join(fields, ", "), strings.Join(names, ", "), strings.Join(blank, ", "), strings.Join(methods, ", "), comparable, strings.Join(implementations, ", "), missing, strings.Join(nativeMethods, ", "), e.names.Type(t, "T_"))
 	}
 	if chunks > 0 {
 		b.WriteString("}\n\n")
 	}
-	fmt.Fprintf(b, "let gTypeRegistration: Void = {\n    var table: [GType] = []\n    table.reserveCapacity(%d)\n", len(e.p.Types.All))
+	b.WriteString(missingDeclarations.String())
+	fmt.Fprintf(b, "let _gTypeRegistration: Void = {\n    var _table: [GType] = []\n    _table.reserveCapacity(%d)\n", len(e.p.Types.All))
 	for i := 0; i < chunks; i++ {
-		fmt.Fprintf(b, "    gTypeRows%d(&table)\n", i)
+		fmt.Fprintf(b, "    _gTypeRows%d(&_table)\n", i)
 	}
-	b.WriteString("    GTypes.table = table\n}()\n")
+	b.WriteString("    GTypes.table = _table\n}()\n")
 }
 
 func (e *emitter) constant(c *ir.Const) string {
@@ -192,19 +224,32 @@ type fnEmitter struct {
 	b      strings.Builder
 	labels map[*ir.Block]int
 	next   int
-	resume int
+	folds  *structure.Folds
+	// frame is set when f is a resumable frame rather than a plain function.
+	frame bool
+	// async is set when f is an async function of the native pause model;
+	// defers when it also has deferred calls, run after its body.
+	async, defers bool
 }
 
 func (fe *fnEmitter) w(format string, a ...any) { fmt.Fprintf(&fe.b, "            "+format+"\n", a...) }
-func (fe *fnEmitter) local(l *ir.Local) string  { return fe.e.names.Local(l, "_") }
+func (fe *fnEmitter) local(l *ir.Local) string {
+	if n, ok := fe.folds.Name(l); ok {
+		return n
+	}
+	return fe.e.names.Local(l, "_")
+}
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		return fe.local(v) + ".value"
 	case *ir.Const:
 		return fe.e.constant(v)
 	case *ir.FuncRef:
-		return fmt.Sprintf(".function(GFunction(%d, %s))", v.Func.ID, fe.e.names.Symbol(v.Func.Sym))
+		return ".function(" + fe.e.functionValue(v.Func, "") + ")"
 	}
 	panic("swift operand")
 }
@@ -220,14 +265,82 @@ func (fe *fnEmitter) results() string {
 	for _, r := range fe.f.Results {
 		xs = append(xs, "GCopy("+fe.val(r)+")")
 	}
+	if !fe.frame && len(xs) == 1 {
+		return xs[0]
+	}
+	if !fe.frame {
+		return "(" + strings.Join(xs, ", ") + ")"
+	}
 	return "[" + strings.Join(xs, ", ") + "]"
 }
+
+// plainParams lists a plain function's parameters: the task, one value per
+// parameter, and the captured cells of a closure.
+func plainParams(f *ir.Func) []string {
+	ps := []string{"_ _task: GTask"}
+	for i := range f.Params {
+		ps = append(ps, fmt.Sprintf("_ _p%d: GValue", i))
+	}
+	if len(f.Env) > 0 {
+		ps = append(ps, "_ _env: [GCell]")
+	}
+	return ps
+}
+
+func plainResults(f *ir.Func) string {
+	switch n := len(f.Results); n {
+	case 0:
+		return ""
+	case 1:
+		return " -> GValue"
+	default:
+		return " -> (" + strings.TrimSuffix(strings.Repeat("GValue, ", n), ", ") + ")"
+	}
+}
+
+// plain reports whether f runs as a plain Swift function: it cannot pause,
+// and it has no deferred calls or recover, which the frame scheduler runs.
+func plain(f *ir.Func) bool {
+	if f.MaySuspend {
+		return false
+	}
+	for _, b := range f.Blocks {
+		for _, in := range b.Instrs {
+			switch in.(type) {
+			case *ir.Defer, *ir.Recover:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func hasDefer(f *ir.Func) bool {
+	for _, b := range f.Blocks {
+		for _, in := range b.Instrs {
+			if _, ok := in.(*ir.Defer); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (e *emitter) function(f *ir.Func) string {
-	fe := &fnEmitter{e: e, f: f, labels: map[*ir.Block]int{}, next: len(f.Blocks)}
+	fe := &fnEmitter{e: e, f: f, labels: map[*ir.Block]int{}, next: len(f.Blocks), frame: !plain(f) && !e.async(f), async: e.async(f)}
+	fe.defers = fe.async && hasDefer(f)
 	for i, b := range f.Blocks {
 		fe.labels[b] = i
 	}
-	fmt.Fprintf(&fe.b, "\n%sfunc %s(_ args: [GValue], _ env: [GCell]) -> GFrame {\n    _ = gTypeRegistration\n", position(f.Pos), e.names.Symbol(f.Sym))
+	structure.Analyze(f, structure.FoldOptions{Inline: fe.async, PauseAlone: fe.async, Order: structure.LeftToRight}, swiftProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+	sym := e.names.Symbol(f.Sym)
+	if fe.async {
+		fmt.Fprintf(&fe.b, "\n%sfunc %s(%s) async throws%s {\n", position(f.Pos), e.names.Derived("a", sym), strings.Join(plainParams(f), ", "), plainResults(f))
+	} else if fe.frame {
+		fmt.Fprintf(&fe.b, "\n%sfunc %s(_ _args: [GValue], _ _env: [GCell]) -> GFrame {\n    _ = _gTypeRegistration\n", position(f.Pos), sym)
+	} else {
+		fmt.Fprintf(&fe.b, "\n%sfunc %s(%s) throws%s {\n", position(f.Pos), e.names.Derived("p", sym), strings.Join(plainParams(f), ", "), plainResults(f))
+	}
 	params := map[*ir.Local]int{}
 	for i, l := range f.Params {
 		params[l] = i
@@ -247,39 +360,181 @@ func (e *emitter) function(f *ir.Func) string {
 			}
 		}
 	}
+	var roots []string
 	for _, l := range f.Locals {
+		if fe.folds.Temp(l) {
+			continue
+		}
+		roots = append(roots, ".pointer("+fe.local(l)+")")
 		binding := "let"
 		if rebound[l] {
 			binding = "var"
 		}
 		if i, ok := captures[l]; ok {
-			fmt.Fprintf(&fe.b, "    %s %s = env[%d]\n", binding, fe.local(l), i)
+			fmt.Fprintf(&fe.b, "    %s %s = _env[%d]\n", binding, fe.local(l), i)
 		} else if i, ok := params[l]; ok {
-			fmt.Fprintf(&fe.b, "    %s %s = GCell(args[%d])\n", binding, fe.local(l), i)
+			arg := fmt.Sprintf("_args[%d]", i)
+			if !fe.frame {
+				arg = fmt.Sprintf("_p%d", i)
+			}
+			fmt.Fprintf(&fe.b, "    %s %s = GCell(%s)\n", binding, fe.local(l), arg)
 		} else {
 			fmt.Fprintf(&fe.b, "    %s %s = GCell(GTypes.zero(%d))\n", binding, fe.local(l), l.Type.ID)
 		}
 	}
-	var roots []string
-	for _, l := range f.Locals {
-		roots = append(roots, ".pointer("+fe.local(l)+")")
+	body := structure.Build(f, structure.Options{Inline: fe.async, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, fe.async) }})
+	if fe.async {
+		fe.asyncBody(body, sym, roots)
+		return structure.Resolve(fe.b.String())
 	}
-	fmt.Fprintf(&fe.b, "    let frame = GFrame(%d)\n    frame.dynamicResults = true\n    frame.roots = { [%s] }\n    frame.results = { %s }\n    frame.step = { frame, task in\n        while true {\n            task.owner.safepoint()\n            switch frame.pc {\n", f.ID, strings.Join(roots, ", "), fe.results())
-	for _, b := range f.Blocks {
-		fmt.Fprintf(&fe.b, "        case %d:\n", fe.labels[b])
-		if b.ResumeOf != nil {
+	if !fe.frame {
+		syn := swiftSyntax
+		syn.DispatchOpen, syn.SetPC = []string{"var _pc = 0", "%swhile true {", "\tswitch _pc {"}, "_pc = %d"
+		syn.Default = []string{`default: throw GFault("invalid block")`}
+		fe.b.WriteString(structure.Print(body, syn, swiftEmitter{fe}, 1))
+		fmt.Fprintf(&fe.b, "}\n%sfunc %s(_ _args: [GValue], _ _env: [GCell]) -> GFrame {\n    _ = _gTypeRegistration\n    return GFrame.plain(%d) { _task in %s }\n}\n", position(f.Pos), sym, f.ID, arrayCall(f, "try "+e.names.Derived("p", sym)))
+		return structure.Resolve(fe.b.String())
+	}
+	fmt.Fprintf(&fe.b, "    let _frame = GFrame(%d)\n    _frame.dynamicResults = true\n    _frame.roots = { [%s] }\n    _frame.results = { %s }\n    _frame.step = { _frame, _task in\n", f.ID, strings.Join(roots, ", "), fe.results())
+	if body.Dispatch == nil {
+		fe.b.WriteString("        _task.owner.safepoint()\n")
+	}
+	syn := swiftSyntax
+	syn.LoopStart = "_task.owner.safepoint()"
+	fe.b.WriteString(structure.Print(body, syn, swiftEmitter{fe}, 2))
+	fe.b.WriteString("    }\n    return _frame\n}\n")
+	return structure.Resolve(fe.b.String())
+}
+
+// arrayCall calls fn with f's parameters taken from args and env, and
+// returns its results as an array.
+func arrayCall(f *ir.Func, fn string) string {
+	as := []string{"_task"}
+	for i := range f.Params {
+		as = append(as, fmt.Sprintf("_args[%d]", i))
+	}
+	if len(f.Env) > 0 {
+		as = append(as, "_env")
+	}
+	call := fn + "(" + strings.Join(as, ", ") + ")"
+	switch len(f.Results) {
+	case 0:
+		return call + "; return []"
+	case 1:
+		return "[" + call + "]"
+	}
+	var rs []string
+	for i := range f.Results {
+		rs = append(rs, fmt.Sprintf("_r.%d", i))
+	}
+	return "let _r = " + call + "; return [" + strings.Join(rs, ", ") + "]"
+}
+
+// asyncBody writes the body of an async function, then its frame-convention
+// adapters: sym_n takes and returns arrays, and sym starts a native frame.
+func (fe *fnEmitter) asyncBody(body *structure.Body, sym string, roots []string) {
+	f := fe.f
+	if len(roots) > 0 || fe.defers {
+		fmt.Fprintf(&fe.b, "    let _frame = _task.enter(%d) { [%s] }\n    defer { _task.leave(_frame) }\n", f.ID, strings.Join(roots, ", "))
+	}
+	// The body is a local function: it borrows the cells it captures, while
+	// cells the async function owned would be released on every throwing
+	// path of every resumption, which makes large bodies very slow to build.
+	fmt.Fprintf(&fe.b, "    func _run() async throws%s {\n        _task.owner.safepoint()\n", plainResults(f))
+	syn := swiftSyntax
+	syn.DispatchOpen, syn.SetPC = []string{"var _pc = 0", "%swhile true {", "\t_task.owner.safepoint()", "\tswitch _pc {"}, "_pc = %d"
+	syn.Default = []string{`default: throw GFault("invalid block")`}
+	syn.LoopStart = "_task.owner.safepoint()"
+	if fe.defers {
+		fe.b.WriteString("        _body: do {\n")
+		fe.b.WriteString(structure.Print(body, syn, swiftEmitter{fe}, 3))
+		fe.b.WriteString("        } catch let _p as GPanic {\n            _frame.panic = _p\n        }\n        try await _task.runDefers(_frame)\n")
+		if len(f.Results) > 0 {
+			fmt.Fprintf(&fe.b, "        return %s\n", fe.results())
+		}
+	} else {
+		fe.b.WriteString(structure.Print(body, syn, swiftEmitter{fe}, 2))
+	}
+	ret := "return "
+	if len(f.Results) == 0 {
+		ret = ""
+	}
+	fmt.Fprintf(&fe.b, "    }\n    %stry await _run()\n", ret)
+	native := fe.e.names.Derived("n", sym)
+	fmt.Fprintf(&fe.b, "}\nfunc %s(_ _task: GTask, _ _args: [GValue], _ _env: [GCell]) async throws -> [GValue] { %s }\n", native, arrayCall(f, "try await "+fe.e.names.Derived("a", sym)))
+	fmt.Fprintf(&fe.b, "%sfunc %s(_ _args: [GValue], _ _env: [GCell]) -> GFrame {\n    _ = _gTypeRegistration\n    return GFrame.native(%d, _args, _env, %s)\n}\n", position(f.Pos), sym, f.ID, native)
+}
+
+var swiftSyntax = structure.Syntax{
+	Indent: "    ", If: "if %s {", ElseIf: "} else if %s {", Else: "} else {", End: "}",
+	Loop: "while true {", While: "while %s {", Block: "%s: do {", LoopLabel: "%s: ", LabelName: "_l%d",
+	Break: "break", BreakTo: "break %s", Continue: "continue", ContinueTo: "continue %s",
+	Not: "!%s", And: "try %s && %s", Or: "try %s || %s",
+	DispatchOpen: []string{"%swhile true {", "\t_task.owner.safepoint()", "\tswitch _frame.pc {"}, CaseOpen: "case %d:",
+	Default: []string{`default: throw GFault("invalid frame PC")`}, DispatchClose: []string{"\t}", "}"}, SetPC: "_frame.pc = %d",
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	fe.b = strings.Builder{}
+	fn()
+	out := fe.b.String()
+	fe.b = saved
+	return out
+}
+
+// swiftEmitter prints the target-specific statements of a structured body.
+type swiftEmitter struct{ fe *fnEmitter }
+
+func (x swiftEmitter) Code(b *ir.Block) string {
+	fe := x.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil && !fe.async {
 			fe.resumeInstr(b.ResumeOf)
 		}
 		for _, in := range b.Instrs {
-			fe.mark(in.Position())
-			fe.instr(in)
+			if !fe.folds.Folded(in) {
+				fe.mark(in.Position())
+				fe.instr(in)
+			}
 		}
-		fe.mark(b.Term.Position())
-		fe.term(b.Term)
-	}
-	fe.b.WriteString("        default: throw GFault(\"invalid frame PC\")\n            }\n        }\n    }\n    return frame\n}\n")
-	return fe.b.String()
+	})
 }
+
+func (x swiftEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() {
+		x.fe.mark(t.Position())
+		x.fe.term(t)
+	})
+}
+
+func (x swiftEmitter) Pause(p *ir.Pause) string {
+	if x.fe.folds.FoldedPause(p) {
+		return ""
+	}
+	return x.fe.capture(func() {
+		x.fe.mark(p.Position())
+		x.fe.nativePause(p)
+	})
+}
+func (x swiftEmitter) Cond(v ir.Value) string { return x.fe.val(v) + ".boolValue" }
+func (x swiftEmitter) Mark(pos token.Pos) string {
+	if !pos.IsValid() {
+		return ""
+	}
+	return fmt.Sprintf("%s%d\x00", marker, int(pos))
+}
+
+// swiftProbe renders statements for fold analysis.
+type swiftProbe struct{ fe *fnEmitter }
+
+func (x swiftProbe) Instr(in ir.Instr) string { return x.fe.capture(func() { x.fe.instr(in) }) }
+func (x swiftProbe) Pause(p *ir.Pause) string { return x.fe.capture(func() { x.fe.nativePause(p) }) }
+func (x swiftProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
+func (x swiftProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() { x.fe.term(t) })
+}
+func (x swiftProbe) Assign(l *ir.Local) (string, string) { return x.fe.val(l) + " = ", "" }
 
 const marker = "\x00@"
 
@@ -311,17 +566,10 @@ func (e *emitter) markers(src string) (string, map[int]token.Position) {
 	return strings.Join(ls, "\n"), m
 }
 
-func (fe *fnEmitter) newCase() {
-	n := fe.next
-	fe.next++
-	fe.w("frame.pc = %d", n)
-	fe.w("return .call(child)")
-	fmt.Fprintf(&fe.b, "        case %d:\n", n)
-}
 func (fe *fnEmitter) assignResults(ds []*ir.Local) {
 	for i, d := range ds {
 		if d != nil {
-			fe.w("%s = task.rv[%d]", fe.val(d), i)
+			fe.w("%s = _task.rv[%d]", fe.val(d), i)
 		}
 	}
 }
@@ -343,6 +591,19 @@ func (fe *fnEmitter) call(c *ir.Call) string {
 		return fmt.Sprintf("%s(%s)", symbol, args)
 	}
 	panic("swift call")
+}
+
+// syncCall calls a function that cannot pause and returns its results: a
+// plain function directly, any other through a synchronous frame run.
+func (fe *fnEmitter) syncCall(c *ir.Call) string {
+	if c.Kind == ir.CallStatic && plain(c.Func) {
+		as := []string{"_task"}
+		for _, a := range c.Args {
+			as = append(as, fe.val(a))
+		}
+		return fmt.Sprintf("try %s(%s)", fe.e.names.Derived("p", fe.e.names.Symbol(c.Func.Sym)), strings.Join(as, ", "))
+	}
+	return "try _task.owner.callSync(_task, " + fe.call(c) + ")"
 }
 
 func (fe *fnEmitter) root(p *ir.Place) string {
@@ -441,25 +702,27 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.TypeAssert:
 		n := fe.next
 		fe.next++
-		w("let asserted%d = try GInterface.assertType(%s, %d, %d, %t)", n, fe.val(i.X), i.T.ID, i.X.IRType().ID, i.Ok != nil)
+		w("let _asserted%d = try GInterface.assertType(%s, %d, %d, %t)", n, fe.val(i.X), i.T.ID, i.X.IRType().ID, i.Ok != nil)
 		if i.Dst != nil {
-			w("%s = asserted%d.0", fe.val(i.Dst), n)
+			w("%s = _asserted%d.0", fe.val(i.Dst), n)
 		}
 		if i.Ok != nil {
-			w("%s = .bool(asserted%d.1)", fe.val(i.Ok), n)
+			w("%s = .bool(_asserted%d.1)", fe.val(i.Ok), n)
 		}
 	case *ir.Call:
-		w("let child = %s", fe.call(i))
-		fe.newCase()
-		fe.assignResults(i.Dsts)
+		fe.assignCall(fe.syncCall(i), i.Kind == ir.CallStatic && plain(i.Func), i.Dsts)
 	case *ir.MakeClosure:
 		var env []string
 		for _, l := range i.Env {
 			env = append(env, fe.local(l))
 		}
-		w("%s = .function(GFunction(%d, %s, [%s]))", fe.val(i.Dst), i.Func.ID, e.names.Symbol(i.Func.Sym), strings.Join(env, ", "))
+		w("%s = .function(%s)", fe.val(i.Dst), e.functionValue(i.Func, "["+strings.Join(env, ", ")+"]"))
 	case *ir.MakeBound:
-		w("%s = .function(GFunction.bound(%d, %s, %s))", fe.val(i.Dst), i.Func.ID, e.names.Symbol(i.Func.Sym), fe.val(i.Recv))
+		native := ""
+		if e.async(i.Func) {
+			native = ", native: " + e.names.Derived("n", e.names.Symbol(i.Func.Sym))
+		}
+		w("%s = .function(GFunction.bound(%d, %s, %s%s))", fe.val(i.Dst), i.Func.ID, e.names.Symbol(i.Func.Sym), fe.val(i.Recv), native)
 	case *ir.MakeIfaceBound:
 		w("%s = try GInterface.bound(%s, %s)", fe.val(i.Dst), fe.val(i.Recv), quote(i.Method))
 	case *ir.Len:
@@ -502,12 +765,12 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		e.use("core.map.lookup")
 		n := fe.next
 		fe.next++
-		w("let looked%d = try GMap.lookup(%s, %s, %d)", n, fe.val(i.M), fe.val(i.K), i.M.IRType().U().Elem.ID)
+		w("let _looked%d = try GMap.lookup(%s, %s, %d)", n, fe.val(i.M), fe.val(i.K), i.M.IRType().U().Elem.ID)
 		if i.Dst != nil {
-			w("%s = looked%d.0", fe.val(i.Dst), n)
+			w("%s = _looked%d.0", fe.val(i.Dst), n)
 		}
 		if i.Ok != nil {
-			w("%s = .bool(looked%d.1)", fe.val(i.Ok), n)
+			w("%s = .bool(_looked%d.1)", fe.val(i.Ok), n)
 		}
 	case *ir.MapStore:
 		e.use("core.map.store")
@@ -526,12 +789,12 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		e.use("core.string.decode_rune")
 		n := fe.next
 		fe.next++
-		w("let rune%d = try GString.decode(%s, %s)", n, fe.val(i.S), fe.val(i.I))
+		w("let _rune%d = try GString.decode(%s, %s)", n, fe.val(i.S), fe.val(i.I))
 		if i.Rune != nil {
-			w("%s = rune%d.0", fe.val(i.Rune), n)
+			w("%s = _rune%d.0", fe.val(i.Rune), n)
 		}
 		if i.Width != nil {
-			w("%s = rune%d.1", fe.val(i.Width), n)
+			w("%s = _rune%d.1", fe.val(i.Width), n)
 		}
 	case *ir.MapIterInit:
 		e.use("core.map.iterate")
@@ -539,21 +802,21 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.MapIterNext:
 		n := fe.next
 		fe.next++
-		w("let iterated%d = try GMapIterator.next(%s)", n, fe.val(i.Iter))
-		w("%s = .bool(iterated%d.0)", fe.val(i.Ok), n)
+		w("let _iterated%d = try GMapIterator.next(%s)", n, fe.val(i.Iter))
+		w("%s = .bool(_iterated%d.0)", fe.val(i.Ok), n)
 		if i.Key != nil {
-			w("%s = iterated%d.1", fe.val(i.Key), n)
+			w("%s = _iterated%d.1", fe.val(i.Key), n)
 		}
 		if i.Val != nil {
-			w("%s = iterated%d.2", fe.val(i.Val), n)
+			w("%s = _iterated%d.2", fe.val(i.Val), n)
 		}
 	case *ir.Print:
 		e.use("core.print")
 		w("try GPrint(%s, %t)", fe.values(i.Args), i.Newline)
 	case *ir.Defer:
-		w("frame.defers.append(%s)", fe.call(i.Call))
+		w("_frame.defers.append(%s)", fe.call(i.Call))
 	case *ir.Recover:
-		w("%s = task.recover(%d)", fe.val(i.Dst), fe.f.ID)
+		w("%s = _task.recover(%d)", fe.val(i.Dst), fe.f.ID)
 	case *ir.Rebind:
 		w("%s = GCell(GCopy(%s))", fe.local(i.L), fe.val(i.L))
 	case *ir.BoxParam: // All locals already have stable cells.
@@ -562,13 +825,95 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		w("%s = try GChannel.make(%s, %d)", fe.val(i.Dst), fe.val(i.Size), i.Dst.Type.U().Elem.ID)
 	case *ir.Close:
 		e.use("core.chan.close")
-		w("try GChannel.close(%s, task.owner)", fe.val(i.Ch))
+		w("try GChannel.close(%s, _task.owner)", fe.val(i.Ch))
 	case *ir.Go:
 		e.use("core.task.spawn")
-		w("task.owner.spawn(%s)", fe.call(i.Call))
+		w("_task.owner.spawn(%s)", fe.call(i.Call))
 	default:
 		panic(fmt.Sprintf("swift instruction %T", in))
 	}
+}
+
+// assignCall assigns a call's results: typed calls return them as a value
+// or a tuple, others as an array.
+func (fe *fnEmitter) assignCall(call string, typed bool, dsts []*ir.Local) {
+	index := func(k int) string {
+		if typed {
+			if len(dsts) == 1 {
+				return ""
+			}
+			return fmt.Sprintf(".%d", k)
+		}
+		return fmt.Sprintf("[%d]", k)
+	}
+	switch {
+	case len(dsts) == 0:
+		fe.w("_ = %s", call)
+	case len(dsts) == 1 && dsts[0] != nil:
+		fe.w("%s = %s%s", fe.val(dsts[0]), call, index(0))
+	default:
+		n := fe.next
+		fe.next++
+		fe.w("let _results%d = %s", n, call)
+		for k, d := range dsts {
+			if d != nil {
+				fe.w("%s = _results%d%s", fe.val(d), n, index(k))
+			}
+		}
+	}
+}
+
+// nativePause emits a pause point of an async function: a suspending callee
+// is awaited for its results, and a pause primitive either completes at once
+// or waits for the scheduler to choose the task again, leaving its results
+// in task.rv.
+func (fe *fnEmitter) nativePause(p *ir.Pause) {
+	switch i := p.Op.(type) {
+	case *ir.Call:
+		switch i.Kind {
+		case ir.CallStatic:
+			if !i.Func.MaySuspend {
+				fe.assignCall(fe.syncCall(i), plain(i.Func), i.Dsts)
+				return
+			}
+			as := []string{"_task"}
+			for _, a := range i.Args {
+				as = append(as, fe.val(a))
+			}
+			fe.assignCall(fmt.Sprintf("try await %s(%s)", fe.e.names.Derived("a", fe.e.names.Symbol(i.Func.Sym)), strings.Join(as, ", ")), true, i.Dsts)
+		case ir.CallValue:
+			fe.assignCall(fmt.Sprintf("try await GFunction.call(_task, %s, %s)", fe.val(i.Fn), fe.values(i.Args)), false, i.Dsts)
+		case ir.CallInterface:
+			fe.assignCall(fmt.Sprintf("try await GInterface.call(_task, %s, %s, %s)", fe.val(i.Recv), quote(i.Method), fe.values(i.Args)), false, i.Dsts)
+		case ir.CallExtern:
+			fe.assignCall("try await _task.call("+fe.call(i)+")", false, i.Dsts)
+		}
+	case *ir.Send:
+		fe.e.use("core.chan.send")
+		fe.w("try await _task.pause(GChannel.send(%s, %s, _task))", fe.val(i.Ch), fe.val(i.V))
+	case *ir.Recv:
+		fe.e.use("core.chan.recv")
+		fe.w("try await _task.pause(GChannel.receive(%s, _task))", fe.val(i.Ch))
+		fe.resumeInstr(i)
+	case *ir.Select:
+		fe.e.use("core.select")
+		fe.w("try await _task.pause(GChannel.select([%s], %t, _task))", strings.Join(fe.selectCases(i), ", "), i.Default)
+		fe.resumeInstr(i)
+	default:
+		panic(fmt.Sprintf("swift: pause on %T", p.Op))
+	}
+}
+
+func (fe *fnEmitter) selectCases(i *ir.Select) []string {
+	var cs []string
+	for _, c := range i.Cases {
+		v := ".nilValue"
+		if c.Send {
+			v = fe.val(c.V)
+		}
+		cs = append(cs, fmt.Sprintf("GSelectCase(%s, %t, %s)", fe.val(c.Ch), c.Send, v))
+	}
+	return cs
 }
 
 func (fe *fnEmitter) resumeInstr(in ir.Instr) {
@@ -577,23 +922,23 @@ func (fe *fnEmitter) resumeInstr(in ir.Instr) {
 		fe.assignResults(i.Dsts)
 	case *ir.Recv:
 		if i.Dst != nil {
-			fe.w("%s = task.rv[0]", fe.val(i.Dst))
+			fe.w("%s = _task.rv[0]", fe.val(i.Dst))
 		}
 		if i.Ok != nil {
-			fe.w("%s = task.rv[1]", fe.val(i.Ok))
+			fe.w("%s = _task.rv[1]", fe.val(i.Ok))
 		}
 	case *ir.Select:
-		fe.w("%s = task.rv[0]", fe.val(i.Index))
+		fe.w("%s = _task.rv[0]", fe.val(i.Index))
 		for k, c := range i.Cases {
 			if c.Send {
 				continue
 			}
-			fe.w("if task.rv[0].intValue == %d {", k)
+			fe.w("if _task.rv[0].intValue == %d {", k)
 			if c.Dst != nil {
-				fe.w("    %s = task.rv[1]", fe.val(c.Dst))
+				fe.w("    %s = _task.rv[1]", fe.val(c.Dst))
 			}
 			if c.Ok != nil {
-				fe.w("    %s = task.rv[2]", fe.val(c.Ok))
+				fe.w("    %s = _task.rv[2]", fe.val(c.Ok))
 			}
 			fe.w("}")
 		}
@@ -601,11 +946,15 @@ func (fe *fnEmitter) resumeInstr(in ir.Instr) {
 }
 func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.w("frame.pc = %d; continue", fe.labels[t.Target])
-	case *ir.If:
-		fe.w("frame.pc = %s.boolValue ? %d : %d; continue", fe.val(t.Cond), fe.labels[t.Then], fe.labels[t.Else])
 	case *ir.Return:
+		if fe.defers {
+			fe.w("break _body")
+			return
+		}
+		if !fe.frame {
+			fe.w("return %s", fe.results())
+			return
+		}
 		fe.w("return .complete(%s)", fe.results())
 	case *ir.Panic:
 		fe.w("throw GPanic.source(%s)", fe.val(t.X))
@@ -614,27 +963,19 @@ func (fe *fnEmitter) term(t ir.Terminator) {
 	case *ir.Unreachable:
 		fe.w("throw GFault(\"unreachable\")")
 	case *ir.Pause:
-		fe.w("frame.pc = %d", fe.labels[t.Next])
+		fe.w("_frame.pc = %d", fe.labels[t.Next])
 		switch i := t.Op.(type) {
 		case *ir.Call:
 			fe.w("return .call(%s)", fe.call(i))
 		case *ir.Send:
 			fe.e.use("core.chan.send")
-			fe.w("return try GChannel.send(%s, %s, task)", fe.val(i.Ch), fe.val(i.V))
+			fe.w("return try GChannel.send(%s, %s, _task)", fe.val(i.Ch), fe.val(i.V))
 		case *ir.Recv:
 			fe.e.use("core.chan.recv")
-			fe.w("return try GChannel.receive(%s, task)", fe.val(i.Ch))
+			fe.w("return try GChannel.receive(%s, _task)", fe.val(i.Ch))
 		case *ir.Select:
 			fe.e.use("core.select")
-			var cs []string
-			for _, c := range i.Cases {
-				v := ".nilValue"
-				if c.Send {
-					v = fe.val(c.V)
-				}
-				cs = append(cs, fmt.Sprintf("GSelectCase(%s, %t, %s)", fe.val(c.Ch), c.Send, v))
-			}
-			fe.w("return try GChannel.select([%s], %t, task)", strings.Join(cs, ", "), i.Default)
+			fe.w("return try GChannel.select([%s], %t, _task)", strings.Join(fe.selectCases(i), ", "), i.Default)
 		}
 	default:
 		panic(fmt.Sprintf("swift term %T", t))

@@ -107,7 +107,9 @@ CLR native `StackOverflowException` cannot be caught for managed cleanup, as the
 explains. Generated ordinary functions use a balanced `using` scope and
 [TryEnsureSufficientExecutionStack](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.compilerservices.runtimehelpers.tryensuresufficientexecutionstack?view=net-8.0),
 plus a 4096 ordinary-source-call depth bound. Cooperative source calls have a
-4096 frame-depth bound. The host driver thread has a 16 MiB stack; default virtual
+4096 frame-depth bound. Under `--pause-model=native` they are `async` methods
+guarded by the execution-stack probe alone: a parked task keeps no stack, so a
+depth count would add up across tasks. The host driver thread has a 16 MiB stack; default virtual
 execution retains the existing large-stack thread. The effective guard raises
 `SourceStackFatal`, which Go recover cannot absorb. It unwinds to the driver,
 awaits cleanup ACK, then prints the exact Go-compatible stack fatal report and

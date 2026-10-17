@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: b95b2428b3ab5c697525d462a523f9e704a073ab22c84388681219cb3e0bbf79
 symbol: "TaskSpawn.spawn"
 implementation: runtime/TaskSpawn.java
-implementation_hash: 7e57bd1691da8009438fc29a954fc0cc436ffdfba4fdc84d4dff6c29358593be
+implementation_hash: 98359221d2ff7d5dcd20d8af1c929030da311256eb773723993ed01de37ba9eb
 summary: "go f(args): enqueue a new task after evaluating its callee and arguments; the parent continues."
 suspension: may
 determinism: controlled

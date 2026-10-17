@@ -250,7 +250,7 @@ import("github.com/eugenioenko/goalchemy/lib/task";"github.com/eugenioenko/goalc
 func main(){task.All(func(){time.Sleep(1);println("first")},func(){time.Sleep(2);println("second")});println("all done")}
 `)
 	virtual := cHostCommand(t, out, "sh", "run.sh")
-	cHostInject(t, filepath.Join(out, "main.c"), "    gx_run_main(init_zero_globals, entry_frame);", "    gx_host_main(init_zero_globals, entry_frame);")
+	cHostInject(t, filepath.Join(out, "main.c"), "    gx_run_main(_init_zero_globals, _entry_frame);", "    gx_host_main(_init_zero_globals, _entry_frame);")
 	host := cHostCommand(t, out, "sh", "run.sh")
 	if host != virtual || host != "first\nsecond\nall done\n" {
 		t.Fatalf("actual selectively linked task.All %q virtual %q", host, virtual)
