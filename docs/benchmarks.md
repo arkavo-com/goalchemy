@@ -29,11 +29,12 @@ every build prints the same output:
   then `fib(27)` through suspending recursion.
 - `pingpong`: 300k round trips over unbuffered channels between three tasks.
 
-`--targets` selects targets (`go`, `typescript`, `python`, `swift`, `csharp`;
+`--targets` selects targets (`go`, `typescript`, `python`, `swift`, `csharp`, `java`;
 default `go,typescript`), and `--pause-model native` selects the pause model of
-the targets that implement both (Go, TypeScript, Swift, C#). Swift programs are
+the targets that implement both (Go, TypeScript, Swift, C#, Java). Swift programs are
 built in release mode (`-O -wmo`) before timing; C# programs are compiled with
-their `run.sh` compiler line and timed as `dotnet bin/main.dll`. A compiler named `NAME@MODEL`
+their `run.sh` compiler line and timed as `dotnet bin/main.dll`; Java programs
+are compiled the same way and timed with their `run.sh` `java` command line. A compiler named `NAME@MODEL`
 uses that pause model, so one run can compare models:
 `bench.py micro --targets typescript base=/tmp/gc-before after@frames=/tmp/gc-after after@native=/tmp/gc-after`.
 
