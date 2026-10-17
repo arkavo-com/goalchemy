@@ -18,7 +18,7 @@ func TestNamingModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wanted := map[string]bool{"naming": true, "structs_values": true, "co_frames": true}
+	wanted := map[string]bool{"naming": true, "structs_values": true, "co_frames": true, "shadow_scopes": true, "multipkg": true}
 	for _, fixture := range fixtures {
 		if !wanted[fixture.Name] {
 			continue

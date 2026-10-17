@@ -194,7 +194,7 @@ func (e *emitter) library() (string, error) {
 				fmt.Fprintf(&b, "    if _v.count != %d { throw GoalchemyFailure(\"invalid_argument\", \"array length must be %d\") }\n", u.Len, u.Len)
 			}
 			if elem := u.Elem.U(); elem.Kind == ir.KInt && elem.Int.Bits() == 8 && !elem.Int.Signed() {
-				fmt.Fprintf(&b, "    let _buffer = GBuffer(_bytes: _v, elem: %d)\n", u.Elem.ID)
+				fmt.Fprintf(&b, "    let _buffer = GBuffer(bytes: _v, elem: %d)\n", u.Elem.ID)
 			} else {
 				fmt.Fprintf(&b, "    let _buffer = GBuffer(_v.count, %d)\n    for _i in _v.indices { _buffer.write(_i, try _gInput%d(_v[_i])) }\n", u.Elem.ID, u.Elem.U().ID)
 			}
@@ -218,7 +218,7 @@ func (e *emitter) library() (string, error) {
 		case ir.KFloat:
 			fmt.Fprintf(&b, "    guard case .float(let _number, _) = _v else { throw GFault(\"float boundary\") }; return %s(_number)\n", typ(t))
 		case ir.KString:
-			b.WriteString("    return GoString(_bytes: _v.bytes)\n")
+			b.WriteString("    return GoString(bytes: _v.bytes)\n")
 		case ir.KStruct:
 			fmt.Fprintf(&b, "    guard case .aggregate(let _a) = _v else { throw GFault(\"struct boundary\") }; return %s(\n", typ(t))
 			var fs []string
