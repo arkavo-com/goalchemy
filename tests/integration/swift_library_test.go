@@ -209,7 +209,7 @@ print("PASS Swift library lifecycle")
 `)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release")
+	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release -Xswiftc -Onone")
 	cmd.Dir = consumer
 	cmd.Env = driver.ToolEnv()
 	output, err := cmd.CombinedOutput()
