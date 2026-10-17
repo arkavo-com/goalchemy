@@ -109,6 +109,8 @@ func (e *emitter) types(b *bytes.Buffer) {
 	}
 	const typeRowsPerFunc = 32
 	chunks := (len(e.p.Types.All) + typeRowsPerFunc - 1) / typeRowsPerFunc
+	missingTables := map[string]string{}
+	var missingDeclarations strings.Builder
 	for i, t := range e.p.Types.All {
 		if i%typeRowsPerFunc == 0 {
 			if i > 0 {
@@ -146,7 +148,15 @@ func (e *emitter) types(b *bytes.Buffer) {
 		}
 		missing := strings.Join(missingMethods, ", ")
 		if missing == "" {
-			missing = ":"
+			missing = "[:]"
+		} else {
+			symbol, ok := missingTables[missing]
+			if !ok {
+				symbol = fmt.Sprintf("gMissingInterfaceMethods%d", len(missingTables))
+				missingTables[missing] = symbol
+				fmt.Fprintf(&missingDeclarations, "private let %s: [Int: String] = [%s]\n", symbol, missing)
+			}
+			missing = symbol
 		}
 		bits := 0
 		signed := false
@@ -158,11 +168,12 @@ func (e *emitter) types(b *bytes.Buffer) {
 			bits = u.FloatBits
 		}
 		comparable := t.Go != nil && t.Comparable()
-		fmt.Fprintf(b, "    table.append(GType(%s, %s, %d, %t, %d, %d, %d, [%s], [%s], [%s], [%s], %t, [%s], [%s], [%s])) // %s\n", quote(ir.TypeString(t)), quote(u.Kind.String()), bits, signed, id(u.Elem), id(u.Key), u.Len, strings.Join(fields, ", "), strings.Join(names, ", "), strings.Join(blank, ", "), strings.Join(methods, ", "), comparable, strings.Join(implementations, ", "), missing, strings.Join(nativeMethods, ", "), e.names.Type(t, "T_"))
+		fmt.Fprintf(b, "    table.append(GType(%s, %s, %d, %t, %d, %d, %d, [%s], [%s], [%s], [%s], %t, [%s], %s, [%s])) // %s\n", quote(ir.TypeString(t)), quote(u.Kind.String()), bits, signed, id(u.Elem), id(u.Key), u.Len, strings.Join(fields, ", "), strings.Join(names, ", "), strings.Join(blank, ", "), strings.Join(methods, ", "), comparable, strings.Join(implementations, ", "), missing, strings.Join(nativeMethods, ", "), e.names.Type(t, "T_"))
 	}
 	if chunks > 0 {
 		b.WriteString("}\n\n")
 	}
+	b.WriteString(missingDeclarations.String())
 	fmt.Fprintf(b, "let gTypeRegistration: Void = {\n    var table: [GType] = []\n    table.reserveCapacity(%d)\n", len(e.p.Types.All))
 	for i := 0; i < chunks; i++ {
 		fmt.Fprintf(b, "    gTypeRows%d(&table)\n", i)
