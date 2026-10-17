@@ -81,7 +81,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, f := range p.Funcs {
 				count := 0
-				declaration := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(naming.New(&p, swift.NameRules(&p)).Symbol(f.Sym)) + `\(_ args: \[GValue\], _ env: \[GCell\]\) -> GFrame \{`)
+				declaration := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(naming.New(&p, swift.NameRules(&p)).Symbol(f.Sym)) + `\(_ _args: \[GValue\], _ _env: \[GCell\]\) -> GFrame \{`)
 				for _, file := range output.Files {
 					if declaration.Match(file.Source) {
 						count++
@@ -111,7 +111,7 @@ func TestPackageOutput(t *testing.T) {
 					t.Fatalf("global %s declarations %d", global.Name, count)
 				}
 			}
-			if strings.Count(combined, "let gTypeRegistration: Void =") != 1 || strings.Count(combined, "GTypes.table = table") != 1 {
+			if strings.Count(combined, "let _gTypeRegistration: Void =") != 1 || strings.Count(combined, "GTypes.table = _table") != 1 {
 				t.Fatal("duplicated canonical type registration")
 			}
 			out := t.TempDir()

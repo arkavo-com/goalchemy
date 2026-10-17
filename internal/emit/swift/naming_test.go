@@ -194,10 +194,10 @@ func TestBulkByteEmission(t *testing.T) {
 					t.Fatalf("spread argument expands bytes to GValue elements: %s", line)
 				}
 			}
-			if !foundAppend || !strings.Contains(source, "return try GElements(v).map") {
+			if !foundAppend || !strings.Contains(source, "return try GElements(_v).map") {
 				t.Fatal("fixture must exercise byte spread append and unrelated generic conversion")
 			}
-			if !strings.Contains(source, "GBuffer(bytes: v, elem:") || !strings.Contains(source, "GSlice.byteSource(v)") {
+			if !strings.Contains(source, "GBuffer(bytes: _v, elem:") || !strings.Contains(source, "GSlice.byteSource(_v)") {
 				t.Fatal("byte public conversion lacks native buffer path")
 			}
 		})
