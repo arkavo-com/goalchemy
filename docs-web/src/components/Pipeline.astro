@@ -1,0 +1,21 @@
+---
+const source = `package main
+
+func main() {
+    println("Hello from Goalchemy")
+}`;
+---
+<div class="pipeline" aria-label="One Go source compiles to eight target languages">
+  <div>
+    <span class="source-label">YOUR SOURCE · main.go</span>
+    <pre><code>{source}</code></pre>
+  </div>
+  <span class="arrow" aria-hidden="true">→</span>
+  <div>
+    <span class="source-label">GENERATED TARGETS</span>
+    <div class="targets">
+      <span>Go</span><span>TypeScript</span><span>Python</span><span>Java</span>
+      <span>C#</span><span>Rust</span><span>C</span><span>Swift <small>experimental</small></span>
+    </div>
+  </div>
+</div>

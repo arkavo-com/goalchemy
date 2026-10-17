@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="400" viewBox="0 0 480 400" fill="none">
+  <defs>
+    <linearGradient id="flow" x1="70" y1="350" x2="390" y2="45" gradientUnits="userSpaceOnUse"><stop stop-color="#38bdf8"/><stop offset=".5" stop-color="#8b5cf6"/><stop offset="1" stop-color="#c4b5fd"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#8b5cf6" stop-opacity=".2"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></radialGradient>
+  </defs>
+  <ellipse cx="240" cy="210" rx="230" ry="185" fill="url(#glow)"/>
+  <g stroke="#899ac5" stroke-opacity=".28">
+    <path d="M240 55v35m0 225v35M90 200H55m370 0h-35M134 94l25 25m162 162 25 25M134 306l25-25M321 119l25-25"/>
+    <circle cx="240" cy="200" r="145" stroke-dasharray="3 12"/><circle cx="240" cy="200" r="108"/>
+  </g>
+  <g fill="#12213a" stroke="url(#flow)" stroke-width="2">
+    <rect x="207" y="24" width="66" height="42" rx="12"/><rect x="207" y="334" width="66" height="42" rx="12"/>
+    <rect x="30" y="179" width="66" height="42" rx="12"/><rect x="384" y="179" width="66" height="42" rx="12"/>
+    <rect x="89" y="61" width="66" height="42" rx="12"/><rect x="325" y="61" width="66" height="42" rx="12"/>
+    <rect x="89" y="297" width="66" height="42" rx="12"/><rect x="325" y="297" width="66" height="42" rx="12"/>
+  </g>
+  <g fill="#c4d2ee" font-family="system-ui,sans-serif" font-size="15" font-weight="600" text-anchor="middle">
+    <text x="240" y="51">Go</text><text x="240" y="361">Rust</text><text x="63" y="206">TS</text><text x="417" y="206">C#</text>
+    <text x="122" y="88">Python</text><text x="358" y="88">Java</text><text x="122" y="324">C</text><text x="358" y="324">Swift</text>
+  </g>
+  <path d="M211 122h58v13h-10v51l47 75a15 15 0 0 1-13 23H187a15 15 0 0 1-13-23l47-75v-51h-10z" fill="#101e34" stroke="url(#flow)" stroke-width="5" stroke-linejoin="round"/>
+  <path d="m206 220-27 43a9 9 0 0 0 8 14h106a9 9 0 0 0 8-14l-27-43c-25 14-44-14-68 0" fill="url(#flow)"/>
+  <circle cx="235" cy="103" r="8" fill="#a78bfa"/><circle cx="255" cy="79" r="5" fill="#38bdf8"/>
+  <path d="m313 150 4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#f7ce75"/>
+  <circle cx="181" cy="162" r="3" fill="#f7ce75"/>
+</svg>
