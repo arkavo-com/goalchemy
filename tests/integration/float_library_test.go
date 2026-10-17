@@ -126,7 +126,7 @@ let package = Package(
 							}
 						}
 					}
-					result = run(consumer, swift, "run", "-c", "release")
+					result = run(consumer, swift, "run", "-c", "release", "-Xswiftc", "-Onone")
 				case "c":
 					run(out, "sh", "build.sh")
 					copyFixture("consumer.c", consumer, "consumer.c")

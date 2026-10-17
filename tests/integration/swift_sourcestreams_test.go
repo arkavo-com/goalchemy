@@ -30,7 +30,7 @@ let package = Package(name:"SourceStreamsConsumer",dependencies:[.package(name:"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release")
+	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release -Xswiftc -Onone")
 	cmd.Dir, cmd.Env = consumer, append(driver.ToolEnv(), fmt.Sprintf("THROUGHPUT_MIB=%d", throughputMiB(256)))
 	data, err := cmd.CombinedOutput()
 	if err != nil {

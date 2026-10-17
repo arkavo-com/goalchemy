@@ -75,7 +75,7 @@ let package = Package(name:"PackageConsumer",dependencies:[.package(name:"Goalch
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release")
+			cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release -Xswiftc -Onone")
 			cmd.Dir, cmd.Env = consumer, driver.ToolEnv()
 			data, err := cmd.CombinedOutput()
 			if err != nil {
