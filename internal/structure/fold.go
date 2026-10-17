@@ -40,7 +40,11 @@ const (
 type FoldOptions struct {
 	// Inline continues straight-line sequences through pause points.
 	Inline bool
-	Order  Order
+	// PauseAlone folds a pause only into a use that evaluates nothing
+	// before it that a temporary would hold across the pause: the target's
+	// collector sees locals, not temporaries.
+	PauseAlone bool
+	Order      Order
 }
 
 // Folds records the single-use temporaries a target prints inside the
@@ -418,7 +422,7 @@ func Analyze(f *ir.Func, opt FoldOptions, pr Probe, set func(*Folds)) *Folds {
 		}
 		var drop []*ir.Local
 		for _, c := range cands {
-			if !c.valid(cands, byDef, bySink[c.seq[c.s].key()], root, opt.Order) {
+			if !c.valid(cands, byDef, bySink[c.seq[c.s].key()], root, opt) {
 				drop = append(drop, c.t)
 			}
 		}
@@ -440,7 +444,11 @@ func Analyze(f *ir.Func, opt FoldOptions, pr Probe, set func(*Folds)) *Folds {
 // with effects only past statements folded into the same use; its use must
 // accept an operand with effects; and the target's operand order must keep
 // the source order of effects.
-func (c *cand) valid(cands map[*ir.Local]*cand, byDef map[any]*cand, siblings []*cand, root func(*cand) any, order Order) bool {
+func (c *cand) valid(cands map[*ir.Local]*cand, byDef map[any]*cand, siblings []*cand, root func(*cand) any, opt FoldOptions) bool {
+	order := opt.Order
+	if opt.PauseAlone && c.seq[c.d].pause != nil && !c.alone(cands, byDef) {
+		return false
+	}
 	reads := c.treeReads(cands)
 	effects := c.effects(cands)
 	for k := c.d + 1; k < c.s; k++ {
@@ -489,6 +497,30 @@ func (c *cand) valid(cands map[*ir.Local]*cand, byDef map[any]*cand, siblings []
 		}
 	}
 	return true
+}
+
+// alone reports whether the uses that a folded pause c is printed in, up
+// to the statement or pause containing it, evaluate no folded expression
+// before the pause and read only locals no other task writes, whose
+// storage keeps their values across it.
+func (c *cand) alone(cands map[*ir.Local]*cand, byDef map[any]*cand) bool {
+	for x := c; ; {
+		sink := x.seq[x.s]
+		for _, l := range locals(itemReads(sink)) {
+			if o, ok := cands[l]; ok {
+				if o != x && o.pos < x.pos {
+					return false
+				}
+			} else if l.Boxed || l.Kind == ir.LEnv {
+				return false
+			}
+		}
+		up, ok := byDef[sink.key()]
+		if !ok || sink.pause != nil {
+			return true
+		}
+		x = up
+	}
 }
 
 func (c *cand) firstEffect(cands map[*ir.Local]*cand) int {

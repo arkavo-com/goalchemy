@@ -47,7 +47,10 @@ func (p *toyProbe) Instr(in ir.Instr) string {
 	return "?"
 }
 
-func (p *toyProbe) Pause(*ir.Pause) string               { return "" }
+func (p *toyProbe) Pause(ps *ir.Pause) string {
+	c := ps.Op.(*ir.Call)
+	return p.val(c.Dsts[0]) + " = await " + c.Func.Name + "()"
+}
 func (p *toyProbe) Cond(v ir.Value) string               { return p.val(v) }
 func (p *toyProbe) Leaf(*ir.Block, ir.Terminator) string { return "" }
 func (p *toyProbe) Assign(l *ir.Local) (string, string)  { return p.val(l) + " = ", "" }
@@ -167,5 +170,53 @@ func TestIrreducible(t *testing.T) {
 	py := Resolve(Print(body, pySyntax, dumpEmitter{}, 0))
 	if !strings.Contains(py, "_pc == ") {
 		t.Errorf("python dispatch missing:\n%s", py)
+	}
+}
+
+// TestPauseAlone checks that a pause folds only into a use that holds no
+// earlier operand across it in a temporary, except locals no other task
+// writes.
+func TestPauseAlone(t *testing.T) {
+	cases := []struct {
+		first      func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr)
+		alone, any bool
+	}{
+		{func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr) {
+			t1 := f.NewLocal("t1", ts.IntT(), ir.LTemp)
+			return t1, call("alloc", t1)
+		}, false, true},
+		{func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr) {
+			return f.NewLocal("x", ts.IntT(), ir.LVar), nil
+		}, true, true},
+		{func(f *ir.Func, ts *ir.Types) (ir.Value, ir.Instr) {
+			x := f.NewLocal("x", ts.IntT(), ir.LVar)
+			x.Boxed = true
+			return x, nil
+		}, false, true},
+	}
+	for i, c := range cases {
+		for _, alone := range []bool{false, true} {
+			f := &ir.Func{Name: "f"}
+			ts := ir.NewTypes()
+			b0, b1 := f.NewBlock(""), f.NewBlock("")
+			first, def := c.first(f, ts)
+			if def != nil {
+				b0.Instrs = []ir.Instr{def}
+			}
+			t2 := f.NewLocal("t2", ts.IntT(), ir.LTemp)
+			pause := &ir.Pause{Op: &ir.Call{Kind: ir.CallStatic, Func: &ir.Func{Name: "g"}, Dsts: []*ir.Local{t2}}, Next: b1}
+			b0.Term = pause
+			b1.Instrs = []ir.Instr{call("h", nil, first, t2)}
+			b1.Term = &ir.Return{}
+			p := &toyProbe{}
+			fs := Analyze(f, FoldOptions{Inline: true, PauseAlone: alone, Order: LeftToRight}, p, func(fs *Folds) { p.fs = fs })
+			want := c.any
+			if alone {
+				want = c.alone
+			}
+			if got := fs.FoldedPause(pause); got != want {
+				t.Errorf("case %d, PauseAlone %t: folded %t, want %t (%s)", i, alone, got, want, Resolve(p.Instr(b1.Instrs[0])))
+			}
+		}
 	}
 }
