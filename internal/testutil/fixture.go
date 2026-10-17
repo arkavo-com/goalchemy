@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/format"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,7 +155,54 @@ var buildMu sync.Mutex
 func Native(fixtureDir, work string) (Observation, error) {
 	bin := filepath.Join(work, "native")
 	abs, _ := filepath.Abs(fixtureDir)
-	if o, err := run(abs, 2*time.Minute, "go", "build", "-o", bin, "."); err != nil || o.Exit != 0 {
+	args := []string{"build", "-o", bin}
+	replace := map[string]string{}
+	err := filepath.WalkDir(abs, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(src, []byte(frontend.TaskPackage)) {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, err := frontend.ParseFutureFile(fset, path, src, true)
+		if err != nil {
+			return err
+		}
+		var buf bytes.Buffer
+		if err := format.Node(&buf, fset, file); err != nil {
+			return err
+		}
+		copy := filepath.Join(work, fmt.Sprintf("reference-%d.go", len(replace)))
+		if err := os.WriteFile(copy, buf.Bytes(), 0600); err != nil {
+			return err
+		}
+		replace[path] = copy
+		return nil
+	})
+	if err != nil {
+		return Observation{}, err
+	}
+	if len(replace) > 0 {
+		data, err := json.Marshal(struct{ Replace map[string]string }{replace})
+		if err != nil {
+			return Observation{}, err
+		}
+		overlay := filepath.Join(work, "reference-overlay.json")
+		if err := os.WriteFile(overlay, data, 0600); err != nil {
+			return Observation{}, err
+		}
+		args = append(args, "-overlay", overlay)
+	}
+	args = append(args, ".")
+	if o, err := run(abs, 2*time.Minute, "go", args...); err != nil || o.Exit != 0 {
 		return o, fmt.Errorf("native build failed: %v\n%s", err, o.Stderr)
 	}
 	return run(work, time.Minute, bin)

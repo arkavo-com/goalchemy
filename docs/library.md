@@ -7696,6 +7696,8 @@ Package task provides structured waiting for Goalchemy programs.
 | Function | c | csharp | go | java | python | rust | swift | typescript |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
 | `All` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `await` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `start` | yes | yes | yes | yes | yes | yes | yes | yes |
 
 ### All
 
@@ -7708,6 +7710,32 @@ Run each function as a task, in order, and resume the caller when all have finis
 - **Gate**: `cooperative` (may suspend the calling task)
 - **Determinism**: controlled
 - **Contract**: `lib.task.all` 1.0.0
+
+### await
+
+```go
+func await(future FutureState) []any
+```
+
+Wait for a future and return its cached results.
+
+- **Gate**: `cooperative` (may suspend the calling task)
+- **Determinism**: controlled
+- **Errors**: Errors are ordinary result values.
+- **Contract**: `lib.task.await` 1.0.0
+
+### start
+
+```go
+func start(fn any) FutureState
+```
+
+Start a function as a cooperative task and retain its results.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: controlled
+- **Errors**: Errors are ordinary result values.
+- **Contract**: `lib.task.start` 1.0.0
 
 ## time
 

@@ -9,6 +9,7 @@ public abstract class Frame
     public Frame parent;
     internal int depth;
     public GoPanic panicking;
+    internal Action<GoTask, object[], GoPanic> completion;
 
     public abstract void step(GoTask t);
 
@@ -48,6 +49,8 @@ sealed class FatalPanic : Exception
 
 public sealed class Scheduler
 {
+    internal readonly List<(object key, GoPanic panic)> unawaited = new();
+    internal void checkFuturePanics() { if (unawaited.Count > 0) throw new FatalPanic(unawaited[0].panic); }
     internal sealed record Timer(long at, long seq, GoTask task, Action fn);
     internal readonly Queue<GoTask> runq = new();
     public GoTask cur;
@@ -184,7 +187,7 @@ public sealed class Scheduler
             libraryObserve?.Invoke();
             fireDue(now()); drainHost();
             if (runq.Count > 0) return runq.Dequeue();
-            if (operations.Count == 0 && timers.Count == 0) throw new HostFatal("all goroutines are asleep - deadlock!");
+            if (operations.Count == 0 && timers.Count == 0) { checkFuturePanics(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
             long at = long.MaxValue; foreach (var t in timers) at = Math.Min(at, t.at);
             mail.awaitChange(version, timers.Count == 0 ? -1 : Math.Max(0, at - now()));
         }
@@ -222,7 +225,7 @@ public sealed class Scheduler
     {
         while (runq.Count == 0)
         {
-            if (timers.Count == 0) { if (harness) throw new Blocked(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
+            if (timers.Count == 0) { checkFuturePanics(); if (harness) throw new Blocked(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
             long at = long.MaxValue; foreach (var t in timers) at = Math.Min(at, t.at);
             clock = at; fireDue(at);
         }
@@ -365,6 +368,7 @@ public sealed class Scheduler
             t.done = true;
             t.rv = Array.Empty<object>(); t.curPanic = null; t.deferTarget = null;
             if (t != main) tasks.Remove(t);
+            if (f.completion != null) { f.completion(t, p == null ? f.results() : Array.Empty<object>(), p); return; }
             if (p != null)
             {
                 throw new FatalPanic(p);
@@ -616,6 +620,7 @@ public static partial class R
                 s.run(host ? s.nextHost() : s.next());
                 if (s.handoff != null) s.turnBack();
             }
+            s.checkFuturePanics();
         }
         catch (Exception e) { failure = e; }
         if (s != null) try { s.shutdown(); } catch (Exception e) { failure ??= e; }
@@ -635,7 +640,7 @@ public static partial class R
             var main=new GoTask(0,null);owner=install(main,false);owner.hostMode=true;owner.libraryObserve=observe;
             var mail=owner.mail;wake(() => {lock(mail)mail.signal();});root=entry();main.frame=root;owner.ready(main);
             while(!main.done){observe();owner.run(owner.nextHost());if(owner.handoff!=null)owner.turnBack();}
-            value=capture(root.results());
+            owner.checkFuturePanics(); value=capture(root.results());
         }
         catch(FatalPanic){failure=new Library.Failure("panic");}
         catch(HostFatal e){failure=new Library.Failure("fatal",null,e);}

@@ -65,6 +65,11 @@ fn fire_timers(real: bool) {
     let _roots = temp_root(&values);
     for t in due { if let Some((f, v)) = t.f { f(v); } if let Some(task) = t.task { ready(&task); } }
 }
+fn check_future_panics() {
+    let panic = sched(|s| s.unawaited.first().map(|(_, p)| p.clone()));
+    if let Some(panic) = panic { raise(panic); }
+}
+
 fn next() -> Rc<Task> {
     loop {
         let real = sched(|s| s.epoch.is_some());
@@ -83,6 +88,7 @@ fn next() -> Rc<Task> {
             continue;
         }
         if !timers {
+            check_future_panics();
             if harness { std::panic::resume_unwind(Box::new(BlockedPayload)); }
             fatal("all goroutines are asleep - deadlock!");
         }
@@ -149,6 +155,7 @@ fn finish(t: &Rc<Task>, f: &Rc<Frame>) {
     let Some(par) = parent else {
         t.done.set(true);
         sched(|s| s.tasks.retain(|x| !Rc::ptr_eq(x, t)));
+        if let Some(completion) = f.completion.get() { completion(t, f, p); return; }
         if !p.is_nil() {
             raise(p);
         }
@@ -358,6 +365,7 @@ fn drive_reserved(_reservation: Option<EntryReservation>, main_factory: impl FnO
         initialize(&main);
         ready(&main);
         while !main.done.get() { let t = next(); run(&t); safepoint(); }
+        check_future_panics();
     })).map_err(classify);
     let retirement = retire_owner();
     match (result, retirement) { (Ok(()), Err(e)) => Err(HostError::Fault(e)), (result, _) => result }
@@ -613,7 +621,7 @@ pub fn set_host_poll(p:Option<Rc<dyn Fn()>>){HOST_POLL.with(|x|*x.borrow_mut()=p
 fn host_poll_active()->bool{HOST_POLL.with(|x|x.borrow().is_some())}
 fn poll_host(){let p=HOST_POLL.with(|x|x.borrow().clone());if let Some(p)=p{p()}}
 pub fn library_install(){install(Task::new(0,None),false);sched(|s|s.epoch=Some(Instant::now()));}
-pub fn library_run(main:&Rc<Task>){while !main.done.get(){let t=next();run(&t);safepoint();}}
+pub fn library_run(main:&Rc<Task>){while !main.done.get(){let t=next();run(&t);safepoint();}check_future_panics();}
 
 /// Harness-only owner-local values; production library returns detached native types.
 pub fn run_host_isolated(prim:impl FnOnce(&Rc<Task>)+'static)->Vec<V>{

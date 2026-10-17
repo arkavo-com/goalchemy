@@ -32,11 +32,15 @@ import java.util.concurrent.locks.LockSupport;
 public final class TaskSpawn {
     private TaskSpawn() {}
 
+    @FunctionalInterface
+    interface FutureCompletion { void complete(Task t, Object[] results, GoPanic panic); }
+
     public abstract static class Frame {
         public int pc;
         public ArrayList<Program.Deferred> defers = new ArrayList<>();
         public Frame parent;
         public GoPanic panicking;
+        FutureCompletion completion;
 
         public abstract void step(Task t);
 
@@ -172,6 +176,8 @@ public final class TaskSpawn {
     }
 
     public static final class Scheduler {
+        final LinkedHashMap<Object,GoPanic> unawaited = new LinkedHashMap<>();
+        void checkFuturePanics() { if(!unawaited.isEmpty()) throw new FatalPanic(unawaited.values().iterator().next()); }
         final ArrayDeque<Task> runq = new ArrayDeque<>();
         public Task cur;
         Task main;
@@ -305,7 +311,7 @@ public final class TaskSpawn {
                 long version=mail.version();
                 libraryControl.run(); fireDue(now()); drainHost();
                 if(!runq.isEmpty()) return runq.poll();
-                if(operations.isEmpty() && timers.isEmpty()) throw new HostFatal("all goroutines are asleep - deadlock!");
+                if(operations.isEmpty() && timers.isEmpty()) { checkFuturePanics(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
                 long at=Long.MAX_VALUE;
                 for(Timer t:timers) at=Math.min(at,t.at);
                 mail.await(version,timers.isEmpty() ? -1 : Math.max(0,at-now()));
@@ -340,7 +346,7 @@ public final class TaskSpawn {
         }
         Task next() {
             while(runq.isEmpty()) {
-                if(timers.isEmpty()) { if(harness) throw new Blocked(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
+                if(timers.isEmpty()) { checkFuturePanics(); if(harness) throw new Blocked(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
                 fireTimers();
             }
             return runq.poll();
@@ -503,6 +509,7 @@ public final class TaskSpawn {
                 t.done = true;
                 t.rv=new Object[0]; t.curPanic=null; t.deferTarget=null;
                 if(t!=main) tasks.remove(t);
+                if(f.completion != null) { f.completion.complete(t,p == null ? f.results() : new Object[0],p); return; }
                 if (p != null) throw new FatalPanic(p);
                 return;
             }
@@ -701,6 +708,7 @@ public final class TaskSpawn {
                 s.run(host ? s.nextHost() : s.next());
                 if(s.handoff!=null) s.turnBack();
             }
+            s.checkFuturePanics();
         } catch(Throwable e) { failure=e; }
         if(s!=null) try { s.shutdown(); } catch(Throwable e) { if(failure==null) failure=e; }
         Program.resetPanicBinding();
@@ -731,6 +739,7 @@ public final class TaskSpawn {
             Frame root=entry.get();main.frame=root; s.ready(main);
             while(!main.done) { control.run(); s.run(s.nextHost()); if(s.handoff!=null) s.turnBack(); }
             // Frame results, including structured errors, remain source-owned here.
+            s.checkFuturePanics();
             result=capture.apply(root.results());
         } catch(Throwable e) { failure=e; }
         if(s!=null) try { s.shutdown(); } catch(Throwable e) { failure=e; }
