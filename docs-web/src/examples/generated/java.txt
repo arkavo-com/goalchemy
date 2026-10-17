@@ -3,179 +3,91 @@ import rt.*;
 
 @SuppressWarnings({"unchecked", "unused", "rawtypes"})
 final class pkg_tasks_51ee6f93a026bf93 extends _GoalchemySupport {
-    static final class F$fn_main_fetchTasks_516 extends TaskSpawn.Frame {
-        String v_url$0 = "";
-        Slice v_result$1 = Slice.NIL;
-        Box v_result$2 = null;
-        long v_status$3 = 0L;
-        Slice v_body$4 = Slice.BYTE_NIL;
-        Box v_err$5 = null;
-        StdContextErr.Context v_temp$6 = null;
-        long v_temp$7 = 0L;
-        Slice v_temp$8 = Slice.NIL;
-        Slice v_temp$9 = Slice.BYTE_NIL;
-        Box v_temp$10 = null;
-        boolean v_temp$11 = false;
-        boolean v_temp$12 = false;
-        Box v_temp$13 = null;
-        boolean v_temp$14 = false;
-        boolean v_temp$15 = false;
-        Box v_temp$16 = null;
-        Cell v_tasks$17 = null;
-        Ref v_temp$18 = null;
-        boolean v_temp$19 = false;
-        S$json_typeInfo_333 v_temp$20 = null;
-        Box v_temp$21 = null;
-        Box v_temp$22 = null;
-        Slice v_temp$23 = Slice.NIL;
-        Box v_temp$24 = null;
-        public Object[] results() {
-            final F$fn_main_fetchTasks_516 fr = this;
-            return new Object[] {fr.v_result$1, fr.v_result$2};
+    static Object[] fetchTasks(TaskSpawn.Task _t, String url) {
+        Slice _1 = Slice.NIL;
+        Box _2 = null;
+        long status = 0L;
+        Slice body = Slice.BYTE_NIL;
+        Box err = null;
+        StdContextErr.Context _6 = null;
+        long _7 = 0L;
+        Slice _8 = Slice.NIL;
+        Slice _9 = Slice.BYTE_NIL;
+        Box _10 = null;
+        Box _16 = null;
+        Cell tasks = null;
+        Ref _18 = null;
+        _1 = Slice.NIL;
+        _2 = null;
+        _6 = StdContextBackground.stdContextBackground();
+        LibHttpDo.libHttpDo(_t, _6, "GET", url, Slice.NIL, Slice.BYTE_NIL, 1048576L, 5000L);
+        if (_t.blocked) TaskSpawn.await(_t);
+        _7 = ((Long) (_t.rv[0]));
+        _8 = ((Slice) (_t.rv[1]));
+        _9 = ((Slice) (_t.rv[2]));
+        _10 = ((Box) (_t.rv[3]));
+        status = _7;
+        body = _9;
+        err = _10;
+        if (!Box.ifaceEq(err, null)) {
+            _1 = Slice.NIL;
+            _2 = err;
+            return new Object[] {_1, _2};
         }
-        public void step(TaskSpawn.Task t) {
-            final F$fn_main_fetchTasks_516 fr = this;
-            for (;;) switch (fr.pc) {
-        case 0:
-            fr.v_result$1 = Slice.NIL;
-            fr.v_result$2 = null;
-            fr.v_temp$6 = StdContextBackground.stdContextBackground();
-            fr.pc = 5; LibHttpDo.libHttpDo(t, fr.v_temp$6, "GET", fr.v_url$0, Slice.NIL, Slice.BYTE_NIL, 1048576L, 5000L);
+        if (!(status == 200L)) {
+            _16 = StdErrorsNew.stdErrorsNew("unexpected HTTP status");
+            _1 = Slice.NIL;
+            _2 = _16;
+            return new Object[] {_1, _2};
+        }
+        tasks = new Cell(Slice.NIL);
+        _18 = tasks;
+        err = pkg_json_8cc9496285d7f743.unmarshalTyped(body, Box.box(TD$pointer_slice_main_Task, _18), pkg_json_8cc9496285d7f743._ddesc_main_Task(), _18 == null, "");
+        _1 = ((Slice) (tasks.v));
+        _2 = err;
+        return new Object[] {_1, _2};
+    }
+
+    static TaskSpawn.Frame fetchTasks(String url) {
+        return TaskSpawn.nativeTask(_t -> fetchTasks(_t, url));
+    }
+
+    static void main_2(TaskSpawn.Task _t) {
+        Slice tasks = Slice.NIL;
+        Box err = null;
+        Slice _2 = Slice.NIL;
+        Box _3 = null;
+        long completed = 0L;
+        long _8 = 0L;
+        long _9 = 0L;
+        Slice _10 = Slice.NIL;
+        Task task = null;
+        { Object[] $r = fetchTasks(_t, "https://jsonplaceholder.typicode.com/todos"); _2 = ((Slice) ($r[0])); _3 = ((Box) ($r[1])); }
+        tasks = _2;
+        err = _3;
+        if (!Box.ifaceEq(err, null)) {
+            Print.print(true, "Could not load tasks:", ((String) (Program.icall(err, "Error"))));
             return;
-        case 1:
-            fr.v_temp$13 = fr.v_err$5;
-            fr.v_result$1 = Slice.NIL;
-            fr.v_result$2 = fr.v_temp$13;
-            TaskSpawn.ret(t, fr); return;
-        case 2:
-            fr.v_temp$14 = fr.v_status$3 == 200L;
-            fr.v_temp$15 = !fr.v_temp$14;
-            if (fr.v_temp$15) { fr.pc = 3; continue; }
-            fr.pc = 4; continue;
-        case 3:
-            fr.v_temp$16 = StdErrorsNew.stdErrorsNew("unexpected HTTP status");
-            fr.v_result$1 = Slice.NIL;
-            fr.v_result$2 = fr.v_temp$16;
-            TaskSpawn.ret(t, fr); return;
-        case 4:
-            fr.v_tasks$17 = new Cell(Slice.NIL);
-            fr.v_temp$18 = fr.v_tasks$17;
-            fr.v_temp$19 = fr.v_temp$18 == null;
-            fr.v_temp$20 = pkg_json_8cc9496285d7f743.fn_json_ddesc_u5b__u5b__u5d_main_Task_u5d__530();
-            fr.v_temp$21 = Box.box(TD$pointer_slice_main_Task_575, fr.v_temp$18);
-            fr.v_temp$22 = pkg_json_8cc9496285d7f743.fn_json_unmarshalTyped_306(fr.v_body$4, fr.v_temp$21, fr.v_temp$20, fr.v_temp$19, "");
-            fr.v_err$5 = fr.v_temp$22;
-            fr.v_temp$23 = ((Slice) (fr.v_tasks$17.v));
-            fr.v_temp$24 = fr.v_err$5;
-            fr.v_result$1 = fr.v_temp$23;
-            fr.v_result$2 = fr.v_temp$24;
-            TaskSpawn.ret(t, fr); return;
-        case 5:
-            fr.v_temp$7 = ((Long) (t.rv[0])); fr.v_temp$8 = ((Slice) (t.rv[1])); fr.v_temp$9 = ((Slice) (t.rv[2])); fr.v_temp$10 = ((Box) (t.rv[3])); 
-            fr.v_status$3 = fr.v_temp$7;
-            fr.v_body$4 = fr.v_temp$9;
-            fr.v_err$5 = fr.v_temp$10;
-            fr.v_temp$11 = Box.ifaceEq(fr.v_err$5, null);
-            fr.v_temp$12 = !fr.v_temp$11;
-            if (fr.v_temp$12) { fr.pc = 1; continue; }
-            fr.pc = 2; continue;
-        default: throw Panics.fault("bad block");
+        }
+        completed = 0L;
+        _10 = tasks;
+        _9 = (long) _10.l;
+        _8 = 0L;
+        while (_8 < _9) {
+            task = ((Task) (SliceIndex.sget(_10, _8))).$clone();
+            if (task.f$Completed) {
+                completed = IntegerAdd.add_i64(completed, 1L);
+            } else {
+                Print.print(true, "To do:", task.f$Title);
             }
+            _8 = IntegerAdd.add_i64(_8, 1L);
         }
+        Print.print(true, "Completed:", completed, "of", (long) tasks.l);
+        return;
     }
 
-    static TaskSpawn.Frame fn_main_fetchTasks_516(String v_url$0) {
-        F$fn_main_fetchTasks_516 fr = new F$fn_main_fetchTasks_516();
-        fr.v_url$0 = v_url$0;
-        return fr;
-    }
-
-    static final class F$fn_main_main_517 extends TaskSpawn.Frame {
-        Slice v_tasks$0 = Slice.NIL;
-        Box v_err$1 = null;
-        Slice v_temp$2 = Slice.NIL;
-        Box v_temp$3 = null;
-        boolean v_temp$4 = false;
-        boolean v_temp$5 = false;
-        String v_temp$6 = "";
-        long v_completed$7 = 0L;
-        long v_temp$8 = 0L;
-        long v_temp$9 = 0L;
-        Slice v_temp$10 = Slice.NIL;
-        boolean v_temp$11 = false;
-        long v_temp$12 = 0L;
-        S$main_Task_528 v_temp$13 = null;
-        S$main_Task_528 v_task$14 = null;
-        boolean v_temp$15 = false;
-        long v_temp$16 = 0L;
-        long v_temp$17 = 0L;
-        String v_temp$18 = "";
-        long v_temp$19 = 0L;
-        public Object[] results() {
-            final F$fn_main_main_517 fr = this;
-            return new Object[] {};
-        }
-        public void step(TaskSpawn.Task t) {
-            final F$fn_main_main_517 fr = this;
-            for (;;) switch (fr.pc) {
-        case 0:
-            fr.pc = 10; TaskSpawn.call(t, (TaskSpawn.Frame) (fn_main_fetchTasks_516("https://jsonplaceholder.typicode.com/todos")));
-            return;
-        case 1:
-            fr.v_temp$6 = ((String) (Program.icall(fr.v_err$1, "Error")));
-            Print.print(true, "Could not load tasks:", fr.v_temp$6);
-            TaskSpawn.ret(t, fr); return;
-        case 2:
-            fr.v_completed$7 = 0L;
-            fr.v_temp$10 = fr.v_tasks$0;
-            fr.v_temp$9 = (long) fr.v_temp$10.l;
-            fr.v_temp$8 = 0L;
-            
-        case 3:
-            fr.v_temp$11 = fr.v_temp$8 < fr.v_temp$9;
-            if (fr.v_temp$11) { fr.pc = 4; continue; }
-            fr.pc = 6; continue;
-        case 4:
-            fr.v_temp$12 = fr.v_temp$8;
-            fr.v_temp$13 = ((S$main_Task_528) (SliceIndex.sget(fr.v_temp$10, fr.v_temp$8))).$clone();
-            fr.v_task$14 = fr.v_temp$13;
-            fr.v_temp$15 = fr.v_task$14.f$Completed_1;
-            if (fr.v_temp$15) { fr.pc = 7; continue; }
-            fr.pc = 9; continue;
-        case 5:
-            fr.v_temp$8 = IntegerAdd.add_i64(fr.v_temp$8, 1L);
-            fr.pc = 3; continue;
-        case 6:
-            fr.v_temp$19 = (long) fr.v_tasks$0.l;
-            Print.print(true, "Completed:", fr.v_completed$7, "of", fr.v_temp$19);
-            TaskSpawn.ret(t, fr); return;
-        case 7:
-            fr.v_temp$16 = fr.v_completed$7;
-            fr.v_temp$17 = IntegerAdd.add_i64(fr.v_temp$16, 1L);
-            fr.v_completed$7 = fr.v_temp$17;
-            
-        case 8:
-            fr.pc = 5; continue;
-        case 9:
-            fr.v_temp$18 = fr.v_task$14.f$Title_0;
-            Print.print(true, "To do:", fr.v_temp$18);
-            fr.pc = 8; continue;
-        case 10:
-            fr.v_temp$2 = ((Slice) (t.rv[0])); fr.v_temp$3 = ((Box) (t.rv[1])); 
-            fr.v_tasks$0 = fr.v_temp$2;
-            fr.v_err$1 = fr.v_temp$3;
-            fr.v_temp$4 = Box.ifaceEq(fr.v_err$1, null);
-            fr.v_temp$5 = !fr.v_temp$4;
-            if (fr.v_temp$5) { fr.pc = 1; continue; }
-            fr.pc = 2; continue;
-        default: throw Panics.fault("bad block");
-            }
-        }
-    }
-
-    static TaskSpawn.Frame fn_main_main_517() {
-        F$fn_main_main_517 fr = new F$fn_main_main_517();
-        return fr;
+    static TaskSpawn.Frame main_2() {
+        return TaskSpawn.nativeTask(_t -> { main_2(_t); return new Object[0]; });
     }
 
 }

@@ -1,29 +1,39 @@
 {
   "sourceHash": "12587e521b375077871f705ab8ece72999d19d10ec92f092647f86a8d776fff3",
+  "names": "source",
+  "lineDirectives": false,
   "outputs": {
     "go": {
-      "file": "pkg_tasks_51ee6f93a026bf93.go"
+      "file": "pkg_tasks_51ee6f93a026bf93.go",
+      "pauseModel": "native"
     },
     "typescript": {
-      "file": "pkg_tasks_51ee6f93a026bf93.ts"
+      "file": "pkg_tasks_51ee6f93a026bf93.ts",
+      "pauseModel": "native"
     },
     "python": {
-      "file": "pkg_tasks_51ee6f93a026bf93.py"
+      "file": "pkg_tasks_51ee6f93a026bf93.py",
+      "pauseModel": "native"
     },
     "java": {
-      "file": "pkg_tasks_51ee6f93a026bf93.java"
+      "file": "pkg_tasks_51ee6f93a026bf93.java",
+      "pauseModel": "native"
     },
     "csharp": {
-      "file": "pkg_tasks_51ee6f93a026bf93.cs"
+      "file": "pkg_tasks_51ee6f93a026bf93.cs",
+      "pauseModel": "native"
     },
     "rust": {
-      "file": "src/pkg_tasks_51ee6f93a026bf93.rs"
+      "file": "src/pkg_tasks_51ee6f93a026bf93.rs",
+      "pauseModel": "native"
     },
     "c": {
-      "file": "pkg_tasks_51ee6f93a026bf93.c"
+      "file": "pkg_tasks_51ee6f93a026bf93.c",
+      "pauseModel": "frames"
     },
     "swift": {
-      "file": "pkg_tasks_51ee6f93a026bf93.swift"
+      "file": "pkg_tasks_51ee6f93a026bf93.swift",
+      "pauseModel": "native"
     }
   }
 }

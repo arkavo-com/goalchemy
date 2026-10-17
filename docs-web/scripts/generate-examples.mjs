@@ -19,11 +19,13 @@ try {
   const outputs = {};
   for (const [target, extension] of Object.entries(targets)) {
     const out = path.join(directory, target);
-    execFileSync(compiler, ['compile', '-gate', 'cooperative', '-target', target, '-out', out, '.'], { cwd: directory, stdio: 'inherit' });
+    const pauseModel = target === 'c' ? 'frames' : 'native';
+    execFileSync(compiler, ['compile', '-gate', 'cooperative', '-target', target, '-out', out,
+      '--pause-model', pauseModel, '--names=source', '--line-directives=false', '.'], { cwd: directory, stdio: 'inherit' });
     const manifest = JSON.parse(await readFile(path.join(out, 'goalchemy.manifest.json'), 'utf8'));
     const file = manifest.source_packages.find((pkg) => pkg.root).files.find((file) => file.endsWith(extension));
     if (!file) throw new Error(`No source package output found for ${target}`);
-    outputs[target] = { file, code: await readFile(path.join(out, file), 'utf8') };
+    outputs[target] = { file, pauseModel, code: await readFile(path.join(out, file), 'utf8') };
     console.log(`Generated ${target}: ${file}`);
   }
   const generated = path.join(site, 'src/examples/generated');
@@ -31,9 +33,9 @@ try {
   const metadata = {};
   for (const [target, output] of Object.entries(outputs)) {
     await writeFile(path.join(generated, `${target}.txt`), output.code);
-    metadata[target] = { file: output.file };
+    metadata[target] = { file: output.file, pauseModel: output.pauseModel };
   }
-  const snapshot = { sourceHash: createHash('sha256').update(source).digest('hex'), outputs: metadata };
+  const snapshot = { sourceHash: createHash('sha256').update(source).digest('hex'), names: 'source', lineDirectives: false, outputs: metadata };
   await writeFile(path.join(site, 'src/examples/generated.json'), JSON.stringify(snapshot, null, 2) + '\n');
 } finally {
   await rm(directory, { recursive: true, force: true });

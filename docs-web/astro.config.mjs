@@ -15,6 +15,7 @@ export default defineConfig({
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/eugenioenko/goalchemy' }],
       editLink: { baseUrl: 'https://github.com/eugenioenko/goalchemy/edit/main/docs-web/' },
       customCss: ['./src/styles/custom.css'],
+      components: { Sidebar: './src/components/Sidebar.astro' },
       head: [
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://goalchemy.dev/social.png' } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
@@ -44,7 +45,7 @@ export default defineConfig({
           ],
         },
         { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
-        { label: 'Compiler development', collapsed: true, items: [{ autogenerate: { directory: 'internals' } }] },
+        { label: 'Compiler development', items: [{ autogenerate: { directory: 'internals' } }] },
       ],
     }),
   ],

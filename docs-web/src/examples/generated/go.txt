@@ -4,210 +4,108 @@ package main
 
 import "goalchemyout/rt"
 
-/*line ../main.go:10:6*/
-type type_main_Task_527 struct {
+type Task struct {
 	Title     string
 	Completed bool
 }
 
-/*line ../main.go:15:1*/
-type frame_fn_main_fetchTasks_516 struct {
-	rt.FrameBase
-	v_url_0    string
-	v_result_1 []type_main_Task_527
-	v_result_2 error
-	v_status_3 int
-	v_body_4   []uint8
-	v_err_5    error
-	v_temp_6   rt.Context
-	v_temp_7   int
-	v_temp_8   []string
-	v_temp_9   []uint8
-	v_temp_10  error
-	v_temp_11  bool
-	v_temp_12  bool
-	v_temp_13  error
-	v_temp_14  bool
-	v_temp_15  bool
-	v_temp_16  error
-	v_tasks_17 *[]type_main_Task_527
-	v_temp_18  *[]type_main_Task_527
-	v_temp_19  bool
-	v_temp_20  *type_json_typeInfo_332
-	v_temp_21  any
-	v_temp_22  error
-	v_temp_23  []type_main_Task_527
-	v_temp_24  error
+func fetchTasks(_t *rt.Task, url string) ([]Task, error) {
+	var _1 []Task
+	_ = _1
+	var _2 error
+	_ = _2
+	var status int
+	_ = status
+	var body []uint8
+	_ = body
+	var err error
+	_ = err
+	var _6 rt.Context
+	_ = _6
+	var _7 int
+	_ = _7
+	var _8 []string
+	_ = _8
+	var _9 []uint8
+	_ = _9
+	var _10 error
+	_ = _10
+	var _16 error
+	_ = _16
+	var tasks *[]Task
+	_ = tasks
+	var _18 *[]Task
+	_ = _18
+	_1 = *new([]Task)
+	_2 = *new(error)
+	_6 = rt.StdContextBackground()
+	rt.LibHTTPDo(_t, _6, "GET", url, ([]string)(nil), ([]uint8)(nil), int(1048576), int64(5000))
+	rt.Wait(_t)
+	_7 = rt.As[int](_t.RV[0])
+	_8 = rt.As[[]string](_t.RV[1])
+	_9 = rt.As[[]uint8](_t.RV[2])
+	_10 = rt.As[error](_t.RV[3])
+	status = _7
+	body = _9
+	err = _10
+	if err != nil {
+		_1 = ([]Task)(nil)
+		_2 = err
+		return _1, _2
+	}
+	if status != int(200) {
+		_16 = rt.StdErrorsNew("unexpected HTTP status")
+		_1 = ([]Task)(nil)
+		_2 = _16
+		return _1, _2
+	}
+	tasks = new([]Task)
+	_18 = tasks
+	err = unmarshalTyped(body, any(_18), _ddesc_main_Task(), _18 == nil, "")
+	_1 = (*tasks)
+	_2 = err
+	return _1, _2
 }
 
-func fn_main_fetchTasks_516(v_url_0 string) rt.Frame {
-	fr := &frame_fn_main_fetchTasks_516{}
-	fr.v_url_0 = v_url_0
-	return fr
-}
-
-func (fr *frame_fn_main_fetchTasks_516) Results() []any { return []any{fr.v_result_1, fr.v_result_2} }
-
-func (fr *frame_fn_main_fetchTasks_516) Step(t *rt.Task) {
-	switch fr.PC {
-	case 0:
-		goto b0
-	case 5:
-		goto b5
+func main_2(_t *rt.Task) {
+	var tasks []Task
+	_ = tasks
+	var err error
+	_ = err
+	var _2 []Task
+	_ = _2
+	var _3 error
+	_ = _3
+	var completed int
+	_ = completed
+	var _8 int
+	_ = _8
+	var _9 int
+	_ = _9
+	var _10 []Task
+	_ = _10
+	var task Task
+	_ = task
+	_2, _3 = fetchTasks(_t, "https://jsonplaceholder.typicode.com/todos")
+	tasks = _2
+	err = _3
+	if err != nil {
+		println("Could not load tasks:", err.Error())
+		return
 	}
-b0:
-	fr.v_result_1 = *new([]type_main_Task_527)
-	fr.v_result_2 = *new(error)
-	/*line ../main.go:17:9*/ fr.v_temp_6 = rt.StdContextBackground()
-	/*line ../main.go:16:29*/ fr.PC = 5
-	rt.LibHTTPDo(t, fr.v_temp_6, "GET", fr.v_url_0, ([]string)(nil), ([]uint8)(nil), int(1048576), int64(5000))
-	return
-b1:
-	fr.v_temp_13 = fr.v_err_5
-	/*line ../main.go:21:9*/ fr.v_result_1 = ([]type_main_Task_527)(nil)
-	/*line ../main.go:21:9*/ fr.v_result_2 = fr.v_temp_13
-	/*line ../main.go:21:9*/ rt.Ret(t, fr)
-	return
-b2:
-	/*line ../main.go:23:8*/ fr.v_temp_14 = fr.v_status_3 == int(200)
-	/*line ../main.go:23:8*/ fr.v_temp_15 = !fr.v_temp_14
-	/*line ../main.go:23:8*/ if fr.v_temp_15 {
-		goto b3
+	completed = int(0)
+	_10 = tasks
+	_9 = len(_10)
+	_8 = int(0)
+	for _8 < _9 {
+		task = _10[_8]
+		if task.Completed {
+			completed = completed + int(1)
+		} else {
+			println("To do:", task.Title)
+		}
+		_8 = _8 + int(1)
 	}
-	goto b4
-b3:
-	/*line ../main.go:24:21*/ fr.v_temp_16 = rt.StdErrorsNew("unexpected HTTP status")
-	/*line ../main.go:24:9*/ fr.v_result_1 = ([]type_main_Task_527)(nil)
-	/*line ../main.go:24:9*/ fr.v_result_2 = fr.v_temp_16
-	/*line ../main.go:24:9*/ rt.Ret(t, fr)
+	println("Completed:", completed, "of", len(tasks))
 	return
-b4:
-	/*line ../main.go:27:9*/ fr.v_tasks_17 = new([]type_main_Task_527)
-	/*line ../main.go:28:32*/ fr.v_temp_18 = fr.v_tasks_17
-	/*line ../main.go:28:11*/ fr.v_temp_19 = fr.v_temp_18 == nil
-	/*line ../main.go:28:11*/ fr.v_temp_20 = fn_json_ddesc_u5b__u5b__u5d_main_Task_u5d__530()
-	/*line ../main.go:28:11*/ fr.v_temp_21 = any(fr.v_temp_18)
-	/*line ../main.go:28:11*/ fr.v_temp_22 = fn_json_unmarshalTyped_306(fr.v_body_4, fr.v_temp_21, fr.v_temp_20, fr.v_temp_19, "")
-	/*line ../main.go:28:5*/ fr.v_err_5 = fr.v_temp_22
-	/*line ../main.go:29:12*/ fr.v_temp_23 = (*fr.v_tasks_17)
-	fr.v_temp_24 = fr.v_err_5
-	/*line ../main.go:29:5*/ fr.v_result_1 = fr.v_temp_23
-	/*line ../main.go:29:5*/ fr.v_result_2 = fr.v_temp_24
-	/*line ../main.go:29:5*/ rt.Ret(t, fr)
-	return
-b5:
-	fr.v_temp_7 = rt.As[int](t.RV[0])
-	fr.v_temp_8 = rt.As[[]string](t.RV[1])
-	fr.v_temp_9 = rt.As[[]uint8](t.RV[2])
-	fr.v_temp_10 = rt.As[error](t.RV[3])
-	/*line ../main.go:16:5*/ fr.v_status_3 = fr.v_temp_7
-	/*line ../main.go:16:16*/ fr.v_body_4 = fr.v_temp_9
-	/*line ../main.go:16:22*/ fr.v_err_5 = fr.v_temp_10
-	/*line ../main.go:20:8*/ fr.v_temp_11 = fr.v_err_5 == nil
-	/*line ../main.go:20:8*/ fr.v_temp_12 = !fr.v_temp_11
-	/*line ../main.go:20:8*/ if fr.v_temp_12 {
-		goto b1
-	}
-	goto b2
-}
-
-/*line ../main.go:32:1*/
-type frame_fn_main_main_517 struct {
-	rt.FrameBase
-	v_tasks_0     []type_main_Task_527
-	v_err_1       error
-	v_temp_2      []type_main_Task_527
-	v_temp_3      error
-	v_temp_4      bool
-	v_temp_5      bool
-	v_temp_6      string
-	v_completed_7 int
-	v_temp_8      int
-	v_temp_9      int
-	v_temp_10     []type_main_Task_527
-	v_temp_11     bool
-	v_temp_12     int
-	v_temp_13     type_main_Task_527
-	v_task_14     type_main_Task_527
-	v_temp_15     bool
-	v_temp_16     int
-	v_temp_17     int
-	v_temp_18     string
-	v_temp_19     int
-}
-
-func fn_main_main_517() rt.Frame {
-	fr := &frame_fn_main_main_517{}
-	return fr
-}
-
-func (fr *frame_fn_main_main_517) Results() []any { return []any{} }
-
-func (fr *frame_fn_main_main_517) Step(t *rt.Task) {
-	switch fr.PC {
-	case 0:
-		goto b0
-	case 10:
-		goto b10
-	}
-b0:
-	/*line ../main.go:33:19*/ fr.PC = 10
-	rt.Call(t, fn_main_fetchTasks_516("https://jsonplaceholder.typicode.com/todos"))
-	return
-b1:
-	/*line ../main.go:35:42*/ fr.v_temp_6 = fr.v_err_1.Error()
-	/*line ../main.go:35:9*/ println("Could not load tasks:", fr.v_temp_6)
-	/*line ../main.go:36:9*/ rt.Ret(t, fr)
-	return
-b2:
-	/*line ../main.go:39:5*/ fr.v_completed_7 = int(0)
-	fr.v_temp_10 = fr.v_tasks_0
-	/*line ../main.go:40:5*/ fr.v_temp_9 = len(fr.v_temp_10)
-	fr.v_temp_8 = int(0)
-	goto b3
-b3:
-	fr.v_temp_11 = fr.v_temp_8 < fr.v_temp_9
-	/*line ../main.go:40:5*/ if fr.v_temp_11 {
-		goto b4
-	}
-	goto b6
-b4:
-	fr.v_temp_12 = fr.v_temp_8
-	/*line ../main.go:40:5*/ fr.v_temp_13 = fr.v_temp_10[fr.v_temp_8]
-	/*line ../main.go:40:12*/ fr.v_task_14 = fr.v_temp_13
-	/*line ../main.go:41:12*/ fr.v_temp_15 = fr.v_task_14.Completed
-	/*line ../main.go:41:12*/ if fr.v_temp_15 {
-		goto b7
-	}
-	goto b9
-b5:
-	fr.v_temp_8 = fr.v_temp_8 + int(1)
-	goto b3
-b6:
-	/*line ../main.go:47:44*/ fr.v_temp_19 = len(fr.v_tasks_0)
-	/*line ../main.go:47:5*/ println("Completed:", fr.v_completed_7, "of", fr.v_temp_19)
-	rt.Ret(t, fr)
-	return
-b7:
-	/*line ../main.go:42:13*/ fr.v_temp_16 = fr.v_completed_7
-	/*line ../main.go:42:13*/ fr.v_temp_17 = fr.v_temp_16 + int(1)
-	/*line ../main.go:42:13*/ fr.v_completed_7 = fr.v_temp_17
-	goto b8
-b8:
-	goto b5
-b9:
-	/*line ../main.go:44:31*/ fr.v_temp_18 = fr.v_task_14.Title
-	/*line ../main.go:44:13*/ println("To do:", fr.v_temp_18)
-	goto b8
-b10:
-	fr.v_temp_2 = rt.As[[]type_main_Task_527](t.RV[0])
-	fr.v_temp_3 = rt.As[error](t.RV[1])
-	/*line ../main.go:33:5*/ fr.v_tasks_0 = fr.v_temp_2
-	/*line ../main.go:33:12*/ fr.v_err_1 = fr.v_temp_3
-	/*line ../main.go:34:8*/ fr.v_temp_4 = fr.v_err_1 == nil
-	/*line ../main.go:34:8*/ fr.v_temp_5 = !fr.v_temp_4
-	/*line ../main.go:34:8*/ if fr.v_temp_5 {
-		goto b1
-	}
-	goto b2
 }

@@ -1,0 +1,43 @@
+---
+import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.astro';
+import SidebarPersister from '@astrojs/starlight/components/SidebarPersister.astro';
+import SidebarSublist from '@astrojs/starlight/components/SidebarSublist.astro';
+
+type SidebarEntry = (typeof Astro.locals.starlightRoute.sidebar)[number];
+
+function flattenDirectories(entries: SidebarEntry[]): SidebarEntry[] {
+  return entries.flatMap((entry): SidebarEntry[] => {
+    if (entry.type === 'link') return [entry];
+    const children = flattenDirectories(entry.entries);
+    return 'autogenerate' in entry ? children : [{ ...entry, entries: children }];
+  });
+}
+
+const sidebar = flattenDirectories(Astro.locals.starlightRoute.sidebar);
+Astro.locals.starlightRoute.sidebar = sidebar;
+---
+
+<SidebarPersister>
+  {sidebar.map((entry, index) => entry.type === 'group' ? (
+    <section class="sidebar-section" aria-labelledby={`sidebar-group-${index}`}>
+      <h2 id={`sidebar-group-${index}`}>{entry.label}</h2>
+      <SidebarSublist sublist={entry.entries} nested />
+    </section>
+  ) : <SidebarSublist sublist={[entry]} nested />)}
+</SidebarPersister>
+
+<div class="md:sl-hidden">
+  <MobileMenuFooter />
+</div>
+
+<style>
+  .sidebar-section + .sidebar-section { margin-top: 1.5rem; }
+  h2 {
+    margin: 0 0 0.5rem;
+    padding-inline: 0.5rem;
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+</style>

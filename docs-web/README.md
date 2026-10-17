@@ -41,7 +41,9 @@ After changing the source or compiler, regenerate the committed output snapshots
 pnpm --filter docs-web examples:generate
 ```
 
-This requires the reference Go toolchain but no target runtimes. The generator builds the local compiler, emits the cooperative example to all eight targets in a temporary directory, and retains each root package's source file under `src/examples/generated/`. Keeping `.go` samples as `.txt` avoids adding documentation fixtures to the compiler's Go package discovery. Normal docs builds use the snapshots and require only Node/pnpm. A source hash check rejects stale examples.
+This requires the reference Go toolchain but no target runtimes. The generator builds the local compiler and uses `--pause-model=native --names=source --line-directives=false` for the seven targets that support native pausing; C uses `--pause-model=frames`. It emits the cooperative example to all eight targets in a temporary directory and retains each root package's source file under `src/examples/generated/`. Keeping `.go` samples as `.txt` avoids adding documentation fixtures to the compiler's Go package discovery. Normal docs builds use the snapshots and require only Node/pnpm. A source hash check rejects stale examples. Generation settings and each target's pause model are recorded in `src/examples/generated.json`.
+
+The documentation sidebar uses plain section headings and Starlight's standard links and collapsible subgroups. Automatically created directory groups are flattened, so package names such as `std/encoding/json` are directly available inside their package category.
 
 ## GitHub Pages
 
