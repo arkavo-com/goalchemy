@@ -100,10 +100,16 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	} else if p.Cooperative {
 		e.use("core.task.spawn")
 		start := e.symbol(p.Entry.Sym) + "()"
+		run := "export function $run(): void { rt.runMain(%s); }"
 		if !p.Entry.MaySuspend {
 			start = "rt.sync(() => { " + e.symbol(p.Entry.Sym) + "(); return []; })"
+		} else if e.native() {
+			start = "rt.nativeTask((t: rt.Task) => " + e.symbol(p.Entry.Sym) + "(t), 0)"
 		}
-		fmt.Fprintf(bodies[entry], "\nexport function $run(): void { rt.runMain(%s); }\nexport function $runHost(host: rt.RuntimeHost = rt.runtimeHost): Promise<void> { return rt.runMainHost(%s, host); }\n", start, start)
+		if e.native() {
+			run = "export function $run(): void | Promise<void> { return rt.runMain(%s); }"
+		}
+		fmt.Fprintf(bodies[entry], "\n"+run+"\nexport function $runHost(host: rt.RuntimeHost = rt.runtimeHost): Promise<void> { return rt.runMainHost(%s, host); }\n", start, start)
 	} else {
 		fmt.Fprintf(bodies[entry], "\nrt.main(() => {\n  %s();\n", e.symbol(p.Init.Sym))
 		if p.Main != nil {

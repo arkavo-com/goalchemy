@@ -408,6 +408,9 @@ type fnEmitter struct {
 	// frame is set when f is emitted as a resumable frame; locals are
 	// fields of fr and pc is fr.pc.
 	frame bool
+	// task is set when f is an async function of the native pause model,
+	// taking the running task as its last parameter t.
+	task  bool
 	folds *structure.Folds
 }
 
@@ -415,9 +418,16 @@ type fnEmitter struct {
 // calling convention: calling one returns a frame.
 func (e *emitter) susp(t *ir.Type) bool { return e.p.SuspTypes[t.U()] }
 
+func (e *emitter) native() bool { return e.p.PauseModel == "native" }
+
 // adapt wraps an ordinary function value with n results in the resumable
-// form.
+// form. Under the native pause model the forms agree: a native-pause value
+// is called with the task as an extra last argument, and awaiting a plain
+// result yields it.
 func (e *emitter) adapt(f string, n int) string {
+	if e.native() {
+		return f
+	}
 	e.use("core.task.spawn")
 	return fmt.Sprintf("rt.adapt(%s, %d)", f, n)
 }
@@ -684,7 +694,7 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 }
 
 func (fe *fnEmitter) analyze() {
-	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, tsProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.task, Order: structure.LeftToRight}, tsProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
 }
 
 var tsSyntax = structure.Syntax{
@@ -698,7 +708,7 @@ var tsSyntax = structure.Syntax{
 // structured writes the function body as structured statements, with a
 // dispatch over the blocks a resumable frame resumes at.
 func (fe *fnEmitter) structured(depth int) {
-	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	body := structure.Build(fe.f, structure.Options{Inline: fe.task, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, fe.task) }})
 	syn := tsSyntax
 	syn.DispatchOpen = []string{"%sfor (;;) switch (" + fe.pc() + ") {"}
 	if !fe.frame {
@@ -742,7 +752,16 @@ func (t tsEmitter) Leaf(b *ir.Block, term ir.Terminator) string {
 	})
 }
 
-func (t tsEmitter) Pause(p *ir.Pause) string  { panic("ts: inline pause") }
+func (t tsEmitter) Pause(p *ir.Pause) string {
+	if t.fe.folds.FoldedPause(p) {
+		return ""
+	}
+	return t.fe.capture(func() {
+		t.fe.mark(p.Position())
+		t.fe.nativePause(p)
+	})
+}
+
 func (t tsEmitter) Cond(v ir.Value) string    { return t.fe.val(v) }
 func (t tsEmitter) Mark(pos token.Pos) string { return t.fe.e.position(pos) }
 
@@ -750,7 +769,7 @@ func (t tsEmitter) Mark(pos token.Pos) string { return t.fe.e.position(pos) }
 type tsProbe struct{ fe *fnEmitter }
 
 func (t tsProbe) Instr(in ir.Instr) string { return t.fe.capture(func() { t.fe.instr(in) }) }
-func (t tsProbe) Pause(p *ir.Pause) string { panic("ts: inline pause") }
+func (t tsProbe) Pause(p *ir.Pause) string { return t.fe.capture(func() { t.fe.nativePause(p) }) }
 func (t tsProbe) Cond(v ir.Value) string   { return t.fe.val(v) }
 func (t tsProbe) Leaf(b *ir.Block, term ir.Terminator) string {
 	return t.fe.capture(func() { t.fe.term(term) })
@@ -759,22 +778,26 @@ func (t tsProbe) Assign(l *ir.Local) (string, string) { return t.fe.val(l) + " =
 
 // resume assigns a paused operation's results from the task.
 func (fe *fnEmitter) resume(op ir.Instr) {
+	sep, close, end := "; ", " } ", "\n"
+	if fe.task {
+		sep, close, end = ";\n", " }\n", ""
+	}
 	switch i := op.(type) {
 	case *ir.Call:
 		for k, d := range i.Dsts {
 			if d != nil {
-				fe.w("%s = t.rv[%d]; ", fe.val(d), k)
+				fe.w("%s = t.rv[%d]"+sep, fe.val(d), k)
 			}
 		}
 	case *ir.Recv:
 		if i.Dst != nil {
-			fe.w("%s = t.rv[0]; ", fe.val(i.Dst))
+			fe.w("%s = t.rv[0]"+sep, fe.val(i.Dst))
 		}
 		if i.Ok != nil {
-			fe.w("%s = t.rv[1]; ", fe.val(i.Ok))
+			fe.w("%s = t.rv[1]"+sep, fe.val(i.Ok))
 		}
 	case *ir.Select:
-		fe.w("%s = BigInt(t.rv[0]); ", fe.val(i.Index))
+		fe.w("%s = BigInt(t.rv[0])"+sep, fe.val(i.Index))
 		for k, c := range i.Cases {
 			if c.Send || c.Dst == nil && c.Ok == nil {
 				continue
@@ -786,10 +809,10 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 			if c.Ok != nil {
 				fe.w(" %s = t.rv[2];", fe.val(c.Ok))
 			}
-			fe.w(" } ")
+			fe.w(close)
 		}
 	}
-	fe.w("\n")
+	fe.w(end)
 }
 
 // pause emits a pause point: record the resume block, start the
@@ -816,26 +839,70 @@ func (fe *fnEmitter) pause(p *ir.Pause) {
 		fe.w("rt.chanRecv(t, %s);\n", fe.val(i.Ch))
 	case *ir.Select:
 		e.use("core.select")
-		var cs []string
-		for _, c := range i.Cases {
-			if c.Send {
-				cs = append(cs, fmt.Sprintf("{ch: %s, send: true, val: %s}", fe.val(c.Ch), fe.val(c.V)))
-			} else {
-				cs = append(cs, fmt.Sprintf("{ch: %s, send: false}", fe.val(c.Ch)))
-			}
-		}
-		fe.w("rt.select(t, [%s], %v);\n", strings.Join(cs, ", "), i.Default)
+		fe.w("rt.select(t, [%s], %v);\n", strings.Join(fe.selectCases(i), ", "), i.Default)
 	default:
 		panic(fmt.Sprintf("ts: pause on %T", p.Op))
 	}
 	fe.w("    return;\n")
 }
 
+// nativePause emits a pause point of an async function: a generated callee
+// is awaited for its results; a runtime primitive either completes at once
+// or leaves the task blocked, and then the task waits for the scheduler to
+// choose it again. Primitive results arrive in t.rv.
+func (fe *fnEmitter) nativePause(p *ir.Pause) {
+	e := fe.e
+	const wait = "if (t.blocked) await rt.wait(t);\n"
+	switch i := p.Op.(type) {
+	case *ir.Call:
+		fn, args, _ := fe.callee(i)
+		if i.Kind == ir.CallExtern {
+			fe.w("%s(%s);\n"+wait, fn, strings.Join(append([]string{"t"}, args...), ", "))
+			fe.resume(i)
+			return
+		}
+		if i.Kind == ir.CallValue {
+			fn = "rt.fnchk(" + fn + ")"
+		}
+		call := "await " + fn + "(" + strings.Join(append(args, "t"), ", ") + ")"
+		if len(i.Dsts) > 0 {
+			fe.w("%s = %s;\n", fe.dsts(i.Dsts), call)
+		} else {
+			fe.w("%s;\n", call)
+		}
+	case *ir.Send:
+		e.use("core.chan.send")
+		fe.w("rt.chanSend(t, %s, %s);\n"+wait, fe.val(i.Ch), fe.val(i.V))
+	case *ir.Recv:
+		e.use("core.chan.recv")
+		fe.w("rt.chanRecv(t, %s);\n"+wait, fe.val(i.Ch))
+		fe.resume(i)
+	case *ir.Select:
+		e.use("core.select")
+		fe.w("rt.select(t, [%s], %v);\n"+wait, strings.Join(fe.selectCases(i), ", "), i.Default)
+		fe.resume(i)
+	default:
+		panic(fmt.Sprintf("ts: pause on %T", p.Op))
+	}
+}
+
+func (fe *fnEmitter) selectCases(i *ir.Select) []string {
+	var cs []string
+	for _, c := range i.Cases {
+		if c.Send {
+			cs = append(cs, fmt.Sprintf("{ch: %s, send: true, val: %s}", fe.val(c.Ch), fe.val(c.V)))
+		} else {
+			cs = append(cs, fmt.Sprintf("{ch: %s, send: false}", fe.val(c.Ch)))
+		}
+	}
+	return cs
+}
+
 func (e *emitter) function(f *ir.Func) string {
-	if f.MaySuspend {
+	if f.MaySuspend && !e.native() {
 		return e.frameFunction(f)
 	}
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, task: f.MaySuspend}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
@@ -854,7 +921,13 @@ func (e *emitter) function(f *ir.Func) string {
 	for _, l := range f.Params {
 		params = append(params, fe.local(l)+": any")
 	}
-	fe.w(e.functionDeclaration(f)+" %s(%s): any {\n", e.names.Symbol(f.Sym), strings.Join(params, ", "))
+	decl, ret := e.functionDeclaration(f), "any"
+	if fe.task {
+		e.use("core.task.spawn")
+		params = append(params, "t: rt.Task")
+		decl, ret = strings.Replace(decl, "function", "async function", 1), "Promise<any>"
+	}
+	fe.w(decl+" %s(%s): %s {\n", e.names.Symbol(f.Sym), strings.Join(params, ", "), ret)
 	isParam := map[*ir.Local]bool{}
 	for _, l := range f.Env {
 		isParam[l] = true
@@ -874,12 +947,28 @@ func (e *emitter) function(f *ir.Func) string {
 	if fe.defers {
 		fe.w("  const $d: rt.Deferred[] = [];\n  let $p: any = null;\n  try {\n  $body: {\n")
 		fe.structured(2)
-		fe.w("  }\n  } catch (e) {\n    $p = rt.catchPanic(e);\n  }\n  rt.runDefers($d, $p);\n  return %s;\n", fe.results())
+		run := "rt.runDefers($d, $p)"
+		if fe.pausingDefer() {
+			run = "await rt.runDefersAsync(t, $d, $p)"
+		}
+		fe.w("  }\n  } catch (e) {\n    $p = rt.catchPanic(e);\n  }\n  %s;\n  return %s;\n", run, fe.results())
 	} else {
 		fe.structured(1)
 	}
 	fe.w("}\n\n")
 	return structure.Resolve(fe.b.String())
+}
+
+// pausingDefer reports whether a deferred call of f may pause.
+func (fe *fnEmitter) pausingDefer() bool {
+	for _, b := range fe.f.Blocks {
+		for _, in := range b.Instrs {
+			if d, ok := in.(*ir.Defer); ok && d.Call.Suspends {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (fe *fnEmitter) results() string {
@@ -957,7 +1046,7 @@ func (fe *fnEmitter) callee(c *ir.Call) (fn string, args []string, fid string) {
 	case ir.CallExtern:
 		fe.e.use(c.Extern.Contract)
 		for k, a := range c.Args {
-			if u := a.IRType().U(); u.Kind == ir.KSlice && u.Elem.U().Kind == ir.KFunc && !fe.e.susp(u.Elem) {
+			if u := a.IRType().U(); u.Kind == ir.KSlice && u.Elem.U().Kind == ir.KFunc && !fe.e.susp(u.Elem) && !fe.e.native() {
 				fe.e.use("core.task.spawn")
 				args[k] = fmt.Sprintf("rt.adaptSlice(%s, %d)", args[k], len(u.Elem.U().Results))
 			}
@@ -1224,6 +1313,13 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			fe.w("fr.defers.push({f: %s, args: [%s], fid: %s, start: %v});\n", fn, strings.Join(args, ", "), fid, i.Call.Suspends)
 			return
 		}
+		if fe.task && i.Call.Suspends {
+			if i.Call.Kind == ir.CallExtern {
+				fn = "rt.awaitOp(" + fn + ")"
+			}
+			fe.w("$d.push({f: %s, args: [%s], fid: %s, start: true});\n", fn, strings.Join(args, ", "), fid)
+			return
+		}
 		fe.w("$d.push({f: %s, args: [%s], fid: %s});\n", fn, strings.Join(args, ", "), fid)
 	case *ir.Recover:
 		fe.w("%s = rt.recover(%d);\n", fe.val(i.Dst), fe.f.ID)
@@ -1257,6 +1353,8 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		call := fmt.Sprintf("f(%s)", strings.Join(ps, ", "))
 		if i.Call.Kind == ir.CallExtern && i.Call.Suspends {
 			call = fmt.Sprintf("rt.nativeFrame((t:rt.Task)=>f(t%s))", optArg(strings.Join(ps, ", ")))
+		} else if i.Call.Suspends && e.native() {
+			call = fmt.Sprintf("rt.nativeTask((t: rt.Task) => f(%s), 0)", strings.Join(append(ps, "t"), ", "))
 		} else if !i.Call.Suspends {
 			call = fmt.Sprintf("rt.sync(() => { f(%s); return []; })", strings.Join(ps, ", "))
 		}

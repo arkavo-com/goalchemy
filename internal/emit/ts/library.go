@@ -279,9 +279,14 @@ func (e *emitter) library() (string, error) {
 	init := e.symbol(e.p.Init.Sym) + "()"
 	if !e.p.Init.MaySuspend {
 		init = "rt.sync(()=>{ " + e.symbol(e.p.Init.Sym) + "();return [];})"
+	} else if e.native() {
+		init = "rt.nativeTask((t:rt.Task)=>" + e.symbol(e.p.Init.Sym) + "(t),0)"
 	}
 	frame := func(f *ir.Func, as []string) string {
 		call := e.symbol(f.Sym) + "(" + strings.Join(as, ",") + ")"
+		if f.MaySuspend && e.native() {
+			call = fmt.Sprintf("rt.nativeTask((t:rt.Task)=>%s(%s),%d)", e.symbol(f.Sym), strings.Join(append(append([]string(nil), as...), "t"), ","), len(f.Sig.Results))
+		}
 		if !f.MaySuspend {
 			body := call
 			if len(f.Sig.Results) == 0 {

@@ -205,6 +205,8 @@ func emitTS(res *Result, out string) []diagnostics.Diagnostic {
 		}
 		if ir.HostEntry(used) {
 			run = "import { $runHost } from \"./program.ts\";\nawait $runHost();\n"
+		} else if res.IR.PauseModel == "native" {
+			run = "import { $run } from \"./program.ts\";\nawait $run();\n"
 		}
 		gen["main.ts"] = []byte("// Node executable entry.\nimport \"./rt/types/node_host.ts\";\n" + run)
 		gen["host.ts"] = []byte("// Portable Promise entry; executable globals are serialized, not library instances.\nexport { $runHost as runHost } from \"./program.ts\";\n")
