@@ -164,17 +164,18 @@ def plan(suite, shard, target=None):
                     ['go', 'test', '-short', '-v', '-timeout', '30m', INTEGRATION,
                      '-run', '^(?:TestGeneratedGo|TestGeneratedCSharp|TestCSharp)', '-count=1']]
     elif suite == 'pause-rust':
-        # Optional Rust native coverage: full correctness checks run in CI;
-        # local development can select the affected agreement fixtures.
+        # Optional Rust native coverage: fixtures, the frames/native agreement
+        # check, the cooperative fixtures with a collection at every safepoint,
+        # the corpus and the Rust library integration. The cooperative fixtures
+        # under frames are already covered by "Language and corpus (Rust)".
+        # Local development can select the affected agreement fixtures.
         environment['GOALCHEMY_TEST_TARGETS'] = 'rust'
         environment['GOALCHEMY_PAUSE_MODEL'] = 'native'
-        commands = [['go', 'test', '-v', '-parallel', '2', '-timeout', '60m', './tests/language',
+        commands = [['go', 'test', '-v', '-timeout', '60m', './tests/language',
                      '-run', '^(?:TestFixtures|TestRustPauseModelsAgree)$', '-count=1'],
-                    ['env', 'GOALCHEMY_GC_THRESHOLD=1', 'FIXTURE=co_', 'go', 'test', '-v', '-parallel', '2',
+                    ['env', 'GOALCHEMY_GC_THRESHOLD=1', 'FIXTURE=co_', 'go', 'test', '-v',
                      '-timeout', '40m', './tests/language', '-run', '^TestFixtures$', '-count=1'],
-                    ['env', 'GOALCHEMY_PAUSE_MODEL=frames', 'FIXTURE=co_', 'go', 'test', '-v', '-parallel', '2',
-                     '-timeout', '40m', './tests/language', '-run', '^TestFixtures$', '-count=1'],
-                    ['go', 'test', '-v', '-parallel', '2', '-timeout', '60m', './tests/corpus',
+                    ['go', 'test', '-v', '-timeout', '60m', './tests/corpus',
                      '-run', '^TestRegressions$', '-count=1'],
                     ['go', 'test', '-short', '-v', '-timeout', '60m', INTEGRATION,
                      '-run', '^(?:TestGeneratedRust|TestRust)', '-count=1']]

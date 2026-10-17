@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -320,8 +321,74 @@ var Runners = map[string]Runner{
 		}, "sh", "run.sh")
 	},
 	"rust": func(out string) (Observation, error) {
-		return run(out, 15*time.Minute, "sh", "run.sh")
+		bin, err := BuildRust(out)
+		if err != nil {
+			return Observation{}, err
+		}
+		return run(out, 3*time.Minute, bin)
 	},
+}
+
+// Programs that use native library contracts build with Cargo and depend on
+// vendored OpenSSL, reqwest and tokio. Every such build shares one target
+// directory so those dependencies compile once per machine instead of once
+// per fixture. Every generated crate is named goalchemy-generated and uplifts
+// its binary to release/main, so a build and the copy of its binary happen
+// under a process and a file lock.
+var cargoBuilds sync.Mutex
+
+func cargoTargetDir() string {
+	if dir := os.Getenv("GOALCHEMY_CARGO_TARGET_DIR"); dir != "" {
+		return dir
+	}
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "..", "..", "out", "fixture-cargo", "target")
+}
+
+// BuildRust compiles a generated Rust program to out/main without running it
+// and returns the binary's path.
+func BuildRust(out string) (string, error) {
+	script, err := os.ReadFile(filepath.Join(out, "run.sh"))
+	if err != nil {
+		return "", err
+	}
+	bin := filepath.Join(out, "main")
+	if !strings.Contains(string(script), "cargo run") {
+		o, err := run(out, 15*time.Minute, "rustc", "--edition", "2021", "-C", "opt-level=2", "-C", "debuginfo=0", "-o", "main", "src/main.rs")
+		if err == nil && o.Exit != 0 {
+			err = fmt.Errorf("rustc failed:\n%s", o.Stderr)
+		}
+		if err != nil {
+			return "", err
+		}
+		return bin, nil
+	}
+	target := cargoTargetDir()
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return "", err
+	}
+	cargoBuilds.Lock()
+	defer cargoBuilds.Unlock()
+	unlock, err := lockFile(filepath.Join(target, ".goalchemy-lock"))
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	o, err := runEnv(out, 15*time.Minute, []string{"CARGO_TARGET_DIR=" + target}, "cargo", "build", "--release", "--quiet")
+	if err == nil && o.Exit != 0 {
+		err = fmt.Errorf("cargo build failed:\n%s", o.Stderr)
+	}
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(target, "release", "main"))
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(bin, data, 0o755); err != nil {
+		return "", err
+	}
+	return bin, nil
 }
 
 // EmitTarget maps a runner name to the target it compiles: runner
