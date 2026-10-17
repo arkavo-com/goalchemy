@@ -1012,7 +1012,7 @@ func (x javaProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
 func (x javaProbe) Leaf(b *ir.Block, t ir.Terminator) string {
 	return x.fe.capture(func() { x.fe.term(t) })
 }
-func (x javaProbe) Assign(l *ir.Local) (string, string) { return x.fe.assign(l, "") , ";" }
+func (x javaProbe) Assign(l *ir.Local) (string, string) { return x.fe.assign(l, ""), ";" }
 
 func (fe *fnEmitter) pcVar() string {
 	if fe.frame {

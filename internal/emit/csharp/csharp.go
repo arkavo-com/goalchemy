@@ -975,7 +975,7 @@ func (x csProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
 func (x csProbe) Leaf(b *ir.Block, t ir.Terminator) string {
 	return x.fe.capture(func() { x.fe.term(t) })
 }
-func (x csProbe) Assign(l *ir.Local) (string, string) { return x.fe.assign(l, "") , ";" }
+func (x csProbe) Assign(l *ir.Local) (string, string) { return x.fe.assign(l, ""), ";" }
 
 func (fe *fnEmitter) pcVar() string {
 	if fe.frame {
