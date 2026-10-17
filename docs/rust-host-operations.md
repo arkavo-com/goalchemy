@@ -134,6 +134,10 @@ is not promised. Wall UTC remains independent and unmapped here.
 
 ## Stack and panic limits
 
+For the experimental `--pause-model=native` execution option, async GC roots,
+adapter compatibility and additional stack limits, see
+[Rust native pausing](rust-native-pausing.md).
+
 Generated ordinary functions use balanced `SourceGuard` scopes, capped at 128
 nested ordinary source calls in host mode. Cooperative call chains cap at 512
 frames. The dedicated generated owner has a fixed 16 MiB stack. These preemptive

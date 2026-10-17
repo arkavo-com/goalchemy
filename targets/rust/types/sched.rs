@@ -120,7 +120,15 @@ pub struct HostPending {
 pub type Step = fn(&Rc<Task>, &Rc<Frame>);
 pub type Results = fn(&Frame) -> Vec<V>;
 
+pub type NativeFuture = std::pin::Pin<Box<dyn std::future::Future<Output = V>>>;
+pub struct NativeBody {
+    pub start: Option<Box<dyn FnOnce(Rc<Task>) -> NativeFuture>>,
+    pub future: Option<NativeFuture>,
+    pub results: usize,
+}
+
 pub struct Frame {
+    pub native: RefCell<Option<NativeBody>>,
     pub l: Fr,
     pub pc: Cell<u32>,
     pub parent: RefCell<Option<Rc<Frame>>>,
@@ -141,6 +149,7 @@ fn no_results(_: &Frame) -> Vec<V> {
 impl Frame {
     pub fn new(n: usize, step: Step, results: Option<Results>) -> Rc<Frame> {
         Rc::new(Frame {
+            native: RefCell::new(None),
             l: Fr::unrooted(n),
             pc: Cell::new(0),
             parent: RefCell::new(None),
@@ -155,6 +164,8 @@ impl Frame {
 }
 
 pub struct Task {
+    pub native_roots: RefCell<Vec<*mut FrData>>,
+    pub native_depth: Cell<usize>,
     pub id: usize,
     pub owner: Cell<u64>,
     pub thread: ThreadId,
@@ -176,6 +187,8 @@ pub struct Task {
 impl Task {
     pub fn new(id: usize, frame: Option<Rc<Frame>>) -> Rc<Task> {
         Rc::new(Task {
+            native_roots: RefCell::new(Vec::new()),
+            native_depth: Cell::new(0),
             id,
             owner: Cell::new(0), thread: std::thread::current().id(), retired: Cell::new(false),
             cleanup_roots: RefCell::new(Vec::new()),

@@ -60,7 +60,7 @@ def toolchain_env():
     return env
 
 
-NATIVE_PAUSE = ('go', 'typescript', 'swift', 'csharp')
+NATIVE_PAUSE = ('go', 'typescript', 'swift', 'csharp', 'rust')
 
 
 def csharp_build(out, env):
@@ -70,6 +70,7 @@ def csharp_build(out, env):
 def micro(args, comps, work):
     env = toolchain_env()
     runners = {
+        'rust': (lambda out: run(['cargo', 'build', '--release', '--quiet'], cwd=out, env=env), ['target/release/main']),
         'go': (lambda out: run(['go', 'build', '-o', 'prog', '.'], cwd=out), ['./prog']),
         'typescript': (None, ['node', 'main.ts']),
         'python': (None, ['python3', 'main.py']),

@@ -487,6 +487,7 @@ type fnEmitter struct {
 	slots  map[*ir.Local]int
 	defers bool
 	frame  bool
+	native bool
 	indent string
 	folds  *structure.Folds
 }
@@ -748,6 +749,9 @@ func (fe *fnEmitter) allLocals() {
 
 func (e *emitter) function(f *ir.Func) string {
 	if f.MaySuspend {
+		if e.p.PauseModel == "native" {
+			return e.nativeFunction(f)
+		}
 		return e.frameFunction(f)
 	}
 	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
@@ -796,7 +800,7 @@ func (e *emitter) function(f *ir.Func) string {
 }
 
 func (fe *fnEmitter) body() {
-	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	body := structure.Build(fe.f, structure.Options{Inline: fe.native, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, fe.native) }})
 	syn := rustSyntax
 	syn.DispatchOpen = []string{"%sloop {", "\tsafepoint();", "\tmatch " + fe.pc() + " {"}
 	if !fe.frame {
@@ -821,7 +825,7 @@ var rustSyntax = structure.Syntax{
 }
 
 func (fe *fnEmitter) analyze() {
-	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, rustProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.native, PauseAlone: fe.native, Order: structure.LeftToRight}, rustProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
 }
 
 func (fe *fnEmitter) capture(fn func()) string {
@@ -839,7 +843,7 @@ type rustEmitter struct{ fe *fnEmitter }
 func (r rustEmitter) Code(b *ir.Block) string {
 	fe := r.fe
 	return fe.capture(func() {
-		if b.ResumeOf != nil {
+		if b.ResumeOf != nil && !fe.native {
 			fe.resume(b.ResumeOf)
 		}
 		for _, in := range b.Instrs {
@@ -854,7 +858,12 @@ func (r rustEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
 	return r.fe.capture(func() { r.fe.term(t) })
 }
 
-func (r rustEmitter) Pause(*ir.Pause) string    { panic("rust: inline pause") }
+func (r rustEmitter) Pause(p *ir.Pause) string {
+	if r.fe.folds.FoldedPause(p) {
+		return ""
+	}
+	return r.fe.capture(func() { r.fe.nativePause(p) })
+}
 func (r rustEmitter) Cond(v ir.Value) string    { return r.fe.val(v) + ".b()" }
 func (r rustEmitter) Mark(pos token.Pos) string { return r.fe.mark(pos) }
 
@@ -862,7 +871,7 @@ func (r rustEmitter) Mark(pos token.Pos) string { return r.fe.mark(pos) }
 type rustProbe struct{ fe *fnEmitter }
 
 func (r rustProbe) Instr(in ir.Instr) string { return r.fe.capture(func() { r.fe.instr(in) }) }
-func (r rustProbe) Pause(*ir.Pause) string   { panic("rust: inline pause") }
+func (r rustProbe) Pause(p *ir.Pause) string { return r.fe.capture(func() { r.fe.nativePause(p) }) }
 func (r rustProbe) Cond(v ir.Value) string   { return r.fe.val(v) }
 func (r rustProbe) Leaf(b *ir.Block, t ir.Terminator) string {
 	return r.fe.capture(func() { r.fe.term(t) })
@@ -1333,7 +1342,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		if i.Call.Kind == ir.CallExtern {
 			args = fe.externArgs(i.Call)
 		}
-		w("l.defer(Deferred { f: %s, args: vec![%s], fid: %s, start: %v });", fn, strings.Join(args, ", "), fid, i.Call.Suspends && fe.frame)
+		w("l.defer(Deferred { f: %s, args: vec![%s], fid: %s, start: %v });", fn, strings.Join(args, ", "), fid, i.Call.Suspends && (fe.frame || fe.native))
 	case *ir.Recover:
 		w("%s;", fe.set(i.Dst, fmt.Sprintf("recover(%d)", fe.f.ID)))
 	case *ir.Rebind:

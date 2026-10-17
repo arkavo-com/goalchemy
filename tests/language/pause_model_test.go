@@ -52,6 +52,29 @@ func TestCSharpPauseModelsAgree(t *testing.T) {
 	})
 }
 
+func TestRustPauseModelsAgree(t *testing.T) {
+	pauseModelsAgree(t, "rust", func(t *testing.T, out string) []string {
+		script, err := os.ReadFile(filepath.Join(out, "run.sh"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cmd *exec.Cmd
+		binary := filepath.Join(out, "main")
+		if strings.Contains(string(script), "cargo run") {
+			cmd = exec.Command("cargo", "build", "--release", "--quiet")
+			binary = filepath.Join(out, "target", "release", "main")
+		} else {
+			cmd = exec.Command("rustc", "--edition", "2021", "-C", "opt-level=2", "-C", "debuginfo=0", "-o", "main", "src/main.rs")
+		}
+		cmd.Dir = out
+		cmd.Env = driver.ToolEnv()
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("Rust build: %v\n%s", err, b)
+		}
+		return []string{binary}
+	})
+}
+
 // pauseModelsAgree compiles every cooperative fixture for target under both
 // pause models; prepare returns the command that runs a compiled program.
 func pauseModelsAgree(t *testing.T, target string, prepare func(t *testing.T, out string) []string) {

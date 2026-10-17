@@ -100,7 +100,8 @@ fn run(t: &Rc<Task>) {
     while !t.blocked.get() {
         if sched(|s| s.epoch.is_some()) { dispatch_host(); }
         let Some(f) = t.frame.borrow().clone() else { break };
-        let rp = t.resume_panic.replace(V::Nil);
+        let native = native_active(&f);
+        let rp = if native { V::Nil } else { t.resume_panic.replace(V::Nil) };
         if !rp.is_nil() {
             exit(t, &f, rp);
             continue;
@@ -117,6 +118,14 @@ fn set_frame(t: &Task, f: Option<Rc<Frame>>) {
 }
 
 fn exit(t: &Rc<Task>, f: &Rc<Frame>, p: V) {
+    // A native parent's await must observe a child/primitive panic so its
+    // explicit async defer runner can handle it. Completed native bodies
+    // clear their future before propagating an unhandled source panic.
+    if !p.is_nil() && native_active(f) {
+        t.resume_panic.replace(p);
+        set_frame(t, Some(f.clone()));
+        return;
+    }
     if !p.is_nil() {
         let earlier = f.panicking.borrow().clone();
         chain_panic(&p, &earlier);
@@ -222,8 +231,7 @@ pub fn call(t: &Rc<Task>, child: V) {
     check_task(t);
     let c = child.frame();
     if sched(|s| s.epoch.is_some()) {
-        let mut depth = 0; let mut frame = t.frame.borrow().clone();
-        while let Some(f) = frame { depth += 1; if depth >= 512 { std::panic::resume_unwind(Box::new(SourceStackFatal)); } frame = f.parent.borrow().clone(); }
+        if native_stack_depth(t) >= 512 { std::panic::resume_unwind(Box::new(SourceStackFatal)); }
     }
     c.parent.replace(t.frame.borrow().clone());
     set_frame(t, Some(c));
@@ -597,7 +605,7 @@ fn detach_owner_frames(tasks: &[Rc<Task>]) {
         for link in [&f.parent,&f.a,&f.b] {if let Some(f)=link.borrow().clone(){frames.push(f)}}
         owned.push(f);
     }
-    for f in owned {f.parent.replace(None);f.a.replace(None);f.b.replace(None);f.panicking.replace(V::Nil);f.prim.borrow_mut().take();f.l.clear();}
+    for f in owned {f.native.borrow_mut().take();f.parent.replace(None);f.a.replace(None);f.b.replace(None);f.panicking.replace(V::Nil);f.prim.borrow_mut().take();f.l.clear();}
 }
 
 thread_local! { static HOST_POLL: RefCell<Option<Rc<dyn Fn()>>> = RefCell::new(None); }
@@ -610,4 +618,142 @@ pub fn library_run(main:&Rc<Task>){while !main.done.get(){let t=next();run(&t);s
 /// Harness-only owner-local values; production library returns detached native types.
 pub fn run_host_isolated(prim:impl FnOnce(&Rc<Task>)+'static)->Vec<V>{
  let _reservation=reserve_entry().unwrap_or_else(|e|host_fault(&e.0));let mut output=Vec::new();let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{let h=Frame::new(1,await_step,Some(await_results));h.prim.replace(Some(Box::new(prim)));let main=Task::new(0,Some(h.clone()));install(main.clone(),true);sched(|s|s.epoch=Some(Instant::now()));ready(&main);while !main.done.get(){let t=next();run(&t)};output=await_results(&h)}));let _roots=temp_root(&output);let retirement=retire_owner();if let Err(e)=result{std::panic::resume_unwind(e)};retirement.unwrap_or_else(|e|host_fault(&e));output
+}
+
+// Native futures are deliberately !Send. The owner polls them from run(),
+// exactly where it steps frames; no waker or foreign executor schedules source.
+fn native_active(f: &Frame) -> bool {
+    f.native.borrow().as_ref().map_or(false, |n| n.future.is_some())
+}
+fn native_results(f: &Frame) -> Vec<V> {
+    match f.l.g(0) { V::Tuple(v) => v.to_vec(), _ => Vec::new() }
+}
+/// roots must list every captured source value until the async activation
+/// registers its locals. Rust closure captures are invisible to the collector.
+pub fn native_task(roots: Vec<V>, results: usize, start: impl FnOnce(Rc<Task>) -> NativeFuture + 'static) -> V {
+    let fr = Frame::new(roots.len() + 1, native_step, Some(native_results));
+    for (i, v) in roots.into_iter().enumerate() { fr.l.s(i + 1, v); }
+    fr.native.replace(Some(NativeBody { start: Some(Box::new(start)), future: None, results }));
+    V::Frame(fr)
+}
+fn native_step(t: &Rc<Task>, f: &Rc<Frame>) {
+    let mut body = f.native.borrow_mut().take().expect("native body already completed");
+    if let Some(start) = body.start.take() { body.future = Some(start(t.clone())); }
+    // Wakes are intentionally ignored: runtime primitives put tasks on the
+    // scheduler's FIFO queue. Polling another task here would nest task bodies.
+    struct NoWake;
+    impl std::task::Wake for NoWake { fn wake(self: std::sync::Arc<Self>) {} }
+    static WAKER: std::sync::OnceLock<std::task::Waker> = std::sync::OnceLock::new();
+    let waker = WAKER.get_or_init(|| std::task::Waker::from(std::sync::Arc::new(NoWake)));
+    let mut cx = std::task::Context::from_waker(waker);
+    let polled = catch(|| body.future.as_mut().unwrap().as_mut().poll(&mut cx));
+    match polled {
+        Ok(std::task::Poll::Pending) => {
+            if !t.blocked.get() && t.frame.borrow().as_ref().map_or(true, |current| Rc::ptr_eq(current, f)) {
+                host_fault("native future yielded without a scheduler wait");
+            }
+            f.native.replace(Some(body));
+        }
+        Ok(std::task::Poll::Ready(value)) => {
+            let values = match body.results {
+                0 => Vec::new(), 1 => vec![value],
+                _ => match value { V::Tuple(v) => v.to_vec(), _ => fault("native results expected") },
+            };
+            f.l.s(0, tuple(values));
+            drop(body);
+            ret(t, f);
+        }
+        Err(p) => { drop(body); raise(p); }
+    }
+}
+
+/// Wait once for the scheduler to return the turn. No native event loop polls
+/// this future; run() resumes it only after the task is explicitly readied.
+struct NativeWait { task: Rc<Task>, first: bool }
+impl std::future::Future for NativeWait {
+    type Output = ();
+    fn poll(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if self.first { self.first = false; return std::task::Poll::Pending; }
+        let panic = self.task.resume_panic.replace(V::Nil);
+        if !panic.is_nil() { raise(panic); }
+        std::task::Poll::Ready(())
+    }
+}
+pub async fn wait(t: &Rc<Task>) { NativeWait { task: t.clone(), first: true }.await }
+
+/// Run a frame-convention function value, interface method or runtime adapter
+/// on this same task, retaining recover identity and the existing host ABI.
+pub async fn await_frame(t: &Rc<Task>, child: V) {
+    call(t, child);
+    wait(t).await;
+}
+
+/// Catch only source panics. Driver failures never enter a future's poll;
+/// faults and fatals propagate without running source defers.
+pub async fn catch_async<T>(future: impl std::future::Future<Output = T>) -> Result<T, V> {
+    let mut future = Some(Box::pin(future));
+    std::future::poll_fn(move |cx| {
+        match catch(|| future.as_mut().unwrap().as_mut().poll(cx)) {
+            Ok(std::task::Poll::Pending) => std::task::Poll::Pending,
+            Ok(std::task::Poll::Ready(v)) => { future.take(); std::task::Poll::Ready(Ok(v)) }
+            Err(p) => { future.take(); std::task::Poll::Ready(Err(p)) }
+        }
+    }).await
+}
+
+pub async fn run_defers_async(t: &Rc<Task>, fr: &Fr, p: V) {
+    // TLS TempRoots cannot span an await: other tasks can interleave their
+    // pushes and drops. Root panic state and deferred captures on this task.
+    let state = Fr::task(t, 5);
+    state.s(0, p);
+    while let Some(d) = fr.pop_defer() {
+        state.s(1, t.cur_panic.replace(state.g(0)));
+        let saved_target = t.defer_target.replace(d.fid);
+        state.s(2, d.f.clone());
+        state.s(3, tuple(d.args.clone()));
+        let result = catch_async(async {
+            if d.start { await_frame(t, callv(&d.f, d.args)).await; }
+            else { callv(&d.f, d.args); }
+        }).await;
+        t.cur_panic.replace(state.g(1));
+        t.defer_target.set(saved_target);
+        match result {
+            Err(p) => { chain_panic(&p, &state.g(0)); state.s(0, p); }
+            Ok(()) => {
+                let p = state.g(0);
+                if !p.is_nil() && panic_recovered(&p) { state.s(0, V::Nil); }
+            }
+        }
+    }
+    let p = state.g(0);
+    if !p.is_nil() { raise(p); }
+}
+
+pub struct NativeDepth(std::rc::Weak<Task>);
+impl Drop for NativeDepth {
+    fn drop(&mut self) {
+        if let Some(t) = self.0.upgrade() { t.native_depth.set(t.native_depth.get() - 1); }
+    }
+}
+/// Bound poll/drop recursion before exhausting a native stack. Host mode keeps
+/// the frame-chain limit; virtual mode has an explicit native-only ceiling.
+pub fn native_guard(t: &Rc<Task>) -> NativeDepth {
+    let host = sched(|s| s.epoch.is_some());
+    let limit = if host { 512 } else { 4096 };
+    let depth = if host { native_stack_depth(t) } else { t.native_depth.get() };
+    if depth >= limit { std::panic::resume_unwind(Box::new(SourceStackFatal)); }
+    t.native_depth.set(t.native_depth.get() + 1);
+    NativeDepth(Rc::downgrade(t))
+}
+
+// Native activations replace source frames. Do not count their adapter frames
+// a second time when a function-value call crosses the compatibility boundary.
+fn native_stack_depth(t: &Task) -> usize {
+    let mut depth = t.native_depth.get();
+    let mut frame = t.frame.borrow().clone();
+    while let Some(f) = frame {
+        if f.step as usize != native_step as Step as usize { depth += 1; }
+        frame = f.parent.borrow().clone();
+    }
+    depth
 }

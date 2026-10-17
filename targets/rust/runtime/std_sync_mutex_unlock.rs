@@ -10,7 +10,7 @@ pub fn std_sync_mutex_unlock(m: V) {
             x.locked = false;
             return Ok(None);
         }
-        Ok(Some(x.waiters.remove(0)))
+        Ok(x.waiters.pop_front())
     });
     match r {
         Err(()) => fatal("sync: unlock of unlocked mutex"),
