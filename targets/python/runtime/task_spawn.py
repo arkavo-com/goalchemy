@@ -7,12 +7,14 @@ trampoline; exactly one task runs at a time and runnable tasks are
 dispatched in FIFO order. Pause primitives either complete immediately,
 leaving their results in task.rv, or block the task until another task or
 a timer readies it. Deferred calls, panics, and recover are managed per task
-by the runtime.
+by the runtime. Under the native pause model a task's frame is a NativeFrame
+running a coroutine body; the same scheduler picks the next task.
 """
 
 import os
 import time
 import threading
+import types
 from collections import deque
 from concurrent.futures import Future
 
@@ -102,6 +104,8 @@ class Scheduler:
         # Identity shared by the schedulers of one library instance; native
         # objects created by any of its calls remain usable by later calls.
         self.domain = self
+        self.handoff = None
+        self.fault = None
 
     def choose(self, n):
         """xorshift32 choice source, identical on every target."""
@@ -284,6 +288,7 @@ class Scheduler:
             t.owner = None
         self.tasks.clear()
         self.runq.clear()
+        self.handoff = None
         for timer in self.timers:
             timer[2:] = [None, None]
         self.timers.clear()
@@ -292,18 +297,13 @@ class Scheduler:
             raise HostFault("retirement cleanup: " + "; ".join(fault_text(e) for e in errors))
 
     def run(self, t):
-        """Drives a task's frames until it blocks or finishes."""
+        """Drives a task's frames until it blocks, finishes, or hands the
+        turn to its native body."""
         self.check()
-        self.cur = t
-        t.owner = self
-        self.tasks.add(t)
-        t.blocked = False
-        if t.cleanup is not None:
-            c, t.cleanup = t.cleanup, None
-            c()
+        self.enter(t)
         while not t.blocked and t.frame is not None:
             p = t.resume_panic
-            if p is not None:
+            if p is not None and type(t.frame) is not NativeFrame:
                 t.resume_panic = None
                 self.exit(t, t.frame, p)
                 continue
@@ -312,6 +312,66 @@ class Scheduler:
                 f.step(t)
             except GoPanic as e:
                 self.exit(t, f, e)
+            if self.handoff is not None:
+                return
+
+    def enter(self, t):
+        self.cur = t
+        t.owner = self
+        self.tasks.add(t)
+        t.blocked = False
+        if t.cleanup is not None:
+            c, t.cleanup = t.cleanup, None
+            c()
+
+    def turn_back(self):
+        """Runs the native bodies the turn was handed to until it comes back
+        to the driver: nothing is runnable, main is done, or the scheduler
+        failed on a body's side, which is raised here."""
+        while self.handoff is not None:
+            n = self.handoff
+            self.handoff = None
+            n.resume()
+            e = self.fault
+            if e is not None:
+                self.fault = None
+                raise e
+
+    def turn(self, me):
+        """Runs the scheduler for a native body that blocked (me) or finished
+        (None) while holding the turn: frame tasks run inline and the next
+        native body is handed the turn. Reports whether me runs next. Host
+        drivers take every turn back. Scheduler failures never unwind a task
+        body: the driver raises them."""
+        if self.real:
+            return False
+        q = self.runq
+        try:
+            while q and not self.main.done:
+                u = q.popleft()
+                if u is me:
+                    self.enter(u)
+                    return True
+                self.run(u)
+                if self.handoff is not None:
+                    return False
+        except BaseException as e:
+            self.fault = e
+        return False
+
+    def native_done(self, t, n, failure):
+        """Delivers a finished native body like a frame return, then continues
+        the task's remaining frames and the scheduler."""
+        try:
+            self.exit(t, n, None if failure is None else catch_panic(failure))
+            if t.frame is not None:
+                self.run(t)
+                if self.handoff is not None:
+                    return
+        except BaseException as e:
+            self.fault = e
+            return
+        self.turn(None)
 
     def exit(self, t, f, p):
         """Leaves frame f (panicking when p is set); deferred calls run first."""
@@ -671,6 +731,8 @@ def _drive(factory, real=False, harness=False, library=False, convert=lambda rv:
         s.ready(main)
         while not main.done:
             s.run(s.next())
+            if s.handoff is not None:
+                s.turn_back()
         result = convert(main.rv)
         main.rv = []
     except RecursionError:
@@ -803,3 +865,106 @@ _program.sequential_end = _sequential_end
 def await_native(fn):
     """Wrap a suspending capability for defer/go first-class invocation."""
     return lambda *args: _AwaitFrame(lambda t: fn(t, *args))
+
+
+class NativeFrame(Frame):
+    """The frame of a native coroutine body with n results, for go, defer,
+    function values and entries. The scheduler hands it the turn and the
+    driver's trampoline (turn_back) starts or resumes the coroutine, so
+    bodies never nest."""
+
+    def __init__(self, body, n):
+        super().__init__()
+        self.body = body
+        self.n = n
+        self.task = None
+        self.coro = None
+        self.res = []
+
+    def step(self, t):
+        self.task = t
+        t.owner.handoff = self
+
+    def results(self):
+        return self.res
+
+    def pack(self, v):
+        n = self.n
+        return [] if n == 0 else [v] if n == 1 else list(v)
+
+    def resume(self):
+        t = self.task
+        try:
+            c = self.coro
+            if c is None:
+                c = self.coro = self.body(t)
+            c.send(None)
+            return
+        except StopIteration as e:
+            self.res = self.pack(e.value)
+            failure = None
+        except BaseException as e:
+            failure = e
+        self.coro = None
+        t.owner.native_done(t, self, failure)
+
+
+def native_task(body, n):
+    return NativeFrame(body, n)
+
+
+@types.coroutine
+def wait(t):
+    """Completes a pause primitive that left native task t blocked: the
+    scheduler runs other tasks until it chooses t again. A panic the waker
+    left for the task is raised here."""
+    if not t.owner.turn(t):
+        yield
+    p = t.resume_panic
+    if p is not None:
+        t.resume_panic = None
+        raise p
+
+
+async def await_frame(t, f):
+    """Runs a function value's or method's frame on native task t and leaves
+    its results in t.rv."""
+    k = type(f)
+    if k is NativeFrame:
+        t.rv = f.pack(await f.body(t))
+    elif k is _SyncFrame:
+        t.rv = f.fn()
+    elif k is _AwaitFrame:
+        f.fn(t)
+        if t.blocked:
+            await wait(t)
+    else:
+        raise HostFault("synchronous call paused")
+
+
+async def run_defers_async(t, ds, p):
+    """Runs a native function's deferred calls, awaiting those that pause;
+    recover and the panic chain behave as in run_defers."""
+    panicking = p
+    while ds:
+        d = ds.pop()
+        saved_panic, saved_target = t.cur_panic, t.defer_target
+        t.cur_panic, t.defer_target = panicking, d.fid
+        try:
+            if d.f is None:
+                raise nil_deref()
+            if d.start:
+                await await_frame(t, d.f(*d.args))
+            else:
+                d.f(*d.args)
+        except GoPanic as np:
+            if np is not panicking and np.prev is None:
+                np.prev = panicking
+            panicking = np
+            continue
+        finally:
+            t.cur_panic, t.defer_target = saved_panic, saved_target
+        if panicking is not None and panicking.recovered:
+            panicking = None
+    if panicking is not None:
+        raise panicking
