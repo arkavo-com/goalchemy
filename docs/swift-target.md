@@ -45,12 +45,16 @@ string and collection semantics do not replace it.
 | Map | Source equality and type descriptors, including aggregate keys and nonreflexive NaN |
 | Pointer | Stable cell identity; assignments update cells in place |
 | Interface | Dynamic source type plus copied payload and method descriptors |
-| Function or task | Captured cells and resumable frames driven by the cooperative scheduler |
+| Function or task | Captured cells and resumable frames driven by the cooperative scheduler; under `--pause-model=native`, `async throws` functions on the owner's executor |
 
 ARC releases ordinary acyclic native objects. A weak allocation registry and
 explicit tracing pass break unreachable source cycles at scheduler safepoints.
 Roots include source globals, live frames, deferred captures, channels, pending
-host operations and retained public call inputs. Field pointers and bound
+host operations and retained public call inputs. Under the native pause model
+each async function registers its local cells with its task, and the compiler
+never holds a computed value in a Swift temporary across an `await`.
+`GOALCHEMY_GC_THRESHOLD=<n>` collects after fewer allocations; `1` collects at
+every safepoint. Field pointers and bound
 method receivers retain their backing objects. This preserves source ownership
 even when the host representation introduces a closure or reference cycle.
 

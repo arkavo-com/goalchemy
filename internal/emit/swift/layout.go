@@ -40,7 +40,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	root.WriteString("func gSetupMethods() {\n")
 	for _, typ := range p.Types.All {
 		for _, method := range typ.MethodSet {
-			fmt.Fprintf(root, "    GTypes.table[%d].methods[%s] = GFunction(%d, %s)\n", typ.ID, quote(method.ID), method.Func.ID, e.names.Symbol(method.Func.Sym))
+			fmt.Fprintf(root, "    GTypes.table[%d].methods[%s] = %s\n", typ.ID, quote(method.ID), e.functionValue(method.Func, ""))
 		}
 	}
 	root.WriteString("}\n")

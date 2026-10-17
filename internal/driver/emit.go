@@ -39,7 +39,7 @@ type EmitOptions struct {
 var PauseModels = []string{"frames", "native"}
 
 // nativePause lists the targets that implement the native pause model.
-var nativePause = map[string]bool{"go": true, "typescript": true, "ir": true}
+var nativePause = map[string]bool{"go": true, "typescript": true, "swift": true, "ir": true}
 
 // Emit writes a target with readable private identifiers.
 func Emit(name string, res *Result, out string) []diagnostics.Diagnostic {
