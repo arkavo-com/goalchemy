@@ -73,7 +73,7 @@ def language_targets():
 
 
 def language_jobs():
-    jobs = re.findall(r'\{name: ([^,]+), suite: language, target: ([\w]+)\}', WORKFLOW.read_text())
+    jobs = re.findall(r'\{name: ([^,]+), suite: language, target: ([\w]+)(?:, [^}]*)?\}', WORKFLOW.read_text())
     targets = language_targets()
     if sorted(t for _, t in jobs) != sorted(targets):
         raise RuntimeError('language jobs must cover every fixture and corpus target exactly once')
