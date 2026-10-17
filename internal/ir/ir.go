@@ -13,7 +13,10 @@ type Program struct {
 	// PauseModel selects how suspending functions are emitted: "frames"
 	// (resumable frames, the default) or "native" (target-native pausing).
 	PauseModel string
-	Types      *Types
+	// NoLineDirectives omits the source annotations (line directives, source
+	// maps and line tables) that map generated code back to the source.
+	NoLineDirectives bool
+	Types            *Types
 	// Packages preserves included source packages in dependency order. External
 	// capability packages remain runtime contracts rather than source owners.
 	Packages []Package

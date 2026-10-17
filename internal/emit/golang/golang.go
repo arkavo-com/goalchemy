@@ -1,6 +1,7 @@
-// Package golang emits lowered Go: a Go program whose control flow is the
-// IR's basic blocks and whose implementation-dependent operations (append
-// growth, map order, panic reporting) call the Goalchemy Go runtime.
+// Package golang emits lowered Go: a Go program whose control flow is
+// structured from the IR's basic blocks and whose implementation-dependent
+// operations (append growth, map order, panic reporting) call the Goalchemy
+// Go runtime.
 package golang
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 // Output contains package-owned files in one native Go package.
@@ -611,6 +613,7 @@ type fnEmitter struct {
 	// funcOf records the function a local holds when it was set by
 	// MakeClosure or MakeBound, for recover identity of deferred calls.
 	funcOf map[*ir.Local]*ir.Func
+	folds  *structure.Folds
 }
 
 func (e *emitter) localNames(f *ir.Func) *fnEmitter {
@@ -623,17 +626,27 @@ func (e *emitter) localNames(f *ir.Func) *fnEmitter {
 
 func (fe *fnEmitter) w(format string, args ...any) { fmt.Fprintf(fe.b, format, args...) }
 
-func (fe *fnEmitter) local(l *ir.Local) string {
-	if fe.frame {
-		return "fr." + fe.names[l]
+func (fe *fnEmitter) name(l *ir.Local) string {
+	if n, ok := fe.folds.Name(l); ok {
+		return n
 	}
 	return fe.names[l]
+}
+
+func (fe *fnEmitter) local(l *ir.Local) string {
+	if fe.frame {
+		return "fr." + fe.name(l)
+	}
+	return fe.name(l)
 }
 
 // val renders an operand's current value.
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if v.Boxed {
 			return "(*" + fe.local(v) + ")"
 		}
@@ -859,9 +872,15 @@ func (e *emitter) startMethod(f *ir.Func, isFrame bool) {
 // and a Step method running the blocks until return or a pause point.
 func (e *emitter) frameFunction(f *ir.Func) {
 	fe := e.localNames(f)
+	fe.frame = true
+	fe.analyze()
+	fe.frame = false
 	ft := "frame_" + e.names.Symbol(f.Sym)
 	e.p_("type %s struct {\n\trt.FrameBase\n", ft)
 	for _, l := range f.Locals {
+		if fe.folds.Temp(l) {
+			continue
+		}
 		t := e.typ(l.Type)
 		if l.Boxed {
 			t = "*" + t
@@ -922,40 +941,8 @@ func (fe *fnEmitter) scanFuncs() {
 }
 
 func (fe *fnEmitter) frameBody() {
-	f := fe.f
 	fe.scanFuncs()
-	targets := map[*ir.Block]bool{f.Blocks[0]: true}
-	var resumes []*ir.Block
-	for _, b := range f.Blocks {
-		if _, pause := b.Term.(*ir.Pause); !pause {
-			for _, s := range ir.Successors(b.Term) {
-				targets[s] = true
-			}
-		}
-		if b.ResumeOf != nil {
-			targets[b] = true
-			resumes = append(resumes, b)
-		}
-	}
-	fe.w("switch fr.PC {\ncase 0:\ngoto b0\n")
-	for _, b := range resumes {
-		fe.w("case %d:\ngoto b%d\n", b.ID, b.ID)
-	}
-	fe.w("}\n")
-	for _, b := range f.Blocks {
-		if targets[b] {
-			fe.w("b%d:\n", b.ID)
-		}
-		if b.ResumeOf != nil {
-			fe.resume(b.ResumeOf)
-		}
-		for _, in := range b.Instrs {
-			fe.line(in.Position())
-			fe.instr(in)
-		}
-		fe.line(b.Term.Position())
-		fe.term(b.Term)
-	}
+	fe.structured()
 }
 
 // resume assigns a paused operation's results from the task.
@@ -1086,7 +1073,6 @@ func (fe *fnEmitter) nativePause(p *ir.Pause) {
 	default:
 		panic(fmt.Sprintf("golang: pause on %T", p.Op))
 	}
-	fe.w("goto b%d\n", p.Next.ID)
 }
 
 // taskCallExpr renders a call using the native-pause convention: the
@@ -1156,10 +1142,11 @@ func (fe *fnEmitter) externArg(a ir.Value) string {
 	return v
 }
 
-// body writes local declarations and the block-structured body.
+// body writes local declarations and the structured body.
 func (fe *fnEmitter) body() {
 	f := fe.f
 	fe.scanFuncs()
+	fe.analyze()
 	params := map[*ir.Local]bool{}
 	for _, p := range f.Params {
 		params[p] = true
@@ -1168,7 +1155,7 @@ func (fe *fnEmitter) body() {
 		params[l] = true
 	}
 	for _, l := range f.Locals {
-		if params[l] && !l.Boxed {
+		if params[l] && !l.Boxed || fe.folds.Temp(l) {
 			continue
 		}
 		if params[l] && l.Boxed && containsLocal(f.Env, l) {
@@ -1193,23 +1180,101 @@ func (fe *fnEmitter) body() {
 		}
 		fe.w("}()\n")
 	}
-	targets := map[*ir.Block]bool{}
-	for _, b := range f.Blocks {
-		for _, s := range ir.Successors(b.Term) {
-			targets[s] = true
+	fe.structured()
+}
+
+// analyze decides which temporaries fold into the expressions using them.
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.inline(), Order: structure.CallsInOrder}, goProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+func (fe *fnEmitter) inline() bool { return !fe.frame }
+
+var goSyntax = structure.Syntax{
+	Indent: "\t", If: "if %s {", ElseIf: "} else if %s {", Else: "} else {", End: "}",
+	Loop: "for {", While: "for %s {", LoopLabel: "%s:\n", LabelName: "L%d",
+	Break: "break", BreakTo: "break %s", Continue: "continue", ContinueTo: "continue %s",
+	Goto: "goto %s", Label: "%s:", Not: "!%s", And: "%s && %s", Or: "%s || %s",
+	EntryLabel: "b%d:", GotoEntry: "goto b%d",
+}
+
+// structured writes the function's control flow as structured statements;
+// resumable frames start with a switch to the block their task resumes at.
+func (fe *fnEmitter) structured() {
+	inline := fe.inline()
+	body := structure.Build(fe.f, structure.Options{Inline: inline, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, inline) }})
+	syn := goSyntax
+	syn.Resume = func(heads []*ir.Block) string {
+		var b strings.Builder
+		b.WriteString("switch fr.PC {\n")
+		for _, h := range heads {
+			fmt.Fprintf(&b, "case %d:\ngoto b%d\n", h.ID, h.ID)
 		}
+		b.WriteString("}")
+		return b.String()
 	}
-	for _, b := range f.Blocks {
-		if targets[b] {
-			fe.w("b%d:\n", b.ID)
+	fe.w("%s", structure.Resolve(structure.Print(body, syn, goEmitter{fe}, 0)))
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	var b bytes.Buffer
+	fe.b = &b
+	fn()
+	fe.b = saved
+	return b.String()
+}
+
+// goEmitter prints the target-specific statements of a structured body.
+type goEmitter struct{ fe *fnEmitter }
+
+func (g goEmitter) Code(b *ir.Block) string {
+	fe := g.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil && fe.frame {
+			fe.resume(b.ResumeOf)
 		}
 		for _, in := range b.Instrs {
+			if fe.folds.Folded(in) {
+				continue
+			}
 			fe.line(in.Position())
 			fe.instr(in)
 		}
-		fe.line(b.Term.Position())
-		fe.term(b.Term)
+	})
+}
+
+func (g goEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return g.fe.capture(func() {
+		g.fe.line(t.Position())
+		g.fe.term(t)
+	})
+}
+
+func (g goEmitter) Pause(p *ir.Pause) string {
+	if g.fe.folds.FoldedPause(p) {
+		return ""
 	}
+	return g.fe.capture(func() {
+		g.fe.line(p.Position())
+		g.fe.nativePause(p)
+	})
+}
+
+func (g goEmitter) Cond(v ir.Value) string    { return g.fe.val(v) }
+func (g goEmitter) Mark(pos token.Pos) string { return g.fe.e.lineDirective(pos) }
+
+// goProbe renders statements for fold analysis.
+type goProbe struct{ fe *fnEmitter }
+
+func (g goProbe) Instr(in ir.Instr) string { return g.fe.capture(func() { g.fe.instr(in) }) }
+func (g goProbe) Pause(p *ir.Pause) string { return g.fe.capture(func() { g.fe.nativePause(p) }) }
+func (g goProbe) Cond(v ir.Value) string   { return g.fe.val(v) }
+func (g goProbe) Assign(l *ir.Local) (string, string) {
+	return g.fe.val(l) + " = ", ""
+}
+func (g goProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return g.fe.capture(func() { g.fe.term(t) })
 }
 
 // line emits a line directive so compiler and runtime positions refer to
@@ -1219,7 +1284,7 @@ func (fe *fnEmitter) line(pos token.Pos) {
 }
 
 func (e *emitter) lineDirective(pos token.Pos) string {
-	if !pos.IsValid() || e.p.Fset == nil {
+	if !pos.IsValid() || e.p.Fset == nil || e.p.NoLineDirectives {
 		return ""
 	}
 	p := e.p.Fset.Position(pos)
@@ -1351,6 +1416,14 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.New:
 		fe.w("%s = new(%s)\n", fe.val(i.Dst), e.typ(i.Dst.Type.U().Elem))
 	case *ir.UnOp:
+		if x, ok := i.X.(*ir.Local); ok && i.Op == ir.Not {
+			if d, ok := fe.folds.Def(x); ok {
+				if b, ok := d.(*ir.BinOp); ok && (b.Op == ir.Eq || b.Op == ir.Ne) {
+					fe.w("%s = %s\n", fe.val(i.Dst), fe.binExpr(b, map[ir.BinOpKind]ir.BinOpKind{ir.Eq: ir.Ne, ir.Ne: ir.Eq}[b.Op]))
+					return
+				}
+			}
+		}
 		op := map[ir.UnOpKind]string{ir.Neg: "-", ir.Not: "!", ir.BitNot: "^"}[i.Op]
 		fe.w("%s = %s%s\n", fe.val(i.Dst), op, fe.val(i.X))
 	case *ir.BinOp:
@@ -1362,14 +1435,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 				fe.w("%s = %s(%s %s %s)\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.val(i.X), i.Op, fe.val(i.Y))
 				break
 			}
-			x, y := fe.val(i.X), fe.val(i.Y)
-			if c, ok := i.X.(*ir.Const); ok && c.Nil && !nilWrapper(i.X.IRType()) {
-				x = "nil"
-			}
-			if c, ok := i.Y.(*ir.Const); ok && c.Nil && !nilWrapper(i.Y.IRType()) {
-				y = "nil"
-			}
-			fe.w("%s = %s %s %s\n", fe.val(i.Dst), x, i.Op, y)
+			fe.w("%s = %s\n", fe.val(i.Dst), fe.binExpr(i, i.Op))
 		}
 	case *ir.Convert:
 		switch i.Kind {
@@ -1566,6 +1632,18 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	default:
 		panic(fmt.Sprintf("golang: unsupported instruction %T", in))
 	}
+}
+
+// binExpr renders a non-float binary operation with operator op.
+func (fe *fnEmitter) binExpr(i *ir.BinOp, op ir.BinOpKind) string {
+	x, y := fe.val(i.X), fe.val(i.Y)
+	if c, ok := i.X.(*ir.Const); ok && c.Nil && !nilWrapper(i.X.IRType()) {
+		x = "nil"
+	}
+	if c, ok := i.Y.(*ir.Const); ok && c.Nil && !nilWrapper(i.Y.IRType()) {
+		y = "nil"
+	}
+	return x + " " + op.String() + " " + y
 }
 
 // chanVal renders a channel operand as the runtime channel type.
