@@ -57,9 +57,10 @@ type Syntax struct {
 
 	// Dispatch forms. With Goto set, entries are printed in sequence under
 	// EntryLabel, Resume is printed first, and a jump is GotoEntry. Otherwise
-	// DispatchOpen's first line takes a loop label prefix, each entry opens
+	// a DispatchOpen line with %s takes a loop label prefix, each entry opens
 	// with CaseOpen (CaseFirst for the first one, when set) and closes with
 	// CaseClose, and a jump is SetPC followed by a continue of the dispatch.
+	// Leading tabs in DispatchOpen and DispatchClose lines add indentation.
 	EntryLabel, GotoEntry string
 	Resume                func(heads []*ir.Block) string
 	DispatchOpen          []string
@@ -68,6 +69,8 @@ type Syntax struct {
 	Default               []string
 	DispatchClose         []string
 	SetPC                 string
+	// Fallthrough lets an entry end by running into the next one.
+	Fallthrough bool
 }
 
 // Print renders body at depth.
@@ -464,6 +467,15 @@ func (p *printer) jump(j jump, depth int) {
 }
 
 func (p *printer) dispatch(d *Dispatch, depth int) {
+	bodies := make([][]Stmt, len(d.Entries))
+	for i, e := range d.Entries {
+		bodies[i] = e.Body
+		if n := len(e.Body); n > 0 && i+1 < len(d.Entries) && (p.syn.Goto != "" || p.syn.Fallthrough) {
+			if g, ok := e.Body[n-1].(*Goto); ok && g.Target == d.Entries[i+1].Head {
+				bodies[i] = e.Body[:n-1]
+			}
+		}
+	}
 	if p.syn.Goto != "" {
 		var resumes []*ir.Block
 		for _, e := range d.Entries {
@@ -478,28 +490,33 @@ func (p *printer) dispatch(d *Dispatch, depth int) {
 				used[h] = true
 			}
 		}
-		for _, e := range d.Entries {
-			walk(e.Body, func(s Stmt) {
+		for _, b := range bodies {
+			walk(b, func(s Stmt) {
 				if g, ok := s.(*Goto); ok {
 					used[g.Target] = true
 				}
 			})
 		}
 		p.push(d)
-		for _, e := range d.Entries {
+		for i, e := range d.Entries {
 			if used[e.Head] {
 				p.line(depth, fmt.Sprintf(p.syn.EntryLabel, e.Head.ID))
 			}
-			p.seq(e.Body, depth)
+			p.seq(bodies[i], depth)
 		}
 		p.pop()
 		return
 	}
+	inner := 1
 	for _, l := range p.syn.DispatchOpen {
+		n := len(l) - len(strings.TrimLeft(l, "\t"))
 		if strings.Contains(l, "%s") {
 			l = fmt.Sprintf(l, p.prefix(d))
 		}
-		p.line(depth, l)
+		p.line(depth+n, strings.TrimLeft(l, "\t"))
+		if n+1 > inner {
+			inner = n + 1
+		}
 	}
 	p.push(d)
 	for i, e := range d.Entries {
@@ -507,18 +524,19 @@ func (p *printer) dispatch(d *Dispatch, depth int) {
 		if i == 0 && p.syn.CaseFirst != "" {
 			open = p.syn.CaseFirst
 		}
-		p.line(depth+1, fmt.Sprintf(open, e.Head.ID))
-		p.body(e.Body, depth+2)
+		p.line(depth+inner, fmt.Sprintf(open, e.Head.ID))
+		p.body(bodies[i], depth+inner+1)
 		if p.syn.CaseClose != "" {
-			p.line(depth+1, p.syn.CaseClose)
+			p.line(depth+inner, p.syn.CaseClose)
 		}
 	}
 	p.pop()
 	for _, l := range p.syn.Default {
-		p.line(depth+1, l)
+		p.line(depth+inner, l)
 	}
 	for _, l := range p.syn.DispatchClose {
-		p.line(depth, l)
+		n := len(l) - len(strings.TrimLeft(l, "\t"))
+		p.line(depth+n, strings.TrimLeft(l, "\t"))
 	}
 	p.after(d, depth)
 }

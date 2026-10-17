@@ -691,7 +691,7 @@ var tsSyntax = structure.Syntax{
 	Indent: "  ", If: "if (%s) {", ElseIf: "} else if (%s) {", Else: "} else {", End: "}",
 	Loop: "for (;;) {", While: "while (%s) {", Block: "%s: {", LoopLabel: "%s: ", LabelName: "$L%d",
 	Break: "break;", BreakTo: "break %s;", Continue: "continue;", ContinueTo: "continue %s;",
-	Not: "!%s", And: "%s && %s", Or: "%s || %s",
+	Not: "!%s", And: "%s && %s", Or: "%s || %s", Fallthrough: true,
 	CaseOpen: "case %d:", Default: []string{`default: throw rt.fault("bad block");`}, DispatchClose: []string{"}"},
 }
 

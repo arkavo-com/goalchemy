@@ -2,6 +2,7 @@ package structure_test
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"go/token"
 	"os"
@@ -105,5 +106,54 @@ func TestExplore(t *testing.T) {
 			continue
 		}
 		t.Logf("func %s (suspends %v)\n%s", f.Name, f.MaySuspend, render(f, os.Getenv("INLINE") != ""))
+	}
+}
+
+var update = flag.Bool("update", false, "rewrite golden files")
+
+// TestSource structures functions lowered from Go: labelled loops, switch
+// with fallthrough, defer and panic paths, short-circuit conditions and
+// select, under the frame model and inline pauses.
+func TestSource(t *testing.T) {
+	src, err := os.ReadFile("testdata/control.go.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := lowered(t, string(src))
+	var b strings.Builder
+	for _, name := range []string{"main.labelled", "main.fallthroughs", "main.recovers", "main.short", "main.selects"} {
+		f := function(t, p, name)
+		for _, inline := range []bool{false, true} {
+			if inline && !f.MaySuspend {
+				continue
+			}
+			fmt.Fprintf(&b, "== %s inline=%v\n%s\n", name, inline, render(f, inline))
+		}
+	}
+	got := b.String()
+	for _, name := range []string{"main.labelled", "main.fallthroughs", "main.short"} {
+		if body := structure.Build(function(t, p, name), structure.Options{}); body.Dispatch != nil {
+			t.Errorf("%s needs a dispatch", name)
+		}
+	}
+	if body := structure.Build(function(t, p, "main.selects"), structure.Options{Inline: true}); body.Dispatch != nil {
+		t.Error("selects needs a dispatch with inline pauses")
+	}
+	if body := structure.Build(function(t, p, "main.selects"), structure.Options{}); body.Dispatch == nil {
+		t.Error("selects resumes without a dispatch under frames")
+	}
+	const path = "testdata/control.golden"
+	if *update {
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Errorf("structured output changed; review and run go test ./internal/structure -update\n%s", got)
 	}
 }

@@ -484,7 +484,7 @@ func (c *cand) valid(cands map[*ir.Local]*cand, byDef map[any]*cand, siblings []
 		if (of < first) != (o.pos < c.pos) {
 			return false
 		}
-		if of < first && (order == Unsequenced || order == CallsInOrder && !calls) {
+		if of > first && (order == Unsequenced || order == CallsInOrder && !calls) {
 			return false
 		}
 	}
