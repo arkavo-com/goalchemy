@@ -22,6 +22,15 @@ pub enum Obj {
     Context(Context),
     Iter(MapIter),
     Panic(PanicObj),
+    Future(FutureState),
+}
+
+pub struct FutureState {
+    pub done: bool,
+    pub observed: bool,
+    pub results: V,
+    pub panic: V,
+    pub waiters: Vec<Rc<Task>>,
 }
 
 pub struct Heap {
@@ -394,6 +403,11 @@ pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) 
             }
             out.push(it.k.clone());
             out.push(it.v.clone());
+        }
+        Obj::Future(f) => {
+            out.push(f.results.clone());
+            out.push(f.panic.clone());
+            for t in &f.waiters { trace_task(t, out, frames); }
         }
         Obj::Panic(p) => {
             out.push(p.value.clone());

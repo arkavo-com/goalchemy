@@ -156,3 +156,5 @@ functions:
   - {id: lib.callback.request, contract_version: 1.0.0, symbol: "rt.LibCallbackRequest", implementation: runtime/lib_callback_request.go, requires: [std.context.err], harness: "unsupported"}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: rt.LibChecksumCRC32IEEE, implementation: runtime/lib_checksum_crc32_ieee.go, harness: "rt.LibChecksumCRC32IEEE({0})"}
+  - {id: lib.task.start, contract_version: 1.0.0, symbol: "rt.LibTaskStart", implementation: runtime/lib_task_start.go, requires: [core.task.spawn], harness: "unsupported"}
+  - {id: lib.task.await, contract_version: 1.0.0, symbol: "rt.LibTaskAwait", implementation: runtime/lib_task_await.go, requires: [lib.task.start], harness: "unsupported"}

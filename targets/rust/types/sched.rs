@@ -135,6 +135,7 @@ pub struct Frame {
     pub panicking: RefCell<V>,
     pub step: Step,
     pub results: Results,
+    pub completion: Cell<Option<fn(&Rc<Task>, &Rc<Frame>, V)>>,
     /// Links used by runtime frames (defer runners).
     pub a: RefCell<Option<Rc<Frame>>>,
     pub b: RefCell<Option<Rc<Frame>>>,
@@ -156,6 +157,7 @@ impl Frame {
             panicking: RefCell::new(V::Nil),
             step,
             results: results.unwrap_or(no_results),
+            completion: Cell::new(None),
             a: RefCell::new(None),
             b: RefCell::new(None),
             prim: RefCell::new(None),
@@ -237,6 +239,7 @@ pub struct Sched {
     pub thread: ThreadId, pub epoch: Option<Instant>,
     pub mailbox: Arc<HostMailbox>, pub pending: BTreeMap<u64, HostPending>, pub operation: u64,
     pub contexts: Vec<V>,
+    pub unawaited: Vec<(V, V)>,
     /// Independently removable roots also cover a decoder while it runs outside
     /// the scheduler borrow. Never hold a LIFO TempRoots for operation lifetime.
     pub host_roots: BTreeMap<u64, Vec<V>>,
@@ -262,7 +265,7 @@ impl Sched {
             harness,
             owner, domain: owner, active: true, retiring: false, thread: std::thread::current().id(), epoch: None,
             mailbox: HostMailbox::new(owner), pending: BTreeMap::new(), operation: 0,
-            contexts: Vec::new(), host_roots: BTreeMap::new(),
+            contexts: Vec::new(), host_roots: BTreeMap::new(), unawaited: Vec::new(),
         }
     }
 }
@@ -292,6 +295,7 @@ pub fn trace_sched(out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) {
             trace_task(t, out, frames);
         }
         out.extend(s.contexts.iter().cloned());
+        for (future, panic) in &s.unawaited { out.push(future.clone()); out.push(panic.clone()); }
         for roots in s.host_roots.values() { out.extend(roots.iter().cloned()); }
         for p in s.pending.values() {
             trace_task(&p.task, out, frames);

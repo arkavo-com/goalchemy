@@ -65,6 +65,7 @@ export abstract class Frame {
   defers: Deferred[] = [];
   parent: Frame | null = null;
   panicking: GoPanic | null = null;
+  completion: ((t: Task, results: unknown[], p: GoPanic | null) => void) | null = null;
   abstract step(t: Task): void;
   results(): unknown[] {
     return [];
@@ -156,6 +157,7 @@ interface HostOperation {
 }
 
 export class Scheduler {
+  unawaited = new Map<object, GoPanic>();
   runq = new Queue<Task>();
   cur: Task;
   main: Task;
@@ -281,7 +283,7 @@ export class Scheduler {
       this.fireDue(this.now());
       this.drainHost();
       if (this.runq.length) return this.runq.shift()!;
-      if (!this.operations.size && !this.timers.length) throw new HostFatal("fatal error: all goroutines are asleep - deadlock!\n");
+      if (!this.operations.size && !this.timers.length) { this.checkFuturePanics(); throw new HostFatal("fatal error: all goroutines are asleep - deadlock!\n"); }
       const at = this.timers.reduce<bigint | null>((a,t) => a === null || t.at < a ? t.at : a, null);
       await this.wait(at === null ? undefined : Number(at - this.now()) / 1e6);
     }
@@ -333,6 +335,7 @@ export class Scheduler {
       t.cleanup = null; t.frame = null; t.rv = []; t.blocked = false; t.done = true; t.curPanic = null; t.resumePanic = null; t.deferTarget = undefined;
     }
     this.tasks.clear();
+    this.unawaited.clear();
     this.cur = this.main = null as unknown as Task;
     return failure;
   }
@@ -351,6 +354,7 @@ export class Scheduler {
    * reports a deadlock. */
   idle(): void {
     if (this.timers.length === 0) {
+      this.checkFuturePanics();
       if (this.harness) throw new Blocked();
       fatal("all goroutines are asleep - deadlock!");
     }
@@ -367,7 +371,15 @@ export class Scheduler {
       this.run(this.next());
       if (this.away) { this.away = false; return true; }
     }
+    this.checkFuturePanics();
     return false;
+  }
+  checkFuturePanics(): void {
+    const p = this.unawaited.values().next().value;
+    if (p === undefined) return;
+    if (this.harness || this.hostMode) throw new FatalPanic(p);
+    writeStderr(formatChain(p));
+    runtimeHost.fail(2);
   }
   private async driveNative(): Promise<void> {
     do {
@@ -492,6 +504,10 @@ export class Scheduler {
       t.done = true;
       t.rv = this.libraryMode && t === this.main && p === null ? f.results() : []; t.curPanic = null; t.deferTarget = undefined;
       if (t !== this.main) this.tasks.delete(t);
+      if (f.completion !== null) {
+        f.completion(t, p === null ? f.results() : [], p);
+        return;
+      }
       if (p !== null) {
         if (this.harness || this.hostMode) throw new FatalPanic(p);
         writeStderr(formatChain(p));
@@ -698,6 +714,7 @@ export async function runMainHost(entry: Frame, host: RuntimeHost = runtimeHost)
       // with an always-runnable cooperative source task.
       if (!main.done) await new Promise<void>(resolve => s.host.alarm(0, resolve));
     }
+    s.checkFuturePanics();
   } catch (e) { failure = e; }
   try { await s.shutdown(); } catch (e) { failure ??= e; }
   activeHost = false;
@@ -896,6 +913,7 @@ export async function driveLibrary(entry: () => Frame, capture: (rv: unknown[]) 
       if (s.away) await s.turnBack();
       if (!main.done) await new Promise<void>(resolve => s.host.alarm(0, resolve));
     }
+    s.checkFuturePanics();
     owned = capture(main.rv);
     if (aborted) throw new NativeCanceled();
   } catch (e) { failure = e; }

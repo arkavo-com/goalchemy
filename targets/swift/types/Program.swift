@@ -299,6 +299,7 @@ final class GFrame {
   var savedPanic: GPanic?
   var savedTarget: Int?
   var native: GAsyncFrame?
+  var completion: ((GTask, [GValue], GPanic?) -> Void)?
   init(_ id: Int) { self.id = id }
   static func sync(_ call: @escaping () throws -> [GValue]) -> GFrame {
     let f = GFrame(-1)
@@ -415,6 +416,10 @@ final class GOwner {
   var rng: UInt32
   var active = true
   var main: GTask?
+  var unawaited: [(GValue, GPanic)] = []
+  func checkFuturePanics() throws {
+    if let first = unawaited.first { throw first.1 }
+  }
   var callbacks: [String: CallbackProvider] = [:]
   var keys: [GWeakCryptoKey] = []
   /// Library calls receive the keys still open at shutdown instead of closing
@@ -518,6 +523,7 @@ final class GOwner {
       try drive(task)
       if away { try turnBack() }
     }
+    try checkFuturePanics()
     GTransferKeys(root.rv)
     return root.rv
   }
@@ -553,6 +559,7 @@ final class GOwner {
       mailbox.condition.unlock()
       return
     }
+    try checkFuturePanics()
     throw GFatal("all goroutines are asleep - deadlock!")
   }
   /// callSync runs a frame that cannot pause to completion on the current
@@ -612,6 +619,11 @@ final class GOwner {
             }
           }
           continue
+        }
+        if task.stack.isEmpty && base == 0, let completion = frame.completion {
+          task.done = true
+          completion(task, panicking == nil ? frame.results() : [], panicking)
+          break
         }
         if let p = panicking, !p.recovered {
           if task.stack.count == base && base > 0 { throw p }
@@ -690,6 +702,7 @@ final class GOwner {
       }
     }
     keys = []
+    unawaited = []
   }
 }
 
@@ -751,7 +764,9 @@ extension GOwner {
       guard let p = p else { return [] }
       return [p.value] + panicRoots(p.previous)
     }
+    for (future, panic) in unawaited { roots += [future] + panicRoots(panic) }
     for task in tasks {
+      roots += panicRoots(task.resumePanic)
       roots += panicRoots(task.currentPanic)
       for frame in task.stack {
         roots += panicRoots(frame.panic) + panicRoots(frame.savedPanic)

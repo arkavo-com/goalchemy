@@ -79,11 +79,12 @@ func (e *emitter) use(c string) {
 // opaqueContracts names a contract whose implementation declares each
 // opaque handle type.
 var opaqueContracts = map[string]string{
-	"sync.Mutex":      "std.sync.mutex.lock",
-	"sync.WaitGroup":  "std.sync.waitgroup.add",
-	"context.Context": "std.context.err",
-	"crypto.Key":      "lib.crypto.close",
-	"http.Exchange":   "lib.http.exchange_close",
+	"task.FutureState": "lib.task.start",
+	"sync.Mutex":       "std.sync.mutex.lock",
+	"sync.WaitGroup":   "std.sync.waitgroup.add",
+	"context.Context":  "std.context.err",
+	"crypto.Key":       "lib.crypto.close",
+	"http.Exchange":    "lib.http.exchange_close",
 }
 
 func intKind(t *ir.Type) string { return t.U().Int.String() }
@@ -1045,6 +1046,9 @@ func (fe *fnEmitter) callee(c *ir.Call) (fn string, args []string, fid string) {
 		return fmt.Sprintf("rt.ichk(%s).t.methods[%q]", x, c.Method), append([]string{x + ".v"}, args...), "undefined"
 	case ir.CallExtern:
 		fe.e.use(c.Extern.Contract)
+		if c.Extern.Contract == "lib.task.start" && fe.e.native() {
+			args[0] = fmt.Sprintf("((fn: rt.Box | null) => () => rt.nativeTask((t) => rt.fnchk(rt.ichk(fn).v)(t), 1))(%s)", args[0])
+		}
 		for k, a := range c.Args {
 			if u := a.IRType().U(); u.Kind == ir.KSlice && u.Elem.U().Kind == ir.KFunc && !fe.e.susp(u.Elem) && !fe.e.native() {
 				fe.e.use("core.task.spawn")

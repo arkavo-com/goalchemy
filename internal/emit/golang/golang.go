@@ -211,11 +211,12 @@ func (e *emitter) use(contract string) {
 // opaqueContracts names a contract whose implementation declares each
 // opaque handle type.
 var opaqueContracts = map[string]string{
-	"sync.Mutex":      "std.sync.mutex.lock",
-	"sync.WaitGroup":  "std.sync.waitgroup.add",
-	"context.Context": "std.context.background",
-	"crypto.Key":      "lib.crypto.close",
-	"http.Exchange":   "lib.http.exchange_close",
+	"task.FutureState": "lib.task.start",
+	"sync.Mutex":       "std.sync.mutex.lock",
+	"sync.WaitGroup":   "std.sync.waitgroup.add",
+	"context.Context":  "std.context.background",
+	"crypto.Key":       "lib.crypto.close",
+	"http.Exchange":    "lib.http.exchange_close",
 }
 
 func (e *emitter) p_(format string, args ...any) {

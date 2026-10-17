@@ -314,6 +314,7 @@ struct gx_Frame {
     gx_Panic *panicking;
     gx_Step step;
     gx_Results results;
+    void (*completion)(gx_Task *, gx_Frame *, gx_Panic *);
     gx_Frame *a, *b;
     void (*prim)(gx_Task *t, void *arg);
     void *prim_arg;
@@ -339,7 +340,13 @@ typedef struct gx_Timer {
     void (*f)(gx_V);
     gx_V arg;
 } gx_Timer;
+typedef struct gx_Unawaited {
+    void *key;
+    gx_Panic *panic;
+    struct gx_Unawaited *next;
+} gx_Unawaited;
 struct gx_Sched {
+    gx_Unawaited *unawaited, *unawaited_tail;
     gx_Task **runq;
     size_t qhead, qlen, qcap;
     gx_Task *cur;
@@ -659,6 +666,19 @@ gx_V gx_std_context_with_timeout(gx_V parent, gx_V d);
 gx_V gx_std_context_context_done(gx_V c);
 gx_V gx_std_context_canceled(void);
 gx_V gx_std_context_deadline_exceeded(void);
+typedef struct gx_FutureWaiter {
+    gx_Task *task;
+    struct gx_FutureWaiter *next;
+} gx_FutureWaiter;
+typedef struct gx_Future {
+    bool done, observed;
+    gx_V results;
+    gx_Panic *panic;
+    gx_FutureWaiter *head, *tail;
+} gx_Future;
+gx_V gx_lib_task_start(gx_V function);
+void gx_lib_task_await(gx_Task *t, gx_V future);
+gx_Panic *gx_copy_future_panic(gx_Panic *p);
 void gx_lib_task_all(gx_Task *t, gx_V fns);
 
 /* Native tokens retain only a refcounted malloc mailbox and numeric identity.

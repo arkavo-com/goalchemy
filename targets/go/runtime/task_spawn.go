@@ -32,6 +32,7 @@ type FrameBase struct {
 	Defers    []Deferred
 	parent    Frame
 	panicking *Panic
+	complete  func(*Task, Frame, *Panic)
 }
 
 func (b *FrameBase) Base() *FrameBase { return b }
@@ -94,7 +95,9 @@ type scheduler struct {
 	boundary  func()
 	retire    []func()
 	// live counts spawned tasks that have not finished.
-	live int
+	live           int
+	unawaited      map[any]*Panic
+	unawaitedOrder []any
 	// natives lists the native-pause tasks whose goroutines have started.
 	natives []*nativeTask
 	handoff handoff
@@ -387,6 +390,7 @@ func (s *scheduler) idle() {
 		return
 	}
 	if len(s.operations) == 0 && len(s.timers) == 0 {
+		s.checkFuturePanics()
 		if s.harness {
 			panic(deadlockSignal{})
 		}
@@ -423,6 +427,19 @@ func (s *scheduler) drive() {
 			if h.idle {
 				s.idle()
 			}
+		}
+	}
+	s.checkFuturePanics()
+}
+
+func (s *scheduler) checkFuturePanics() {
+	for _, key := range s.unawaitedOrder {
+		if p := s.unawaited[key]; p != nil {
+			if s.harness {
+				panic(fatalPanicSignal{p})
+			}
+			s.shutdown()
+			reportChain(p)
 		}
 	}
 }
@@ -560,6 +577,10 @@ func (s *scheduler) finish(t *Task, f Frame) {
 		t.done = true
 		if t != s.main {
 			s.live--
+		}
+		if b.complete != nil {
+			b.complete(t, f, p)
+			return
 		}
 		if p != nil {
 			if s.harness {

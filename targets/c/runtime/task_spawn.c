@@ -121,6 +121,14 @@ _Noreturn void gx_fatal(const char *msg) {
     exit(2);
 }
 
+static void check_future_panics(void) {
+    for (gx_Unawaited *p = gx_sched->unawaited; p; p = p->next) {
+        if (!p->panic) continue;
+        if (gx_sched->harness) gx_raise(p->panic);
+        gx_report_panic(p->panic);
+    }
+}
+
 static int64_t earliest_timer(void) {
     int64_t at = INT64_MAX;
     for (size_t i = 0; i < gx_sched->ntimers; i++)
@@ -177,6 +185,7 @@ static gx_Task *next(void) {
             fire_timers();
             continue;
         }
+        check_future_panics();
         if (s->harness) {
             gx_blocked_signal = 1;
             gx_raise(gx_new_panic(gx_nil()));
@@ -274,6 +283,7 @@ static void finish(gx_Task *t, gx_Frame *f) {
         if (*link)
             *link = t->next_all;
         t->next_all = NULL;
+        if (f->completion) { f->completion(t, f, p); return; }
         if (p) {
             if (gx_sched->harness)
                 gx_raise(p);
@@ -411,6 +421,7 @@ static void main_body(void) {
     gx_ready(main);
     while (!main->done)
         run(next());
+    check_future_panics();
     gx_retire(gx_sched);
 }
 
@@ -1108,6 +1119,7 @@ static void *host_entry_thread(void *arg) {
         gx_ready(main);
         while (!main->done)
             run(next());
+        check_future_panics();
         if (entry->finish) entry->finish(main);
     }
     gx_handler = NULL;

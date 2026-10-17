@@ -1,0 +1,40 @@
+id: lib.task.start
+schema_version: 1
+version: 1.0.0
+summary: 'task.Start: start a function as a cooperative task and retain its results.'
+signature:
+  source: declaration
+  symbol: github.com/eugenioenko/goalchemy/lib/task.start
+  type_parameters: []
+  inputs:
+  - name: fn
+    type: any
+  outputs:
+  - name: future
+    type: task.FutureState
+depends_on:
+- id: type.task
+  version: 1.0.0
+- id: core.task.spawn
+  version: 1.0.0
+suspension: never
+determinism: controlled
+behavior:
+  zero: Awaiting a zero future parks forever and participates in deadlock detection.
+  nil: A nil started function panics in its task.
+  bounds: Not applicable.
+  conversions: The compiler boxes each result and restores its inferred static type at Await.
+  overflow: Not applicable.
+  mutations: Completion stores the results once and readies all waiters in registration order.
+  aliasing: Future copies share identity; repeated awaits return the same stored results with normal Go
+    value copying.
+  allocation: One future state and one task per Start.
+  errors: Errors are ordinary result values.
+  panics: Each await re-raises the same source panic value with independent recover state. An unobserved
+    panic is fatal at entry completion or before deadlock.
+  observations: Start does not yield. An already completed future does not yield; pending awaiters resume
+    through the FIFO scheduler.
+notes: Start and Await are optional compiler intrinsics. Plain pausing calls still use effect inference.
+  Futures cannot cross an exported library boundary.
+cases: []
+native_tests: [lib/task/future_test.go]

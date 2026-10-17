@@ -71,6 +71,7 @@ func Check(prog *frontend.Program, opts Options) []diagnostics.Diagnostic {
 		}
 	}
 	c.out = append(c.out, libraryGlobals(prog)...)
+	c.futureBoundaries()
 	diagnostics.Sort(c.out)
 	return diagnostics.Dedup(c.out)
 }
@@ -399,6 +400,12 @@ func (c *checker) ident(id *ast.Ident) {
 	if obj == nil {
 		return
 	}
+	if name := catalog.TaskIntrinsic(obj); name != "" {
+		if !c.called[id] {
+			c.unsupported(id, "GCS006", "task."+name+" used as a function value", "Call task."+name+" directly.")
+		}
+		return
+	}
 	switch o := obj.(type) {
 	case *types.PkgName:
 		return
@@ -625,6 +632,16 @@ func (c *checker) typeProblemUncached(t types.Type) string {
 		}
 		return ""
 	case *types.Named:
+		if catalog.IsFuture(t) {
+			if t.TypeArgs().Len() == 1 {
+				sig, ok := t.TypeArgs().At(0).Underlying().(*types.Signature)
+				if !ok || sig.Params().Len() != 0 {
+					return "future without a zero-argument result signature"
+				}
+				return c.typeProblem(sig)
+			}
+			return ""
+		}
 		if t.TypeArgs().Len() > 0 {
 			return "generic type instantiation"
 		}

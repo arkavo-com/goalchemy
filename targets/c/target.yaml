@@ -156,3 +156,7 @@ functions:
   - {id: lib.callback.request, contract_version: 1.0.0, symbol: gx_lib_callback_request, implementation: runtime/lib_callback_request.c, requires: [lib.crypto.close, std.context.err], harness: "await: gx_lib_callback_request(t,{0},{1},{2})"}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: gx_lib_checksum_crc32_ieee, implementation: runtime/lib_checksum_crc32_ieee.c, harness: "gx_lib_checksum_crc32_ieee({0})"}
+
+  - {id: lib.task.start, contract_version: 1.0.0, symbol: "gx_lib_task_start", implementation: runtime/lib_task_start.c, requires: [core.task.spawn], harness: "unsupported"}
+
+  - {id: lib.task.await, contract_version: 1.0.0, symbol: "gx_lib_task_await", implementation: runtime/lib_task_await.c, requires: [lib.task.start], harness: "unsupported"}

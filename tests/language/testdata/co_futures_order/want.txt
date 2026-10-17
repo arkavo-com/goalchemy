@@ -1,0 +1,10 @@
+exit=0
+--- stdout
+--- stderr
+immediate false
+ready true
+fast 7
+queued
+waiter 1 9
+waiter 2 9
+done
