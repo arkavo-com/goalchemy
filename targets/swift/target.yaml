@@ -63,6 +63,7 @@ representations:
   representation: Owner-controlled FIFO stack of resumable frames; virtual timers by default, explicit
     host entries wait for immutable native mailbox completions and cleanup acknowledgements.
 support_files:
+- types/Async.swift
 - types/Channels.swift
 - types/Collections.swift
 - types/Files.swift

@@ -107,12 +107,18 @@ func GReport(_ error: Error) -> Never {
 final class GFunction: GManaged {
   let id: Int
   private var maker: (([GValue], [GCell]) -> GFrame)?
+  /// native is the async entry of a function of the native pause model.
+  let native: GAsyncBody?
   var environment: [GCell]
   var retained: [GValue] = []
   private var receiver: GValue?
-  init(_ id: Int, _ maker: @escaping ([GValue], [GCell]) -> GFrame, _ environment: [GCell] = []) {
+  init(
+    _ id: Int, _ maker: @escaping ([GValue], [GCell]) -> GFrame, _ environment: [GCell] = [],
+    native: GAsyncBody? = nil
+  ) {
     self.id = id
     self.maker = maker
+    self.native = native
     self.environment = environment
     GHeap.track(self)
   }
@@ -128,12 +134,23 @@ final class GFunction: GManaged {
     }
     return fn.start(args)
   }
-  static func bound(_ id: Int, _ maker: @escaping ([GValue], [GCell]) -> GFrame, _ receiver: GValue)
-    -> GFunction
-  {
-    let f = GFunction(id, maker)
+  static func bound(
+    _ id: Int, _ maker: @escaping ([GValue], [GCell]) -> GFrame, _ receiver: GValue,
+    native: GAsyncBody? = nil
+  ) -> GFunction {
+    let f = GFunction(id, maker, native: native)
     f.receiver = receiver
     return f
+  }
+  /// call runs a function value on a task of the native pause model.
+  static func call(_ task: GTask, _ value: GValue, _ args: [GValue]) async throws -> [GValue] {
+    guard case .function(let fn) = value else {
+      throw GPanic.runtime("invalid memory address or nil pointer dereference")
+    }
+    if let native = fn.native {
+      return try await native(task, (fn.receiver.map { [GCopy($0)] } ?? []) + args, fn.environment)
+    }
+    return try await task.call(fn.start(args))
   }
   func children() -> [GValue] {
     environment.map { .pointer($0) } + (receiver.map { [$0] } ?? []) + retained
@@ -186,6 +203,15 @@ final class GInterface: GManaged {
       throw GFault("missing method " + method)
     }
     return f.start([GCopy(box.value)] + args)
+  }
+  /// call runs a method on a task of the native pause model.
+  static func call(_ task: GTask, _ v: GValue, _ method: String, _ args: [GValue]) async throws
+    -> [GValue]
+  {
+    if case .interface(let box) = v, box.type >= 0, let f = GTypes.table[box.type].methods[method] {
+      return try await GFunction.call(task, .function(f), [GCopy(box.value)] + args)
+    }
+    return try await task.call(try start(v, method, args))
   }
   static func bound(_ v: GValue, _ method: String) throws -> GValue {
     guard case .interface(let box) = v else {
@@ -255,6 +281,8 @@ enum GAction {
   case complete([GValue])
   case resume([GValue])
   case yield, park
+  /// suspend: a native task body took the turn; the task's state is already set.
+  case suspend
 }
 final class GFrame {
   let id: Int
@@ -270,6 +298,7 @@ final class GFrame {
   var isDeferred = false
   var savedPanic: GPanic?
   var savedTarget: Int?
+  var native: GAsyncFrame?
   init(_ id: Int) { self.id = id }
   static func sync(_ call: @escaping () throws -> [GValue]) -> GFrame {
     let f = GFrame(-1)
@@ -280,6 +309,32 @@ final class GFrame {
   static func plain(_ id: Int, _ body: @escaping (GTask) throws -> [GValue]) -> GFrame {
     let f = GFrame(id)
     f.step = { _, task in .complete(try body(task)) }
+    return f
+  }
+  /// native runs the async body of a function of the native pause model as a frame.
+  static func native(_ id: Int, _ args: [GValue], _ env: [GCell], _ body: @escaping GAsyncBody)
+    -> GFrame
+  {
+    let f = GFrame(id)
+    let n = GAsyncFrame { task in try await body(task, args, env) }
+    f.native = n
+    f.roots = { args + env.map { .pointer($0) } }
+    f.step = { frame, task in
+      if n.finished {
+        if let failure = n.failure { throw failure }
+        return .complete(n.results)
+      }
+      if !n.started {
+        try task.owner.start(task, n)
+        n.started = true
+        task.native = frame
+      } else if let c = task.cont {
+        task.cont = nil
+        c.resume()
+      }
+      task.owner.away = true
+      return .suspend
+    }
     return f
   }
   static func failure(_ error: Error) -> GFrame {
@@ -300,6 +355,10 @@ final class GTask {
   var deferTarget: Int?
   var resumePanic: GPanic?
   var cleanup: (() -> Void)?
+  /// native is the frame whose async body runs this task; cont resumes the
+  /// body where it waits for the scheduler to choose the task again.
+  var native: GFrame?
+  var cont: UnsafeContinuation<Void, Error>?
   init(_ id: Int, _ owner: GOwner, _ frame: GFrame) {
     self.id = id
     self.owner = owner
@@ -362,16 +421,28 @@ final class GOwner {
   /// them, so an instance can keep them; abandoned counts unfinished goroutines.
   var retainKeys: ((GCryptoKey) -> Void)?
   var abandoned = 0
-  var nextCollection = 4096
+  /// GOALCHEMY_GC_THRESHOLD overrides the allocations between collections
+  /// (1 collects at every safepoint).
+  let collectionThreshold: Int?
+  var nextCollection: Int
   /// syncDepth counts synchronous calls in progress; their callers' locals
   /// are not frame roots, so collection waits until they return.
   var syncDepth = 0
   var harness = false
+  /// away is set when a native task body took the turn from the loop that
+  /// dispatched it; back is set when the turn returns to the driver.
+  var away = false
+  var back: GHandoff?
+  var executor: AnyObject?
   static var current: GOwner?
   init(host: Bool) {
     self.host = host
     let seed = UInt32(ProcessInfo.processInfo.environment["GOALCHEMY_SEED"] ?? "1") ?? 1
     rng = seed == 0 ? 1 : seed
+    collectionThreshold = ProcessInfo.processInfo.environment["GOALCHEMY_GC_THRESHOLD"].flatMap {
+      Int($0)
+    }
+    nextCollection = collectionThreshold ?? 4096
   }
   func check() throws {
     if pthread_equal(thread, pthread_self()) == 0 {
@@ -416,6 +487,7 @@ final class GOwner {
     return t
   }
   func fireTimers(_ advance: Bool) {
+    if timers.isEmpty { return }
     let active = timers.filter { $0.active }
     if advance, let next = active.map({ $0.at }).min() { clock = max(clock, next) }
     let due = active.filter { $0.at <= now() }.sorted {
@@ -439,35 +511,49 @@ final class GOwner {
     let root = spawn(frame)
     main = root
     while !root.done {
-      fireTimers(false)
-      mailbox.drain()
-      if queue.isEmpty {
-        if !host && !timers.isEmpty && operations.isEmpty {
-          fireTimers(true)
-          continue
-        }
-        if !operations.isEmpty || (host && !timers.isEmpty) {
-          mailbox.condition.lock()
-          if mailbox.completions.isEmpty {
-            if let next = timers.filter({ $0.active }).map({ $0.at }).min() {
-              _ = mailbox.condition.wait(
-                until: Date(timeIntervalSinceNow: Double(max(0, next - now())) / 1e9))
-            } else {
-              mailbox.condition.wait()
-            }
-          }
-          mailbox.condition.unlock()
-          continue
-        }
-        throw GFatal("all goroutines are asleep - deadlock!")
+      guard let task = poll() else {
+        try idle()
+        continue
       }
-      let task = queue.removeFirst()
-      task.queued = false
-      if task.done { continue }
       try drive(task)
+      if away { try turnBack() }
     }
     GTransferKeys(root.rv)
     return root.rv
+  }
+  /// poll returns the next runnable task after due timers and host
+  /// completions, or nil.
+  func poll() -> GTask? {
+    while true {
+      fireTimers(false)
+      mailbox.drain()
+      if queue.isEmpty { return nil }
+      let task = queue.removeFirst()
+      task.queued = false
+      if !task.done { return task }
+    }
+  }
+  /// idle makes progress when no task is runnable: it fires the next timers,
+  /// waits for host completions, or reports a deadlock.
+  func idle() throws {
+    if !host && !timers.isEmpty && operations.isEmpty {
+      fireTimers(true)
+      return
+    }
+    if !operations.isEmpty || (host && !timers.isEmpty) {
+      mailbox.condition.lock()
+      if mailbox.completions.isEmpty {
+        if let next = timers.filter({ $0.active }).map({ $0.at }).min() {
+          _ = mailbox.condition.wait(
+            until: Date(timeIntervalSinceNow: Double(max(0, next - now())) / 1e9))
+        } else {
+          mailbox.condition.wait()
+        }
+      }
+      mailbox.condition.unlock()
+      return
+    }
+    throw GFatal("all goroutines are asleep - deadlock!")
   }
   /// callSync runs a frame that cannot pause to completion on the current
   /// task and returns its results; an unrecovered panic is thrown.
@@ -479,11 +565,23 @@ final class GOwner {
     try drive(task, base: base)
     return task.rv
   }
-  func drive(_ task: GTask, base: Int = 0) throws {
+  /// drive steps a task's frames above base until it blocks or they finish.
+  /// The scheduler drives from base 0; inline drives the frames a native
+  /// task body calls, returning when one pauses or is a native frame, which
+  /// the body awaits itself.
+  func drive(_ task: GTask, base: Int = 0, inline: Bool = false) throws {
     while !task.done && !task.blocked && task.stack.count > base {
+      if base == 0, task.cont != nil, let n = task.native {
+        _ = try n.step(n, task)
+        return
+      }
       guard let frame = task.stack.last else {
         task.done = true
         break
+      }
+      if base > 0, let n = frame.native, !n.started {
+        if inline { return }
+        throw GFault("synchronous call paused")
       }
       if let p = task.resumePanic {
         task.resumePanic = nil
@@ -545,13 +643,14 @@ final class GOwner {
         frame.finishing = true
       case .resume(let values): task.rv = values
       case .yield:
-        if base > 0 { throw GFault("synchronous call paused") }
+        if base > 0 && !inline { throw GFault("synchronous call paused") }
         ready(task)
         return
       case .park:
-        if base > 0 { throw GFault("synchronous call paused") }
+        if base > 0 && !inline { throw GFault("synchronous call paused") }
         task.blocked = true
         return
+      case .suspend: return
       }
     }
   }
@@ -559,6 +658,7 @@ final class GOwner {
     if !active { return }
     active = false
     abandoned = tasks.filter { !$0.done && $0 !== main }.count
+    unwindNative()
     for task in tasks {
       task.cleanup?()
       task.cleanup = nil
@@ -661,6 +761,6 @@ extension GOwner {
     if let background = GNative.background { roots.append(.opaque(background)) }
     GHeap.collect(roots)
     keys.removeAll { $0.value == nil }
-    nextCollection = max(4096, GHeap.allocations.count * 2)
+    nextCollection = collectionThreshold ?? max(4096, GHeap.allocations.count * 2)
   }
 }
