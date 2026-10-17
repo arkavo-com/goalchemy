@@ -23,13 +23,13 @@ total._fid = 0
 async def _a_main(_t):
     _1 = rt.closure(2, (lambda : (lambda *_a: _main_1(*_a)))())
     _2 = rt.bound(3, _Start, _1)
-    _4 = rt.lib_task_start(lambda _fn=rt.box(_types._td_func, _2): rt.native_task(lambda _t: rt.fnchk(rt.ichk(_fn).v)(_t), 1))
+    _4 = rt.lib_task_start(rt.box(_types._td_func, _2))
     _5 = Future()
     _5.f_state = _4
     a = _5
     _7 = rt.closure(4, (lambda : (lambda *_a: _main_2(*_a)))())
     _8 = rt.bound(3, _Start, _7)
-    _10 = rt.lib_task_start(lambda _fn=rt.box(_types._td_func, _8): rt.native_task(lambda _t: rt.fnchk(rt.ichk(_fn).v)(_t), 1))
+    _10 = rt.lib_task_start(rt.box(_types._td_func, _8))
     _11 = Future()
     _11.f_state = _10
     b = _11
