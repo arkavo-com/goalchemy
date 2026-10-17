@@ -25,6 +25,7 @@ type Config struct {
 	Tags          []string          `json:"tags,omitempty"`
 	Gate          string            `json:"gate,omitempty"`
 	CompactNames  bool              `json:"compact_names,omitempty"`
+	PauseModel    string            `json:"pause_model,omitempty"`
 	Targets       map[string]Target `json:"targets"`
 
 	// Dir is the directory containing the configuration file.
@@ -61,6 +62,11 @@ func Load(path string) (*Config, error) {
 		if t.Out == "" {
 			return nil, fmt.Errorf("%s: target %s needs an out directory", path, name)
 		}
+	}
+	switch c.PauseModel {
+	case "", "frames", "native":
+	default:
+		return nil, fmt.Errorf("%s: unknown pause_model %q", path, c.PauseModel)
 	}
 	switch c.Gate {
 	case "", "sequential", "cooperative":

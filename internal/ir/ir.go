@@ -10,7 +10,10 @@ type Program struct {
 	// CompactNames requests short private identifiers during target emission.
 	// Source identities and public export names are independent of this option.
 	CompactNames bool
-	Types        *Types
+	// PauseModel selects how suspending functions are emitted: "frames"
+	// (resumable frames, the default) or "native" (target-native pausing).
+	PauseModel string
+	Types      *Types
 	// Packages preserves included source packages in dependency order. External
 	// capability packages remain runtime contracts rather than source owners.
 	Packages []Package

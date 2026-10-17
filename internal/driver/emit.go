@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -29,7 +30,14 @@ func Targets() []string {
 // EmitOptions controls the presentation of generated private identifiers.
 type EmitOptions struct {
 	CompactNames bool
+	PauseModel   string
 }
+
+// PauseModels lists the accepted pause models; the first is the default.
+var PauseModels = []string{"frames", "native"}
+
+// nativePause lists the targets that implement the native pause model.
+var nativePause = map[string]bool{"go": true, "ir": true}
 
 // Emit writes a target with readable private identifiers.
 func Emit(name string, res *Result, out string) []diagnostics.Diagnostic {
@@ -57,6 +65,25 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 	if !ok {
 		return []diagnostics.Diagnostic{{Code: "GCE001", Severity: diagnostics.Error, Feature: "target",
 			Message: "unknown or unimplemented target " + name, Remedy: "Choose one of: " + joinTargets()}}
+	}
+	if opts.PauseModel == "" && nativePause[name] {
+		// Test suites select a pause model for every target emission.
+		opts.PauseModel = os.Getenv("GOALCHEMY_PAUSE_MODEL")
+	}
+	switch opts.PauseModel {
+	case "", "frames":
+	case "native":
+		if !nativePause[name] {
+			return []diagnostics.Diagnostic{{Code: "GCE008", Severity: diagnostics.Error, Feature: "pause model",
+				Message: "target " + name + " does not implement pause model native",
+				Remedy:  "Use -pause-model=frames for this target."}}
+		}
+	default:
+		return []diagnostics.Diagnostic{{Code: "GCE008", Severity: diagnostics.Error, Feature: "pause model",
+			Message: "unknown pause model " + opts.PauseModel, Remedy: "Choose frames or native."}}
+	}
+	if res != nil && res.IR != nil {
+		res.IR.PauseModel = opts.PauseModel
 	}
 	if res.IR != nil && res.IR.Library && name != "c" && name != "go" && name != "typescript" && name != "java" && name != "csharp" && name != "python" && name != "rust" && name != "swift" && name != "ir" {
 		return []diagnostics.Diagnostic{{Code: "GCE006", Severity: diagnostics.Error, Feature: "library build",

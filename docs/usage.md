@@ -31,6 +31,7 @@ packages: [./cmd/app]      # package patterns, relative to this file
 tags: [prod]               # optional build tags
 gate: sequential           # sequential (default) or cooperative
 compact_names: false        # readable private identifiers (default)
+pause_model: frames         # frames (default) or native (Go target only, experimental)
 targets:
   go: {out: out/go}
   typescript: {out: out/ts}
@@ -55,6 +56,14 @@ goalchemy compile -target rust -out out/rust --compact-names .
 goalchemy run -target python --compact-names .
 goalchemy build --compact-names=false
 ```
+
+`compile`, `run`, and `build` also accept `--pause-model=frames|native`
+(`build` overrides `pause_model`). `frames` emits suspending functions as
+resumable frames. `native`, implemented only by the Go target, emits them as
+ordinary Go functions that take the current task and block at pause points;
+a turn-passing scheduler keeps exactly one task goroutine running and grants
+the turn in the same FIFO order as frames, so output is identical. See
+issue #92.
 
 ## Generated names
 
