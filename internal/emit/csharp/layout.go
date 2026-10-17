@@ -82,6 +82,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	var files []artifact.File
 	write := func(path, owner string, body []byte) {
 		source, lines := e.resolveMarkers(preamble + string(body) + "}\n")
+		if e.p.NoLineDirectives {
+			lines = nil
+		}
 		files = append(files, artifact.File{Path: path, Owner: owner, Source: []byte(source), Lines: lines})
 	}
 	var shared bytes.Buffer

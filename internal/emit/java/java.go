@@ -16,6 +16,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -536,6 +537,7 @@ type fnEmitter struct {
 	order  map[*ir.Block]int
 	defers bool
 	frame  bool
+	folds  *structure.Folds
 }
 
 func (e *emitter) localName(l *ir.Local) string {
@@ -554,10 +556,14 @@ func (e *emitter) symbol(sym string) string {
 func (fe *fnEmitter) w(format string, args ...any) { fmt.Fprintf(&fe.b, format, args...) }
 
 func (fe *fnEmitter) local(l *ir.Local) string {
-	if fe.frame {
-		return "fr." + fe.e.localName(l)
+	name := fe.e.localName(l)
+	if n, ok := fe.folds.Name(l); ok {
+		name = n
 	}
-	return fe.e.localName(l)
+	if fe.frame {
+		return "fr." + name
+	}
+	return name
 }
 
 func cell(l *ir.Local) bool { return l.Boxed && !l.Type.IsAggregate() }
@@ -573,6 +579,9 @@ func (e *emitter) ltype(l *ir.Local) string {
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if cell(v) {
 			return fe.e.cast(v.Type, fe.local(v)+".v")
 		}
@@ -854,29 +863,18 @@ func (e *emitter) function(f *ir.Func) string {
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
 		isParam[l] = !rawParam(l)
 	}
+	fe.analyze()
 	for _, l := range f.Locals {
-		if !isParam[l] {
+		if !isParam[l] && !fe.folds.Temp(l) {
 			fe.w("        %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
 		}
 	}
 	if fe.defers {
-		fe.w("        java.util.ArrayList<Program.Deferred> $d = new java.util.ArrayList<>();\n        GoPanic $p = null;\n        try {\n")
-	}
-	if len(f.Blocks) == 1 {
-		fe.w("        $body: {\n")
-		fe.block(f.Blocks[0], -1)
+		fe.w("        java.util.ArrayList<Program.Deferred> $d = new java.util.ArrayList<>();\n        GoPanic $p = null;\n        try {\n        $body: {\n")
+		fe.structured(3)
 		fe.w("        }\n")
 	} else {
-		fe.w("        int $pc = 0;\n        $body: for (;;) switch ($pc) {\n")
-		for i, b := range f.Blocks {
-			fe.w("        case %d:\n", i)
-			next := -1
-			if i+1 < len(f.Blocks) {
-				next = i + 1
-			}
-			fe.block(b, next)
-		}
-		fe.w("        default: throw Panics.fault(\"bad block\");\n        }\n")
+		fe.structured(2)
 	}
 	if fe.defers {
 		fe.w("        } catch (Throwable $e) {\n            $p = Program.catchPanic($e);\n        }\n        Program.runDefers($d, $p);\n")
@@ -885,7 +883,7 @@ func (e *emitter) function(f *ir.Func) string {
 		}
 	}
 	fe.w("    }\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 // defaultOf renders a placeholder initial value satisfying Java's definite
@@ -935,20 +933,86 @@ func (fe *fnEmitter) mark(pos token.Pos) {
 	}
 }
 
-func (fe *fnEmitter) block(b *ir.Block, next int) {
-	if b.ResumeOf != nil {
-		fe.w("            ")
-		fe.resume(b.ResumeOf)
-	}
-	for _, in := range b.Instrs {
-		fe.w("            ")
-		fe.mark(in.Position())
-		fe.instr(in)
-	}
-	fe.w("            ")
-	fe.mark(b.Term.Position())
-	fe.term(b.Term, next)
+var javaSyntax = structure.Syntax{
+	Indent: "    ", If: "if (%s) {", ElseIf: "} else if (%s) {", Else: "} else {", End: "}",
+	Loop: "for (;;) {", While: "while (%s) {", Block: "%s: {", LoopLabel: "%s: ", LabelName: "$L%d",
+	Break: "break;", BreakTo: "break %s;", Continue: "continue;", ContinueTo: "continue %s;",
+	Not: "!%s", And: "%s && %s", Or: "%s || %s",
+	CaseOpen: "case %d:", Default: []string{`default: throw Panics.fault("bad block");`}, DispatchClose: []string{"}"},
 }
+
+// structured writes the function body as structured statements, with a
+// dispatch over the blocks a resumable frame resumes at.
+func (fe *fnEmitter) structured(depth int) {
+	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	syn := javaSyntax
+	syn.DispatchOpen = []string{"%sfor (;;) switch (" + fe.pcVar() + ") {"}
+	if !fe.frame {
+		syn.DispatchOpen = []string{"int $pc = 0;", syn.DispatchOpen[0]}
+	}
+	syn.SetPC = fe.pcVar() + " = %d;"
+	fe.b.WriteString(structure.Print(body, syn, javaEmitter{fe}, depth))
+}
+
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, javaProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	fe.b = strings.Builder{}
+	fn()
+	out := fe.b.String()
+	fe.b = saved
+	return out
+}
+
+func markText(pos token.Pos) string {
+	if !pos.IsValid() {
+		return ""
+	}
+	return fmt.Sprintf("%s%d\x00", marker, int(pos))
+}
+
+// javaEmitter prints the target-specific statements of a structured body.
+type javaEmitter struct{ fe *fnEmitter }
+
+func (x javaEmitter) Code(b *ir.Block) string {
+	fe := x.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil {
+			fe.resume(b.ResumeOf)
+		}
+		for _, in := range b.Instrs {
+			if !fe.folds.Folded(in) {
+				fe.mark(in.Position())
+				fe.instr(in)
+			}
+		}
+	})
+}
+
+func (x javaEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() {
+		x.fe.mark(t.Position())
+		x.fe.term(t)
+	})
+}
+
+func (x javaEmitter) Pause(*ir.Pause) string    { panic("java: inline pause") }
+func (x javaEmitter) Cond(v ir.Value) string    { return x.fe.val(v) }
+func (x javaEmitter) Mark(pos token.Pos) string { return markText(pos) }
+
+// javaProbe renders statements for fold analysis.
+type javaProbe struct{ fe *fnEmitter }
+
+func (x javaProbe) Instr(in ir.Instr) string { return x.fe.capture(func() { x.fe.instr(in) }) }
+func (x javaProbe) Pause(*ir.Pause) string   { panic("java: inline pause") }
+func (x javaProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
+func (x javaProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() { x.fe.term(t) })
+}
+func (x javaProbe) Assign(l *ir.Local) (string, string) { return x.fe.assign(l, "") , ";" }
 
 func (fe *fnEmitter) pcVar() string {
 	if fe.frame {
@@ -957,21 +1021,8 @@ func (fe *fnEmitter) pcVar() string {
 	return "$pc"
 }
 
-func (fe *fnEmitter) goTo(target *ir.Block, next int) {
-	if fe.order[target] == next {
-		fe.w("\n")
-		return
-	}
-	fe.w("%s = %d; continue;\n", fe.pcVar(), fe.order[target])
-}
-
-func (fe *fnEmitter) term(t ir.Terminator, next int) {
+func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.goTo(t.Target, next)
-	case *ir.If:
-		fe.w("if (%s) { %s = %d; continue; }\n            ", fe.val(t.Cond), fe.pcVar(), fe.order[t.Then])
-		fe.goTo(t.Else, next)
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
@@ -1001,14 +1052,18 @@ func (fe *fnEmitter) term(t ir.Terminator, next int) {
 // frameFunction emits a suspending function as a resumable frame class and
 // a starter binding the arguments.
 func (e *emitter) frameFunction(f *ir.Func) {
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, frame: true}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
+	fe.analyze()
+	fe.frame = false
 	cls := "F$" + e.names.Symbol(f.Sym)
 	fe.w("%s    static final class %s extends TaskSpawn.Frame {\n", position(f.Pos), cls)
 	for _, l := range f.Locals {
-		fe.w("        %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
+		if !fe.folds.Temp(l) {
+			fe.w("        %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
+		}
 	}
 	for _, l := range f.Params {
 		if rawParam(l) {
@@ -1025,16 +1080,9 @@ func (e *emitter) frameFunction(f *ir.Func) {
 		rs = append(rs, v)
 	}
 	fe.w("        public Object[] results() {\n            final %s fr = this;\n            return new Object[] {%s};\n        }\n", cls, strings.Join(rs, ", "))
-	fe.w("        public void step(TaskSpawn.Task t) {\n            final %s fr = this;\n            for (;;) switch (fr.pc) {\n", cls)
-	for i, b := range f.Blocks {
-		fe.w("        case %d:\n", i)
-		next := -1
-		if i+1 < len(f.Blocks) {
-			next = i + 1
-		}
-		fe.block(b, next)
-	}
-	fe.w("        default: throw Panics.fault(\"bad block\");\n            }\n        }\n    }\n\n")
+	fe.w("        public void step(TaskSpawn.Task t) {\n            final %s fr = this;\n", cls)
+	fe.structured(3)
+	fe.w("        }\n    }\n\n")
 	fe.frame = false
 	fe.w("%s    static TaskSpawn.Frame %s(%s) {\n        %s fr = new %s();\n", position(f.Pos), e.names.Symbol(f.Sym), fe.params(), cls, cls)
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
@@ -1045,7 +1093,7 @@ func (e *emitter) frameFunction(f *ir.Func) {
 		}
 	}
 	fe.w("        return fr;\n    }\n\n")
-	e.frames.WriteString(fe.b.String())
+	e.frames.WriteString(structure.Resolve(fe.b.String()))
 }
 
 func (fe *fnEmitter) resume(op ir.Instr) {

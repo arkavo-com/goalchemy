@@ -16,6 +16,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -503,6 +504,7 @@ type fnEmitter struct {
 	order  map[*ir.Block]int
 	defers bool
 	frame  bool
+	folds  *structure.Folds
 }
 
 func (e *emitter) localName(l *ir.Local) string {
@@ -516,10 +518,14 @@ func (e *emitter) symbol(sym string) string {
 func (fe *fnEmitter) w(format string, args ...any) { fmt.Fprintf(&fe.b, format, args...) }
 
 func (fe *fnEmitter) local(l *ir.Local) string {
-	if fe.frame {
-		return "fr." + fe.e.localName(l)
+	name := fe.e.localName(l)
+	if n, ok := fe.folds.Name(l); ok {
+		name = n
 	}
-	return fe.e.localName(l)
+	if fe.frame {
+		return "fr." + name
+	}
+	return name
 }
 
 func cell(l *ir.Local) bool { return l.Boxed && !l.Type.IsAggregate() }
@@ -535,6 +541,9 @@ func (e *emitter) ltype(l *ir.Local) string {
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if cell(v) {
 			return fe.e.cast(v.Type, fe.local(v)+".v")
 		}
@@ -816,27 +825,17 @@ func (e *emitter) function(f *ir.Func) string {
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
 		isParam[l] = !rawParam(l)
 	}
+	fe.analyze()
 	for _, l := range f.Locals {
-		if !isParam[l] {
+		if !isParam[l] && !fe.folds.Temp(l) {
 			fe.w("        %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
 		}
 	}
 	if fe.defers {
 		fe.w("        var _d = new List<Deferred>();\n        GoPanic _p = null;\n        try {\n")
-	}
-	if len(f.Blocks) == 1 {
-		fe.block(f.Blocks[0], -1)
+		fe.structured(3)
 	} else {
-		fe.w("        int _pc = 0;\n        for (;;) switch (_pc) {\n")
-		for i, b := range f.Blocks {
-			fe.w("        case %d:\n", i)
-			next := -1
-			if i+1 < len(f.Blocks) {
-				next = i + 1
-			}
-			fe.block(b, next)
-		}
-		fe.w("        default: throw Panics.fault(\"bad block\");\n        }\n")
+		fe.structured(2)
 	}
 	if fe.defers {
 		fe.w("        _end: ;\n        } catch (Exception _e) {\n            _p = Program.catchPanic(_e);\n        }\n        Program.runDefers(_d, _p);\n")
@@ -845,7 +844,7 @@ func (e *emitter) function(f *ir.Func) string {
 		}
 	}
 	fe.w("    }\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 // defaultOf renders a placeholder initial value satisfying Java's definite
@@ -895,20 +894,88 @@ func (fe *fnEmitter) mark(pos token.Pos) {
 	}
 }
 
-func (fe *fnEmitter) block(b *ir.Block, next int) {
-	if b.ResumeOf != nil {
-		fe.w("            ")
-		fe.resume(b.ResumeOf)
-	}
-	for _, in := range b.Instrs {
-		fe.w("            ")
-		fe.mark(in.Position())
-		fe.instr(in)
-	}
-	fe.w("            ")
-	fe.mark(b.Term.Position())
-	fe.term(b.Term, next)
+var csSyntax = structure.Syntax{
+	Indent: "    ", If: "if (%s) {", ElseIf: "} else if (%s) {", Else: "} else {", End: "}",
+	Loop: "for (;;) {", While: "while (%s) {", LabelName: "L%d",
+	Break: "break;", Continue: "continue;", Goto: "goto %s;", Label: "%s: ;", GotoLoops: true,
+	Not: "!%s", And: "%s && %s", Or: "%s || %s", EntryLabel: "b%d: ;", GotoEntry: "goto b%d;",
+	Resume: func(heads []*ir.Block) string {
+		var b strings.Builder
+		b.WriteString("switch (fr.pc) {\n")
+		for _, h := range heads {
+			fmt.Fprintf(&b, "case %d: goto b%d;\n", h.ID, h.ID)
+		}
+		b.WriteString("}")
+		return b.String()
+	},
 }
+
+// structured writes the function body as structured statements; a
+// resumable frame first jumps to the block it resumes at.
+func (fe *fnEmitter) structured(depth int) {
+	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	fe.b.WriteString(structure.Print(body, csSyntax, csEmitter{fe}, depth))
+}
+
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, csProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	fe.b = strings.Builder{}
+	fn()
+	out := fe.b.String()
+	fe.b = saved
+	return out
+}
+
+func markText(pos token.Pos) string {
+	if !pos.IsValid() {
+		return ""
+	}
+	return fmt.Sprintf("%s%d\x00", marker, int(pos))
+}
+
+// csEmitter prints the target-specific statements of a structured body.
+type csEmitter struct{ fe *fnEmitter }
+
+func (x csEmitter) Code(b *ir.Block) string {
+	fe := x.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil {
+			fe.resume(b.ResumeOf)
+		}
+		for _, in := range b.Instrs {
+			if !fe.folds.Folded(in) {
+				fe.mark(in.Position())
+				fe.instr(in)
+			}
+		}
+	})
+}
+
+func (x csEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() {
+		x.fe.mark(t.Position())
+		x.fe.term(t)
+	})
+}
+
+func (x csEmitter) Pause(*ir.Pause) string    { panic("csharp: inline pause") }
+func (x csEmitter) Cond(v ir.Value) string    { return x.fe.val(v) }
+func (x csEmitter) Mark(pos token.Pos) string { return markText(pos) }
+
+// csProbe renders statements for fold analysis.
+type csProbe struct{ fe *fnEmitter }
+
+func (x csProbe) Instr(in ir.Instr) string { return x.fe.capture(func() { x.fe.instr(in) }) }
+func (x csProbe) Pause(*ir.Pause) string   { panic("csharp: inline pause") }
+func (x csProbe) Cond(v ir.Value) string   { return x.fe.val(v) }
+func (x csProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return x.fe.capture(func() { x.fe.term(t) })
+}
+func (x csProbe) Assign(l *ir.Local) (string, string) { return x.fe.assign(l, "") , ";" }
 
 func (fe *fnEmitter) pcVar() string {
 	if fe.frame {
@@ -917,21 +984,8 @@ func (fe *fnEmitter) pcVar() string {
 	return "_pc"
 }
 
-func (fe *fnEmitter) goTo(target *ir.Block, next int) {
-	if fe.order[target] == next {
-		fe.w("goto case %d;\n", next)
-		return
-	}
-	fe.w("%s = %d; continue;\n", fe.pcVar(), fe.order[target])
-}
-
-func (fe *fnEmitter) term(t ir.Terminator, next int) {
+func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.goTo(t.Target, next)
-	case *ir.If:
-		fe.w("if (%s) { %s = %d; continue; }\n            ", fe.val(t.Cond), fe.pcVar(), fe.order[t.Then])
-		fe.goTo(t.Else, next)
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
@@ -961,14 +1015,18 @@ func (fe *fnEmitter) term(t ir.Terminator, next int) {
 // frameFunction emits a suspending function as a resumable frame class and
 // a starter binding the arguments.
 func (e *emitter) frameFunction(f *ir.Func) {
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, frame: true}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
+	fe.analyze()
+	fe.frame = false
 	cls := "F_" + e.symbol(f.Sym)
 	fe.w("%s    sealed class %s : Frame {\n", position(f.Pos), cls)
 	for _, l := range f.Locals {
-		fe.w("        public %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
+		if !fe.folds.Temp(l) {
+			fe.w("        public %s %s = %s;\n", e.ltype(l), e.localName(l), e.defaultOf(l))
+		}
 	}
 	for _, l := range f.Params {
 		if rawParam(l) {
@@ -985,16 +1043,9 @@ func (e *emitter) frameFunction(f *ir.Func) {
 		rs = append(rs, v)
 	}
 	fe.w("        public override object[] results() {\n            var fr = this;\n            return new object[] {%s};\n        }\n", strings.Join(rs, ", "))
-	fe.w("        public override void step(GoTask t) {\n            var fr = this;\n            for (;;) switch (fr.pc) {\n")
-	for i, b := range f.Blocks {
-		fe.w("        case %d:\n", i)
-		next := -1
-		if i+1 < len(f.Blocks) {
-			next = i + 1
-		}
-		fe.block(b, next)
-	}
-	fe.w("        default: throw Panics.fault(\"bad block\");\n            }\n        }\n    }\n\n")
+	fe.w("        public override void step(GoTask t) {\n            var fr = this;\n")
+	fe.structured(3)
+	fe.w("        }\n    }\n\n")
 	fe.frame = false
 	fe.w("%s    static Frame %s(%s) {\n        %s fr = new %s();\n", position(f.Pos), e.symbol(f.Sym), fe.params(), cls, cls)
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
@@ -1005,7 +1056,7 @@ func (e *emitter) frameFunction(f *ir.Func) {
 		}
 	}
 	fe.w("        return fr;\n    }\n\n")
-	e.frames.WriteString(fe.b.String())
+	e.frames.WriteString(structure.Resolve(fe.b.String()))
 }
 
 func (fe *fnEmitter) resume(op ir.Instr) {

@@ -139,6 +139,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		source.Write(bodies[class].Bytes())
 		source.WriteString("}\n")
 		src, lines := e.resolveMarkers(source.String())
+		if e.p.NoLineDirectives {
+			lines = nil
+		}
 		files = append(files, artifact.File{Path: class + ".java", Source: []byte(src), Owner: owners[class], Lines: lines})
 	}
 	var contracts []string
