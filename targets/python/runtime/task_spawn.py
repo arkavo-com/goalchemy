@@ -13,6 +13,7 @@ by the runtime.
 import os
 import time
 import threading
+from collections import deque
 from concurrent.futures import Future
 
 from ..types.panic import GoPanic, nil_deref
@@ -87,7 +88,7 @@ class Scheduler:
         self.next_op = 0
         self.mailbox = Mailbox()
         self.retiring_wait = None
-        self.runq = []
+        self.runq = deque()
         self.cur = main
         self.main = main
         self.next_id = 1
@@ -169,7 +170,7 @@ class Scheduler:
                 self.library_poll()
             self.dispatch()
             if self.runq:
-                return self.runq.pop(0)
+                return self.runq.popleft()
             if not self.real and self.timers:
                 self.fire_timers(True)
                 continue
