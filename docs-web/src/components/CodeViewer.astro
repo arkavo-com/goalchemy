@@ -1,0 +1,19 @@
+---
+interface Props {
+  code: string;
+  html: string;
+  label: string;
+  file: string;
+}
+const { code, html, label, file } = Astro.props;
+---
+<div class="code-viewer">
+  <div class="code-filebar">
+    <span class="code-filename">{file}</span>
+    <button type="button" class="code-copy" aria-label={`Copy ${label}`}>Copy</button>
+  </div>
+  <div class="code-editor">
+    <div class="code-backdrop" aria-hidden="true" set:html={html} />
+    <textarea readonly spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label={label}>{code}</textarea>
+  </div>
+</div>

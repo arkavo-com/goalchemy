@@ -1,0 +1,137 @@
+---
+import CodeViewer from './CodeViewer.astro';
+import { source, examples, highlight } from '../examples';
+
+const selected = examples.find((example) => example.id === 'typescript')!;
+const [sourceHtml, outputHtml] = await Promise.all([highlight(source, 'go'), highlight(selected.code, selected.lang)]);
+---
+<section class="code-demo not-content" aria-label="Explore Goalchemy source and generated code" data-code-demo>
+  <div class="code-controls">
+    <div class="code-source-heading">
+      <span class="code-column-title">Goalchemy</span>
+      <span class="code-subtitle">Go source · cooperative gate</span>
+    </div>
+    <div class="code-target-heading">
+      <span class="code-column-title">Generated code</span>
+      <div class="code-tabs" role="tablist" aria-label="Target language">
+        {examples.map((example) => (
+          <button
+            type="button"
+            id={`target-${example.id}`}
+            role="tab"
+            aria-selected={example.id === selected.id}
+            aria-controls="generated-code"
+            tabindex={example.id === selected.id ? 0 : -1}
+            data-example-url={`/examples/${example.id}.json`}
+          >
+            {example.label}{example.id === 'swift' && <span class="code-experimental">experimental</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>
+  <div class="code-columns">
+    <div>
+      <CodeViewer code={source} html={sourceHtml} label="Goalchemy source" file="main.go" />
+    </div>
+    <div id="generated-code" role="tabpanel" aria-labelledby={`target-${selected.id}`}>
+      <CodeViewer code={selected.code} html={outputHtml} label={`${selected.label} generated code`} file={selected.file} />
+    </div>
+  </div>
+  <div class="code-demo-footer">
+    <span>Fetch a mock task API, parse JSON, and count completed tasks.</span>
+    <span class="code-feedback" role="status" aria-live="polite"></span>
+  </div>
+  <p class="code-demo-note">Actual compiler output using native pausing (C uses frames). <a href="/guides/usage/#output">Runtime and dependency files</a> are linked separately.</p>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-code-demo]').forEach((demo) => {
+    const tabs = [...demo.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const panel = demo.querySelector<HTMLElement>('[role="tabpanel"]')!;
+    const output = panel.querySelector<HTMLTextAreaElement>('textarea')!;
+    const backdrop = panel.querySelector<HTMLElement>('.code-backdrop')!;
+    const feedback = demo.querySelector<HTMLElement>('[role="status"]')!;
+    const cache = new Map<string, Promise<{ code: string; html: string; label: string; file: string }>>();
+    let request = 0;
+
+    demo.querySelectorAll<HTMLTextAreaElement>('textarea').forEach((textarea) => {
+      const layer = textarea.parentElement!.querySelector<HTMLElement>('.code-backdrop')!;
+      const synchronize = () => {
+        layer.style.width = `${textarea.clientWidth}px`;
+        layer.style.height = `${textarea.clientHeight}px`;
+        layer.querySelector<HTMLElement>('pre')!.style.transform = `translate(${-textarea.scrollLeft}px, ${-textarea.scrollTop}px)`;
+      };
+      textarea.addEventListener('scroll', synchronize);
+      new ResizeObserver(synchronize).observe(textarea);
+      synchronize();
+    });
+
+    async function select(tab: HTMLButtonElement) {
+      const current = ++request;
+      if (tab.getAttribute('aria-selected') === 'true') {
+        panel.removeAttribute('aria-busy');
+        feedback.textContent = '';
+        return;
+      }
+      panel.setAttribute('aria-busy', 'true');
+      feedback.textContent = `Loading ${tab.textContent!.trim()}…`;
+      const url = tab.dataset.exampleUrl!;
+      if (!cache.has(url)) cache.set(url, fetch(url).then((response) => {
+        if (!response.ok) throw new Error('Example request failed');
+        return response.json();
+      }));
+      try {
+        const example = await cache.get(url)!;
+        if (current !== request) return;
+        output.value = example.code;
+        output.setAttribute('aria-label', `${example.label} generated code`);
+        backdrop.innerHTML = example.html;
+        output.scrollTop = output.scrollLeft = 0;
+        output.dispatchEvent(new Event('scroll'));
+        panel.querySelector<HTMLElement>('.code-filename')!.textContent = example.file;
+        panel.querySelector<HTMLButtonElement>('.code-copy')!.setAttribute('aria-label', `Copy ${example.label} generated code`);
+        panel.setAttribute('aria-labelledby', tab.id);
+        tabs.forEach((button) => {
+          button.setAttribute('aria-selected', String(button === tab));
+          button.tabIndex = button === tab ? 0 : -1;
+        });
+        feedback.textContent = `${example.label} selected`;
+      } catch {
+        cache.delete(url);
+        if (current === request) feedback.textContent = 'Could not load this example. Please try again.';
+      } finally {
+        if (current === request) panel.removeAttribute('aria-busy');
+      }
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => { void select(tab); });
+      tab.addEventListener('keydown', (event) => {
+        let next = index;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        tabs[next]!.focus();
+        void select(tabs[next]!);
+      });
+    });
+
+    demo.querySelectorAll<HTMLButtonElement>('.code-copy').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const textarea = button.closest('.code-viewer')!.querySelector('textarea')!;
+        try {
+          await navigator.clipboard.writeText(textarea.value);
+          feedback.textContent = 'Code copied';
+        } catch {
+          textarea.focus();
+          textarea.select();
+          feedback.textContent = 'Code selected. Use your keyboard to copy.';
+        }
+      });
+    });
+  });
+</script>

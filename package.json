@@ -1,0 +1,12 @@
+{
+  "name": "goalchemy-docs-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.7",
+  "scripts": {
+    "docs:dev": "pnpm --filter docs-web dev",
+    "docs:check": "pnpm --filter docs-web check",
+    "docs:build": "pnpm --filter docs-web build",
+    "docs:preview": "pnpm --filter docs-web preview"
+  }
+}

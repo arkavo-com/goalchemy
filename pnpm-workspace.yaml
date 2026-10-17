@@ -1,0 +1,6 @@
+packages:
+  - docs-web
+
+allowBuilds:
+  esbuild: true
+  sharp: true

@@ -1,0 +1,36 @@
+{
+  "name": "docs-web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "prepare:docs": "node scripts/prepare-docs.mjs",
+    "dev": "pnpm prepare:docs && astro dev",
+    "check": "pnpm prepare:docs && astro check",
+    "build": "pnpm prepare:docs && astro build && node scripts/check-links.mjs",
+    "preview": "astro preview",
+    "astro": "astro",
+    "examples:generate": "node scripts/generate-examples.mjs"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.42.6",
+    "astro": "^7.4.0",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@types/node": "^24.13.6",
+    "github-slugger": "^2.0.0",
+    "parse5": "^8.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "shiki": "^4.5.0",
+    "typescript": "^5.9.3",
+    "unified": "^11.0.5",
+    "yaml": "^2.8.1"
+  }
+}

@@ -192,6 +192,8 @@ cd examples/bank && goalchemy build
 
 ## Documentation
 
+The public documentation is at [goalchemy.dev](https://goalchemy.dev). The Astro Starlight site lives in [`docs-web/`](docs-web); see its maintenance guide for local development and GitHub Pages deployment.
+
 | Topic | Reference |
 | --- | --- |
 | Commands, configuration, output, libraries | [Usage guide](docs/usage.md) |

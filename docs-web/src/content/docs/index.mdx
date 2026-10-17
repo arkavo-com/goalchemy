@@ -1,0 +1,54 @@
+---
+title: Goalchemy
+description: Write your SDK once in a restricted subset of Go and generate eight native language targets with consistent behavior.
+template: splash
+hero:
+  title: One Go source. Eight native targets.
+  tagline: Write your SDK’s logic once in a restricted subset of Go. Generate native packages with consistent behavior across languages.
+  image:
+    file: ../../assets/hero.svg
+  actions:
+    - text: Get started
+      link: /getting-started/quick-start/
+      icon: right-arrow
+    - text: Explore the language
+      link: /language/overview/
+      variant: secondary
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Pipeline from '../../components/Pipeline.astro';
+
+<p class="eyebrow">Write once. Verify everywhere.</p>
+
+## One source of truth for your SDK
+
+Keep parsing, validation, protocols, and business rules in one typed codebase. Goalchemy lowers ordinary `.go` files through a typed intermediate representation, then emits source and the runtime each target needs.
+
+<Pipeline />
+
+<CardGrid>
+  <Card title="Ordinary Go source" icon="document">
+    Use the Go toolchain to write, run, and test your source. The compiler checks a defined subset and reports unsupported constructs before emission.
+  </Card>
+  <Card title="Semantics that travel" icon="puzzle">
+    Preserve integer widths, byte strings, value copies, aliasing, errors, and cooperative tasks across target languages.
+  </Card>
+  <Card title="Behavior you can verify" icon="approve-check">
+    Runtime contracts and differential tests compare generated programs with native Go. Reproducible output records its linked contracts in a manifest.
+  </Card>
+  <Card title="Native host capabilities" icon="setting">
+    Use native crypto, HTTP, clocks, and logging through explicit capability boundaries. Keep pure logic in shared source.
+  </Card>
+</CardGrid>
+
+## From first program to native library
+
+<CardGrid>
+  <LinkCard title="Run your first program" description="Install the compiler and run the same source in Go, Python, and TypeScript." href="/getting-started/quick-start/" />
+  <LinkCard title="Build an SDK" description="Design a portable package and generate native library boundaries." href="/guides/building-an-sdk/" />
+  <LinkCard title="Choose your targets" description="Check runtimes, output formats, native dependencies, and platform limits." href="/targets/" />
+  <LinkCard title="Look up a runtime API" description="Browse standard packages and native host capabilities by package." href="/runtime/overview/" />
+</CardGrid>
+
+Goalchemy accepts a defined Go subset. Check the [feature matrix](/language/features/) for coverage and [current limitations](/language/limitations/) before adopting it. Swift is experimental, with Linux x86_64 as its verified baseline.
