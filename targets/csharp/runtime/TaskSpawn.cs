@@ -9,7 +9,7 @@ public abstract class Frame
     public Frame parent;
     internal int depth;
     public GoPanic panicking;
-    internal Action<GoTask, object[], GoPanic> completion;
+    internal Action<GoTask, object[], GoPanic> completion = null;
 
     public abstract void step(GoTask t);
 
