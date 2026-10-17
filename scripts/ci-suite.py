@@ -137,6 +137,19 @@ def plan(suite, shard, target=None):
     elif suite == 'naming':
         commands = [['go', 'test', '-v', '-timeout', '15m', './tests/language',
                      '-run', '^TestNamingModes$', '-count=1']]
+    elif suite == 'pause' and target == 'python':
+        # The Python target under the native pause model, a job of its own to
+        # keep both pause jobs within the time limit: fixtures, corpus, the
+        # frames/native agreement check and the Python library/host
+        # integration.
+        environment['GOALCHEMY_TEST_TARGETS'] = 'python'
+        environment['GOALCHEMY_PAUSE_MODEL'] = 'native'
+        commands = [['go', 'test', '-v', '-timeout', '40m', './tests/language',
+                     '-run', '^(?:TestFixtures|TestPythonPauseModelsAgree)$', '-count=1'],
+                    ['go', 'test', '-v', '-timeout', '40m', './tests/corpus',
+                     '-run', '^TestRegressions$', '-count=1'],
+                    ['go', 'test', '-short', '-v', '-timeout', '30m', INTEGRATION,
+                     '-run', '^TestGeneratedPython', '-count=1']]
     elif suite == 'pause':
         # The Go, TypeScript and C# targets under the native pause model:
         # fixtures, corpus, the frames/native agreement checks and the Go and
@@ -176,7 +189,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('suite', nargs='?', choices=SUITES)
     parser.add_argument('--shard', type=int, default=0)
-    parser.add_argument('--target', default=None, help='language suite target')
+    parser.add_argument('--target', default=None, help='language or pause suite target')
     parser.add_argument('--plan', action='store_true', help='print commands without running checks')
     parser.add_argument('--verify-plan', action='store_true', help='audit package and test coverage')
     args = parser.parse_args()

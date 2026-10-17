@@ -52,6 +52,12 @@ func TestCSharpPauseModelsAgree(t *testing.T) {
 	})
 }
 
+func TestPythonPauseModelsAgree(t *testing.T) {
+	pauseModelsAgree(t, "python", func(t *testing.T, out string) []string {
+		return []string{"python3", "main.py"}
+	})
+}
+
 // pauseModelsAgree compiles every cooperative fixture for target under both
 // pause models; prepare returns the command that runs a compiled program.
 func pauseModelsAgree(t *testing.T, target string, prepare func(t *testing.T, out string) []string) {
