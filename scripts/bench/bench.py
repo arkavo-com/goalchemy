@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in Goalchemy benchmarks (docs/benchmarks.md). Not run by go test or CI.
 
-  bench.py micro [--targets go,typescript] [--pause-model frames|native] [--runs 7] NAME=COMPILER ...
+  bench.py micro [--targets go,typescript] [--pause-model frames|native] [--runs 7] NAME[@MODEL]=COMPILER ...
   bench.py swift-matrix [--variants A,B,C] [--blocks 50,200,1000] [--modes debug,release] NAME=COMPILER ...
   bench.py swift-sdk --sdk DIR [--runs 1] NAME=COMPILER ...
 
@@ -70,7 +70,8 @@ def micro(args, comps, work):
             for name, comp in comps.items():
                 out = os.path.join(work, f'{prog}-{target}-{name}')
                 shutil.rmtree(out, ignore_errors=True)
-                flags = ['-pause-model', args.pause_model] if target == 'go' and args.pause_model else []
+                model = name.partition('@')[2] or args.pause_model
+                flags = ['-pause-model', model] if target in ('go', 'typescript') and model else []
                 run([comp, 'compile', '-gate', 'cooperative', '-target', target, *flags, '-out', out, '.'], cwd=src)
                 if build:
                     run(build, cwd=out)

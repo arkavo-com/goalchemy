@@ -29,7 +29,10 @@ every build prints the same output:
 - `pingpong`: 300k round trips over unbuffered channels between three tasks.
 
 `--targets` selects targets (`go`, `typescript`, `python`; default
-`go,typescript`), and `--pause-model native` selects the Go pause model.
+`go,typescript`), and `--pause-model native` selects the pause model of the
+targets that implement both (Go, TypeScript). A compiler named `NAME@MODEL`
+uses that pause model, so one run can compare models:
+`bench.py micro --targets typescript base=/tmp/gc-before after@frames=/tmp/gc-after after@native=/tmp/gc-after`.
 
 ## swift-matrix
 
