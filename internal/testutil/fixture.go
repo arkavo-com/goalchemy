@@ -186,6 +186,18 @@ type Runner func(out string) (Observation, error)
 // language matrix does not exhaust memory on a two-core CI runner.
 var swiftBuilds = make(chan struct{}, 2)
 
+// BuildSwift builds a compiled Swift program to .build/program without
+// running it, sharing the fixture runner's build limit.
+func BuildSwift(out string) error {
+	swiftBuilds <- struct{}{}
+	defer func() { <-swiftBuilds }()
+	o, err := run(out, 5*time.Minute, "sh", "-c", "sed '/^exec /d' run.sh | sh")
+	if err == nil && o.Exit != 0 {
+		err = fmt.Errorf("swift build failed:\n%s", o.Stderr)
+	}
+	return err
+}
+
 var Runners = map[string]Runner{
 	"swift": func(out string) (Observation, error) {
 		swiftBuilds <- struct{}{}

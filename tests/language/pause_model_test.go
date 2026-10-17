@@ -34,6 +34,15 @@ func TestTypeScriptPauseModelsAgree(t *testing.T) {
 	})
 }
 
+func TestSwiftPauseModelsAgree(t *testing.T) {
+	pauseModelsAgree(t, "swift", func(t *testing.T, out string) []string {
+		if err := testutil.BuildSwift(out); err != nil {
+			t.Fatal(err)
+		}
+		return []string{filepath.Join(out, ".build", "program")}
+	})
+}
+
 // pauseModelsAgree compiles every cooperative fixture for target under both
 // pause models; prepare returns the command that runs a compiled program.
 func pauseModelsAgree(t *testing.T, target string, prepare func(t *testing.T, out string) []string) {

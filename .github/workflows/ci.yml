@@ -92,6 +92,30 @@ jobs:
       - name: Run selected checks
         run: python3 scripts/ci-suite.py '${{ matrix.suite }}' --shard '${{ matrix.shard || 0 }}' --target '${{ matrix.target || '' }}'
 
+  # Swift under the native pause model, including a collection at every
+  # safepoint. Optional: it is not part of the required check.
+  swift-native:
+    name: Native pause model (Swift, optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libcurl4-openssl-dev libssl-dev zlib1g-dev libedit2 libxml2
+      - name: Cache pinned toolchain downloads
+        uses: actions/cache@v5
+        with:
+          path: .toolchains/downloads
+          key: ${{ runner.os }}-native-tools-${{ hashFiles('toolchains.lock') }}
+      - name: Prepare the pinned Swift toolchain
+        run: bash scripts/fetch-toolchains.sh swift
+      - name: Run Swift native pause model checks
+        run: python3 scripts/ci-suite.py pause-swift
+
   # Preserve the existing required check name and fail if any shard fails or skips.
   test:
     needs: checks

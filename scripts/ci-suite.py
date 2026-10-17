@@ -20,7 +20,8 @@ SPECIAL_PACKAGES = {
 }
 FLOAT_FIXTURES = ('floats', 'co_floats', 'floats_panic32', 'floats_panic64',
                   'floats_panic_named32', 'floats_panic_named64')
-SUITES = ('core', 'language', 'contracts', 'integration', 'examples', 'memory', 'floats', 'naming', 'runtime', 'pause')
+SUITES = ('core', 'language', 'contracts', 'integration', 'examples', 'memory', 'floats', 'naming', 'runtime', 'pause',
+          'pause-swift')
 LANGUAGE_TARGET_SOURCES = ('tests/language/language_test.go', 'tests/corpus/corpus_test.go')
 TARGET_NAMES = {'go': 'Go', 'typescript': 'TypeScript', 'python': 'Python', 'java': 'Java',
                 'csharp': 'C#', 'rust': 'Rust', 'c': 'C', 'swift': 'Swift'}
@@ -148,6 +149,21 @@ def plan(suite, shard, target=None):
                      '-run', '^TestRegressions$', '-count=1'],
                     ['go', 'test', '-short', '-v', '-timeout', '30m', INTEGRATION,
                      '-run', '^TestGeneratedGo', '-count=1']]
+    elif suite == 'pause-swift':
+        # The Swift target under the native pause model (an optional job):
+        # fixtures, the frames/native agreement check, the cooperative
+        # fixtures with a collection at every safepoint, the corpus and the
+        # Swift library integration.
+        environment['GOALCHEMY_TEST_TARGETS'] = 'swift'
+        environment['GOALCHEMY_PAUSE_MODEL'] = 'native'
+        commands = [['go', 'test', '-v', '-parallel', '2', '-timeout', '60m', './tests/language',
+                     '-run', '^(?:TestFixtures|TestSwiftPauseModelsAgree)$', '-count=1'],
+                    ['env', 'GOALCHEMY_GC_THRESHOLD=1', 'FIXTURE=co_', 'go', 'test', '-v', '-parallel', '2',
+                     '-timeout', '40m', './tests/language', '-run', '^TestFixtures$', '-count=1'],
+                    ['go', 'test', '-v', '-parallel', '2', '-timeout', '60m', './tests/corpus',
+                     '-run', '^TestRegressions$', '-count=1'],
+                    ['go', 'test', '-short', '-v', '-timeout', '40m', INTEGRATION,
+                     '-run', '^(?:TestGeneratedSwift|TestSwift)', '-count=1']]
     else:
         # No -short or target filter: every canonical case runs on every harness.
         commands = [['go', 'test', '-v', '-timeout', '15m', './tests/contracts',

@@ -29,7 +29,8 @@ var variants = []struct {
 	{"csharp", "csharp", ".cs", ""},
 	{"rust", "rust", ".rs", ""},
 	{"c", "c", ".c", ""},
-	{"swift", "swift", ".swift", ""},
+	{"swift", "swift", ".swift", "frames"},
+	{"swift-native", "swift", ".swift", "native"},
 }
 
 func TestGenerated(t *testing.T) {
