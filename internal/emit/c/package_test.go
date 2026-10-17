@@ -90,7 +90,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, f := range p.Funcs {
 				count := 0
-				declaration := regexp.MustCompile(`(?m)^gx_V f_` + regexp.QuoteMeta(naming.New(&p, c.NameRules(&p)).Symbol(f.Sym)) + `\([^;\n]*\) \{`)
+				declaration := regexp.MustCompile(`(?m)^gx_V ` + regexp.QuoteMeta(cFunc(&p, f.Sym)) + `\([^;\n]*\) \{`)
 				for _, file := range output.Files {
 					if declaration.Match(file.Source) {
 						count++
@@ -105,7 +105,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, global := range p.Globals {
 				count := 0
-				declaration := "gx_V " + naming.New(&p, c.NameRules(&p)).Symbol(global.Sym) + ";"
+				declaration := "gx_V " + cGlobal(&p, global.Sym) + ";"
 				for _, file := range output.Files {
 					for _, line := range strings.Split(string(file.Source), "\n") {
 						if strings.TrimSpace(line) == declaration {
@@ -209,13 +209,13 @@ func TestPackageOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, f := range p.Funcs {
-					if f.Pkg == file.Owner && !strings.Contains(string(data), " T f_"+naming.New(&p, c.NameRules(&p)).Symbol(f.Sym)+"\n") {
+					if f.Pkg == file.Owner && !strings.Contains(string(data), " T "+cFunc(&p, f.Sym)+"\n") {
 						t.Fatalf("%s lacks its native function %s", file.Path, f.Name)
 					}
 				}
 				if strings.HasSuffix(file.Owner, "/worker") {
 					for _, global := range p.Globals {
-						if strings.HasSuffix(global.Pkg, "/first/value") && global.Name == "Counter" && !strings.Contains(string(data), " U "+naming.New(&p, c.NameRules(&p)).Symbol(global.Sym)+"\n") {
+						if strings.HasSuffix(global.Pkg, "/first/value") && global.Name == "Counter" && !strings.Contains(string(data), " U "+cGlobal(&p, global.Sym)+"\n") {
 							t.Fatal("foreign mutable storage was duplicated instead of linked")
 						}
 					}
@@ -262,7 +262,7 @@ func checkDeclarationMap(t *testing.T, p *ir.Program, source []byte, owner, out,
 	}
 	for _, global := range p.Globals {
 		if global.Pkg == owner {
-			declaration := "gx_V " + naming.New(p, c.NameRules(p)).Symbol(global.Sym) + ";"
+			declaration := "gx_V " + cGlobal(p, global.Sym) + ";"
 			for index, line := range strings.Split(string(source), "\n") {
 				if strings.TrimSpace(line) == declaration {
 					expected := p.Fset.Position(global.Pos)
@@ -277,4 +277,14 @@ func checkDeclarationMap(t *testing.T, p *ir.Program, source []byte, owner, out,
 		}
 	}
 	t.Fatalf("owner %s lacks mapped declaration", owner)
+}
+
+func cFunc(p *ir.Program, sym string) string {
+	names := naming.New(p, c.NameRules(p))
+	return names.Derived("f", names.Symbol(sym))
+}
+
+func cGlobal(p *ir.Program, sym string) string {
+	names := naming.New(p, c.NameRules(p))
+	return names.Derived("g", names.Symbol(sym))
 }

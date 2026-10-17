@@ -100,10 +100,13 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 	if res != nil && res.IR != nil {
 		res.IR.PauseModel = opts.PauseModel
 		res.IR.NoLineDirectives = opts.NoLineDirectives
-		if mode == naming.Source && res.Catalog != nil && unqualifiedRuntime[name] {
+		if macros, ok := unqualifiedRuntime[name]; ok && mode == naming.Source && res.Catalog != nil {
 			declared, called, err := runtimeNames(res.Catalog.FS, name)
 			if err != nil {
 				return emitErr("GCE005", "runtime names: "+err.Error())
+			}
+			if macros {
+				declared = append(declared, called...)
 			}
 			res.IR.ReservedNames, res.IR.ReservedGlobals = declared, called
 		}
@@ -167,8 +170,10 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 }
 
 // unqualifiedRuntime lists targets whose generated code names runtime
-// declarations without a qualifier, so source names must avoid them.
-var unqualifiedRuntime = map[string]bool{"java": true, "csharp": true, "rust": true, "c": true, "swift": true}
+// declarations without a qualifier, so source names must avoid them. On C,
+// runtime macros expand to host calls inside generated functions, so locals
+// avoid the names the runtime calls as well.
+var unqualifiedRuntime = map[string]bool{"java": false, "csharp": false, "rust": false, "c": true, "swift": false}
 
 func runtimeNames(fsys fs.FS, target string) (declared, called []string, err error) {
 	var roots []string
