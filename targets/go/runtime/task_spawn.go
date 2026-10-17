@@ -72,7 +72,7 @@ type timer struct {
 }
 
 type scheduler struct {
-	runq          []*Task
+	runq          taskQueue
 	cur           *Task
 	main          *Task
 	nextID        int
@@ -267,7 +267,7 @@ func (s *scheduler) shutdown() {
 	s.retire = nil
 	s.boundary = nil
 	s.operations = nil
-	s.runq = nil
+	s.runq = taskQueue{}
 	s.timers = nil
 	s.cur = nil
 	s.main = nil
@@ -301,7 +301,51 @@ func (s *scheduler) choose(n int) int {
 	return int(x % uint32(n))
 }
 
-func (s *scheduler) ready(t *Task) { s.runq = append(s.runq, t) }
+func (s *scheduler) ready(t *Task) { s.runq.push(t) }
+
+// taskQueue is the FIFO run queue: a ring whose size is a power of two.
+type taskQueue struct {
+	buf  []*Task
+	head int
+	n    int
+}
+
+func (q *taskQueue) len() int { return q.n }
+
+func (q *taskQueue) at(i int) *Task { return q.buf[(q.head+i)&(len(q.buf)-1)] }
+
+func (q *taskQueue) push(t *Task) {
+	if q.n == len(q.buf) {
+		buf := make([]*Task, max(8, 2*len(q.buf)))
+		for i := range q.n {
+			buf[i] = q.at(i)
+		}
+		q.buf, q.head = buf, 0
+	}
+	q.buf[(q.head+q.n)&(len(q.buf)-1)] = t
+	q.n++
+}
+
+func (q *taskQueue) pop() *Task {
+	t := q.buf[q.head]
+	q.buf[q.head] = nil
+	q.head = (q.head + 1) & (len(q.buf) - 1)
+	q.n--
+	return t
+}
+
+// popFront removes the first element, reusing the storage once q drains.
+func popFront[T any](q *[]T) T {
+	v := (*q)[0]
+	var zero T
+	(*q)[0] = zero
+	if len(*q) == 1 {
+		*q = (*q)[:0]
+	} else {
+		*q = (*q)[1:]
+	}
+	return v
+}
 
 // block parks the current task until something readies it.
 func (s *scheduler) block(t *Task) { t.blocked = true }
@@ -329,12 +373,10 @@ func (s *scheduler) poll() *Task {
 		s.fireDue(s.now())
 	}
 	s.drainHost()
-	if len(s.runq) == 0 {
+	if s.runq.len() == 0 {
 		return nil
 	}
-	t := s.runq[0]
-	s.runq = s.runq[1:]
-	return t
+	return s.runq.pop()
 }
 
 // idle advances virtual time, waits for timers or host completions, or

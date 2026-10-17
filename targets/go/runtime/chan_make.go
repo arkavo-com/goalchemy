@@ -38,8 +38,7 @@ func MakeChan[T any](size int) Chan[T] {
 // dequeue removes the first waiter that can still complete.
 func dequeue(q *[]*waiter) *waiter {
 	for len(*q) > 0 {
-		w := (*q)[0]
-		*q = (*q)[1:]
+		w := popFront(q)
 		if w.sel == nil || !w.sel.done {
 			return w
 		}
