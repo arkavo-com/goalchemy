@@ -33,14 +33,14 @@ func TestRustByteGCNativeOracle(t *testing.T) {
 
 func TestRustByteStorage(t *testing.T) {
 	outDir := t.TempDir()
-	if ds := testutil.CompileGate("../language/testdata/byte_storage", "rust", outDir, "sequential"); len(ds) > 0 {
+	if ds := testutil.CompileGateOptions("../language/testdata/byte_storage", "rust", outDir, "sequential", driver.EmitOptions{Names: "readable"}); len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	src, err := testutil.GeneratedSource(outDir, ".rs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"byte_array(vec![0; 4])", "byte_array_clone(x)", "byte_array_set(d, s)", "byte_array_eq(a, b)", "byte_array_key(a)", "BYTE_NIL", "make_byte_slice(", "append_bytes(", ".i() as u8", "slice_to_array(", "make_slice("} {
+	for _, want := range []string{"byte_array(vec![0; 4])", "byte_array_clone(_x)", "byte_array_set(_d, _s)", "byte_array_eq(_a, _b)", "byte_array_key(_a)", "BYTE_NIL", "make_byte_slice(", "append_bytes(", ".i() as u8", "slice_to_array(", "make_slice("} {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("emitted byte program lacks %q", want)
 		}

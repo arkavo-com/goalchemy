@@ -25,8 +25,7 @@ func (c Chan[T]) Recv(t *Task) {
 // tryRecv receives without blocking when a value or closure is available.
 func (ch *chanCore) tryRecv() (any, bool, bool) {
 	if len(ch.buf) > 0 {
-		v := ch.buf[0]
-		ch.buf = ch.buf[1:]
+		v := popFront(&ch.buf)
 		if w := dequeue(&ch.sendq); w != nil {
 			ch.buf = append(ch.buf, w.val)
 			w.sendDone(false)

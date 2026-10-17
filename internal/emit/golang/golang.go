@@ -1,6 +1,7 @@
-// Package golang emits lowered Go: a Go program whose control flow is the
-// IR's basic blocks and whose implementation-dependent operations (append
-// growth, map order, panic reporting) call the Goalchemy Go runtime.
+// Package golang emits lowered Go: a Go program whose control flow is
+// structured from the IR's basic blocks and whose implementation-dependent
+// operations (append growth, map order, panic reporting) call the Goalchemy
+// Go runtime.
 package golang
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 // Output contains package-owned files in one native Go package.
@@ -53,7 +55,7 @@ func Emit(p *ir.Program, outDir string, symbols map[string]string) (*Output, err
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), outDir: outDir, symbols: symbols, typeNames: map[*ir.Type]string{}, syms: map[string]bool{}, contracts: map[string]bool{}, closures: map[*ir.Func]bool{}, layout: layout, files: map[string]*bytes.Buffer{}, owners: map[string]string{}}
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), outDir: outDir, symbols: symbols, typeNames: map[*ir.Type]string{}, syms: map[string]bool{}, contracts: map[string]bool{}, closures: map[*ir.Func]bool{}, layout: layout, files: map[string]*bytes.Buffer{}, owners: map[string]string{}}
 	e.selectFile("main.go", "")
 	for _, f := range p.Funcs {
 		if f.Closure {
@@ -209,11 +211,12 @@ func (e *emitter) use(contract string) {
 // opaqueContracts names a contract whose implementation declares each
 // opaque handle type.
 var opaqueContracts = map[string]string{
-	"sync.Mutex":      "std.sync.mutex.lock",
-	"sync.WaitGroup":  "std.sync.waitgroup.add",
-	"context.Context": "std.context.background",
-	"crypto.Key":      "lib.crypto.close",
-	"http.Exchange":   "lib.http.exchange_close",
+	"task.FutureState": "lib.task.start",
+	"sync.Mutex":       "std.sync.mutex.lock",
+	"sync.WaitGroup":   "std.sync.waitgroup.add",
+	"context.Context":  "std.context.background",
+	"crypto.Key":       "lib.crypto.close",
+	"http.Exchange":    "lib.http.exchange_close",
 }
 
 func (e *emitter) p_(format string, args ...any) {
@@ -244,7 +247,7 @@ func (e *emitter) nameTypes() {
 
 	// Native exported methods keep their API names. Private method identities
 	// include package paths, so assign collision-free names over the whole IR.
-	identities := map[string]bool{}
+	identities := map[string]string{}
 	reserved := map[string]bool{}
 	for _, t := range e.p.Types.All {
 		for i, field := range t.U().Fields {
@@ -255,7 +258,7 @@ func (e *emitter) nameTypes() {
 
 	for _, f := range e.p.Funcs {
 		if strings.Contains(f.MethodID, ".") {
-			identities[f.MethodID] = true
+			identities[f.MethodID] = methodShortName(f)
 		} else if f.MethodID != "" {
 			reserved[methodShortName(f)] = true
 		}
@@ -263,29 +266,39 @@ func (e *emitter) nameTypes() {
 	for _, t := range e.p.Types.All {
 		for _, m := range t.Methods {
 			if strings.Contains(m.ID, ".") {
-				identities[m.ID] = true
+				identities[m.ID] = m.Name
 			} else {
 				reserved[m.Name] = true
 			}
 		}
 		for _, m := range t.MethodSet {
 			if strings.Contains(m.ID, ".") {
-				identities[m.ID] = true
+				identities[m.ID] = m.Name
 			} else {
 				reserved[m.Name] = true
 			}
 		}
 	}
 	var ids []string
-	for id := range identities {
+	short := map[string]int{}
+	for id, name := range identities {
 		ids = append(ids, id)
+		short[name]++
 	}
 	sort.Strings(ids)
 	e.methodNames = map[string]string{}
 	for i, id := range ids {
-		n := fmt.Sprintf("method_%s_%d", naming.Identifier(id), i)
-		if e.p.CompactNames {
+		var n string
+		switch e.names.Mode() {
+		case naming.Compact:
 			n = fmt.Sprintf("m_%d", i)
+		case naming.Source:
+			n = identities[id]
+			if short[n] > 1 {
+				n = fmt.Sprintf("%s_%d", n, i)
+			}
+		default:
+			n = fmt.Sprintf("method_%s_%d", naming.Identifier(id), i)
 		}
 		// One alias per identity must be safe on every native receiver type.
 		for reserved[n] {
@@ -428,9 +441,27 @@ func (e *emitter) typ(t *ir.Type) string {
 // calling convention: calling one returns a frame.
 func (e *emitter) susp(t *ir.Type) bool { return e.p.SuspTypes[t.U()] }
 
-// startType renders the resumable form of a function type.
+// startType renders the resumable form of a function type. Under the
+// native pause model it is an ordinary function taking the current task.
 func (e *emitter) startType(t *ir.Type) string {
+	if e.native() {
+		s := "func(" + strings.Join(append([]string{"*rt.Task"}, e.paramTypes(t)...), ", ") + ")"
+		if r := syncResults(e, t.U()); r != "" {
+			s += " " + r
+		}
+		return s
+	}
 	return "func(" + strings.Join(e.paramTypes(t), ", ") + ") rt.Frame"
+}
+
+func (e *emitter) native() bool { return e.p.PauseModel == "native" }
+
+// nativeBody renders a function body returning call's results, if any.
+func nativeBody(n int, call string) string {
+	if n == 0 {
+		return call
+	}
+	return "return " + call
 }
 
 // syncType renders a function type in the ordinary convention.
@@ -474,8 +505,8 @@ func (e *emitter) paramTypes(t *ir.Type) []string {
 func (e *emitter) forward(t *ir.Type) (params, args []string) {
 	t = t.U()
 	for i, pt := range e.paramTypes(t) {
-		params = append(params, fmt.Sprintf("a%d_ %s", i, pt))
-		a := fmt.Sprintf("a%d_", i)
+		params = append(params, fmt.Sprintf("_a%d %s", i, pt))
+		a := fmt.Sprintf("_a%d", i)
 		if t.Variadic && i == len(t.Params)-1 {
 			a += "..."
 		}
@@ -491,7 +522,7 @@ func syncFrameBody(n int, call string) string {
 	}
 	var rs []string
 	for i := 0; i < n; i++ {
-		rs = append(rs, fmt.Sprintf("r%d_", i))
+		rs = append(rs, fmt.Sprintf("_r%d", i))
 	}
 	return strings.Join(rs, ", ") + " := " + call + "; return []any{" + strings.Join(rs, ", ") + "}"
 }
@@ -501,8 +532,12 @@ func syncFrameBody(n int, call string) string {
 func (e *emitter) adapt(t *ir.Type, expr string) string {
 	u := t.U()
 	ps, as := e.forward(u)
-	body := syncFrameBody(len(u.Results), "f_("+strings.Join(as, ", ")+")")
-	return fmt.Sprintf("func(f_ %s) %s { return func(%s) rt.Frame { return rt.Sync(func() []any { %s }) } }(%s)",
+	if e.native() {
+		return fmt.Sprintf("func(_f %s) %s { return func(%s) %s { %s } }(%s)",
+			e.syncType(u), e.startType(u), strings.Join(append([]string{"_ *rt.Task"}, ps...), ", "), syncResults(e, u), nativeBody(len(u.Results), "_f("+strings.Join(as, ", ")+")"), expr)
+	}
+	body := syncFrameBody(len(u.Results), "_f("+strings.Join(as, ", ")+")")
+	return fmt.Sprintf("func(_f %s) %s { return func(%s) rt.Frame { return rt.Sync(func() []any { %s }) } }(%s)",
 		e.syncType(u), e.startType(u), strings.Join(ps, ", "), body, expr)
 }
 
@@ -553,7 +588,9 @@ func (e *emitter) entry() {
 	if e.p.Cooperative {
 		e.use("core.task.spawn")
 		start := e.names.Symbol(e.p.Entry.Sym) + "()"
-		if !e.p.Entry.MaySuspend {
+		if e.native() && e.p.Entry.MaySuspend {
+			start = "rt.NativeTask(func(_t *rt.Task) []any { " + e.names.Symbol(e.p.Entry.Sym) + "(_t); return nil })"
+		} else if !e.p.Entry.MaySuspend {
 			start = "rt.Sync(func() []any { " + e.names.Symbol(e.p.Entry.Sym) + "(); return nil })"
 		}
 		run := "RunMain"
@@ -580,11 +617,14 @@ type fnEmitter struct {
 	used  map[string]bool
 	b     *bytes.Buffer
 	// frame is set when f is emitted as a resumable frame; locals are
-	// fields of fr.
+	// fields of _fr.
 	frame bool
+	// task is set when f is a native-pause function taking the task t.
+	task bool
 	// funcOf records the function a local holds when it was set by
 	// MakeClosure or MakeBound, for recover identity of deferred calls.
 	funcOf map[*ir.Local]*ir.Func
+	folds  *structure.Folds
 }
 
 func (e *emitter) localNames(f *ir.Func) *fnEmitter {
@@ -597,17 +637,27 @@ func (e *emitter) localNames(f *ir.Func) *fnEmitter {
 
 func (fe *fnEmitter) w(format string, args ...any) { fmt.Fprintf(fe.b, format, args...) }
 
-func (fe *fnEmitter) local(l *ir.Local) string {
-	if fe.frame {
-		return "fr." + fe.names[l]
+func (fe *fnEmitter) name(l *ir.Local) string {
+	if n, ok := fe.folds.Name(l); ok {
+		return n
 	}
 	return fe.names[l]
+}
+
+func (fe *fnEmitter) local(l *ir.Local) string {
+	if fe.frame {
+		return "_fr." + fe.name(l)
+	}
+	return fe.name(l)
 }
 
 // val renders an operand's current value.
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if v.Boxed {
 			return "(*" + fe.local(v) + ")"
 		}
@@ -716,13 +766,19 @@ func placeRootType(p *ir.Place) *ir.Type {
 
 func (e *emitter) signature(f *ir.Func, fe *fnEmitter, skipRecv bool) string {
 	var ps []string
+	if fe.task {
+		ps = append(ps, "_t *rt.Task")
+		for _, l := range f.Env {
+			ps = append(ps, fe.local(l)+" *"+e.typ(l.Type))
+		}
+	}
 	for i, p := range f.Params {
 		if skipRecv && i == 0 {
 			continue
 		}
 		name := fe.local(p)
 		if p.Boxed {
-			name = "p_" + name
+			name = "_p_" + name
 		}
 		t := e.typ(p.Type)
 		if f.Sig.Variadic && i == len(f.Params)-1 {
@@ -734,7 +790,7 @@ func (e *emitter) signature(f *ir.Func, fe *fnEmitter, skipRecv bool) string {
 	var rs []string
 	for i, r := range f.Results {
 		if hasDefer(f) {
-			rs = append(rs, fmt.Sprintf("gres%d %s", i, e.typ(r.Type)))
+			rs = append(rs, fmt.Sprintf("_res%d %s", i, e.typ(r.Type)))
 		} else {
 			rs = append(rs, e.typ(r.Type))
 		}
@@ -754,11 +810,12 @@ func (e *emitter) signature(f *ir.Func, fe *fnEmitter, skipRecv bool) string {
 
 func (e *emitter) function(f *ir.Func) {
 	e.p_("%s", e.lineDirective(f.Pos))
-	if f.MaySuspend {
+	if f.MaySuspend && !e.native() {
 		e.frameFunction(f)
 		return
 	}
 	fe := e.localNames(f)
+	fe.task = f.MaySuspend
 	var body bytes.Buffer
 	fe.b = &body
 	fe.body()
@@ -766,14 +823,14 @@ func (e *emitter) function(f *ir.Func) {
 		e.p_("func %s%s {\n", e.names.Symbol(f.Sym), e.signature(f, fe, false))
 		e.buf.Write(body.Bytes())
 		e.p_("}\n\n")
-		e.startMethod(f, false)
+		e.startMethod(f, f.MaySuspend)
 		return
 	}
 	if isMethod(f) {
 		r := f.Params[0]
 		rn := fe.local(r)
 		if r.Boxed {
-			rn = "p_" + rn
+			rn = "_p_" + rn
 		}
 		e.p_("func (%s %s) %s%s {\n", rn, e.typ(r.Type), e.methodName(f.MethodID, methodShortName(f)), e.signature(f, fe, true))
 	} else {
@@ -792,20 +849,33 @@ func (e *emitter) startMethod(f *ir.Func, isFrame bool) {
 	var ps, as []string
 	for i, p := range f.Params[1:] {
 		t := e.typ(p.Type)
-		a := fmt.Sprintf("a%d_", i)
+		a := fmt.Sprintf("_a%d", i)
 		if f.Sig.Variadic && i == len(f.Params)-2 {
 			t = "..." + e.typ(p.Type.U().Elem)
 			a += "..."
 		}
-		ps = append(ps, fmt.Sprintf("a%d_ %s", i, t))
+		ps = append(ps, fmt.Sprintf("_a%d %s", i, t))
 		as = append(as, a)
 	}
-	call := e.names.Symbol(f.Sym) + "(" + strings.Join(append([]string{"r_"}, as...), ", ") + ")"
+	if e.native() {
+		recv := []string{"_r"}
+		if isFrame {
+			recv = []string{"_t", "_r"}
+		}
+		call := e.names.Symbol(f.Sym) + "(" + strings.Join(append(recv, as...), ", ") + ")"
+		res := syncResults(e, f.Sig.U())
+		if res != "" {
+			res = " " + res
+		}
+		e.p_("func (_r %s) %s(%s)%s {\n%s\n}\n\n", e.typ(r.Type), e.methodName(f.MethodID, methodShortName(f)), strings.Join(append([]string{"_t *rt.Task"}, ps...), ", "), res, nativeBody(len(f.Results), call))
+		return
+	}
+	call := e.names.Symbol(f.Sym) + "(" + strings.Join(append([]string{"_r"}, as...), ", ") + ")"
 	body := "return " + call
 	if !isFrame {
 		body = "return rt.Sync(func() []any { " + syncFrameBody(len(f.Results), call) + " })"
 	}
-	e.p_("func (r_ %s) %s(%s) rt.Frame {\n%s\n}\n\n", e.typ(r.Type), e.methodName(f.MethodID, methodShortName(f)), strings.Join(ps, ", "), body)
+	e.p_("func (_r %s) %s(%s) rt.Frame {\n%s\n}\n\n", e.typ(r.Type), e.methodName(f.MethodID, methodShortName(f)), strings.Join(ps, ", "), body)
 }
 
 // frameFunction emits a suspending function as a resumable frame: a struct
@@ -813,9 +883,15 @@ func (e *emitter) startMethod(f *ir.Func, isFrame bool) {
 // and a Step method running the blocks until return or a pause point.
 func (e *emitter) frameFunction(f *ir.Func) {
 	fe := e.localNames(f)
-	ft := "frame_" + e.names.Symbol(f.Sym)
+	fe.frame = true
+	fe.analyze()
+	fe.frame = false
+	ft := e.names.Derived("frame", e.names.Symbol(f.Sym))
 	e.p_("type %s struct {\n\trt.FrameBase\n", ft)
 	for _, l := range f.Locals {
+		if fe.folds.Temp(l) {
+			continue
+		}
 		t := e.typ(l.Type)
 		if l.Boxed {
 			t = "*" + t
@@ -835,25 +911,25 @@ func (e *emitter) frameFunction(f *ir.Func) {
 		}
 		ps = append(ps, fe.names[l]+" "+t)
 	}
-	e.p_("func %s(%s) rt.Frame {\n\tfr := &%s{}\n", e.names.Symbol(f.Sym), strings.Join(ps, ", "), ft)
+	e.p_("func %s(%s) rt.Frame {\n\t_fr := &%s{}\n", e.names.Symbol(f.Sym), strings.Join(ps, ", "), ft)
 	for _, l := range inputs {
 		if l.Boxed && l.Kind != ir.LEnv {
-			e.p_("\tfr.%s = &%s\n", fe.names[l], fe.names[l])
+			e.p_("\t_fr.%s = &%s\n", fe.names[l], fe.names[l])
 		} else {
-			e.p_("\tfr.%s = %s\n", fe.names[l], fe.names[l])
+			e.p_("\t_fr.%s = %s\n", fe.names[l], fe.names[l])
 		}
 	}
-	e.p_("\treturn fr\n}\n\n")
+	e.p_("\treturn _fr\n}\n\n")
 	fe.frame = true
 	var rs []string
 	for _, r := range f.Results {
 		rs = append(rs, fe.val(r))
 	}
-	e.p_("func (fr *%s) Results() []any { return []any{%s} }\n\n", ft, strings.Join(rs, ", "))
+	e.p_("func (_fr *%s) Results() []any { return []any{%s} }\n\n", ft, strings.Join(rs, ", "))
 	var body bytes.Buffer
 	fe.b = &body
 	fe.frameBody()
-	e.p_("func (fr *%s) Step(t *rt.Task) {\n", ft)
+	e.p_("func (_fr *%s) Step(_t *rt.Task) {\n", ft)
 	e.buf.Write(body.Bytes())
 	e.p_("}\n\n")
 	if isMethod(f) {
@@ -876,40 +952,8 @@ func (fe *fnEmitter) scanFuncs() {
 }
 
 func (fe *fnEmitter) frameBody() {
-	f := fe.f
 	fe.scanFuncs()
-	targets := map[*ir.Block]bool{f.Blocks[0]: true}
-	var resumes []*ir.Block
-	for _, b := range f.Blocks {
-		if _, pause := b.Term.(*ir.Pause); !pause {
-			for _, s := range ir.Successors(b.Term) {
-				targets[s] = true
-			}
-		}
-		if b.ResumeOf != nil {
-			targets[b] = true
-			resumes = append(resumes, b)
-		}
-	}
-	fe.w("switch fr.PC {\ncase 0:\ngoto b0\n")
-	for _, b := range resumes {
-		fe.w("case %d:\ngoto b%d\n", b.ID, b.ID)
-	}
-	fe.w("}\n")
-	for _, b := range f.Blocks {
-		if targets[b] {
-			fe.w("b%d:\n", b.ID)
-		}
-		if b.ResumeOf != nil {
-			fe.resume(b.ResumeOf)
-		}
-		for _, in := range b.Instrs {
-			fe.line(in.Position())
-			fe.instr(in)
-		}
-		fe.line(b.Term.Position())
-		fe.term(b.Term)
-	}
+	fe.structured()
 }
 
 // resume assigns a paused operation's results from the task.
@@ -919,28 +963,28 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 	case *ir.Call:
 		for k, d := range i.Dsts {
 			if d != nil {
-				fe.w("%s = rt.As[%s](t.RV[%d])\n", fe.val(d), e.typ(d.Type), k)
+				fe.w("%s = rt.As[%s](_t.RV[%d])\n", fe.val(d), e.typ(d.Type), k)
 			}
 		}
 	case *ir.Recv:
 		if i.Dst != nil {
-			fe.w("%s = rt.As[%s](t.RV[0])\n", fe.val(i.Dst), e.typ(i.Dst.Type))
+			fe.w("%s = rt.As[%s](_t.RV[0])\n", fe.val(i.Dst), e.typ(i.Dst.Type))
 		}
 		if i.Ok != nil {
-			fe.w("%s = t.RV[1].(bool)\n", fe.val(i.Ok))
+			fe.w("%s = _t.RV[1].(bool)\n", fe.val(i.Ok))
 		}
 	case *ir.Select:
-		fe.w("%s = t.RV[0].(int)\n", fe.val(i.Index))
+		fe.w("%s = _t.RV[0].(int)\n", fe.val(i.Index))
 		for k, c := range i.Cases {
 			if c.Send || c.Dst == nil && c.Ok == nil {
 				continue
 			}
-			fe.w("if t.RV[0].(int) == %d {\n", k)
+			fe.w("if _t.RV[0].(int) == %d {\n", k)
 			if c.Dst != nil {
-				fe.w("%s = rt.As[%s](t.RV[1])\n", fe.val(c.Dst), e.typ(c.Dst.Type))
+				fe.w("%s = rt.As[%s](_t.RV[1])\n", fe.val(c.Dst), e.typ(c.Dst.Type))
 			}
 			if c.Ok != nil {
-				fe.w("%s = t.RV[2].(bool)\n", fe.val(c.Ok))
+				fe.w("%s = _t.RV[2].(bool)\n", fe.val(c.Ok))
 			}
 			fe.w("}\n")
 		}
@@ -951,25 +995,29 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 // operation, and return to the trampoline.
 func (fe *fnEmitter) pause(p *ir.Pause) {
 	e := fe.e
-	fe.w("fr.PC = %d\n", p.Next.ID)
+	if fe.task {
+		fe.nativePause(p)
+		return
+	}
+	fe.w("_fr.PC = %d\n", p.Next.ID)
 	switch i := p.Op.(type) {
 	case *ir.Call:
 		if i.Kind == ir.CallExtern {
 			e.use(i.Extern.Contract)
-			as := []string{"t"}
+			as := []string{"_t"}
 			for _, a := range i.Args {
 				as = append(as, fe.externArg(a))
 			}
 			fe.w("%s(%s)\n", e.externSym(i.Extern.Contract), strings.Join(as, ", "))
 		} else {
-			fe.w("rt.Call(t, %s)\n", fe.callExpr(i))
+			fe.w("rt.Call(_t, %s)\n", fe.callExpr(i))
 		}
 	case *ir.Send:
 		e.use("core.chan.send")
-		fe.w("%s.Send(t, %s)\n", fe.chanVal(i.Ch), fe.val(i.V))
+		fe.w("%s.Send(_t, %s)\n", fe.chanVal(i.Ch), fe.val(i.V))
 	case *ir.Recv:
 		e.use("core.chan.recv")
-		fe.w("%s.Recv(t)\n", fe.chanVal(i.Ch))
+		fe.w("%s.Recv(_t)\n", fe.chanVal(i.Ch))
 	case *ir.Select:
 		e.use("core.select")
 		var cs []string
@@ -980,11 +1028,90 @@ func (fe *fnEmitter) pause(p *ir.Pause) {
 				cs = append(cs, fmt.Sprintf("rt.RecvCase(%s)", fe.chanVal(c.Ch)))
 			}
 		}
-		fe.w("rt.Select(t, []rt.SelectCase{%s}, %v)\n", strings.Join(cs, ", "), i.Default)
+		fe.w("rt.Select(_t, []rt.SelectCase{%s}, %v)\n", strings.Join(cs, ", "), i.Default)
 	default:
 		panic(fmt.Sprintf("golang: pause on %T", p.Op))
 	}
 	fe.w("return\n")
+}
+
+// nativePause emits a pause point as a blocking operation: generated callees
+// return their results directly; runtime primitives leave them in t.RV
+// after rt.Wait hands the turn back to the scheduler while the task blocks.
+func (fe *fnEmitter) nativePause(p *ir.Pause) {
+	e := fe.e
+	switch i := p.Op.(type) {
+	case *ir.Call:
+		if i.Kind == ir.CallExtern {
+			e.use(i.Extern.Contract)
+			as := []string{"_t"}
+			for _, a := range i.Args {
+				as = append(as, fe.externArg(a))
+			}
+			fe.w("%s(%s)\nrt.Wait(_t)\n", e.externSym(i.Extern.Contract), strings.Join(as, ", "))
+			fe.resume(i)
+			break
+		}
+		var ds []string
+		for _, d := range i.Dsts {
+			ds = append(ds, fe.assignDst(d))
+		}
+		call := fe.taskCallExpr(i)
+		if len(ds) > 0 {
+			fe.w("%s = %s\n", strings.Join(ds, ", "), call)
+		} else {
+			fe.w("%s\n", call)
+		}
+	case *ir.Send:
+		e.use("core.chan.send")
+		fe.w("%s.Send(_t, %s)\nrt.Wait(_t)\n", fe.chanVal(i.Ch), fe.val(i.V))
+	case *ir.Recv:
+		e.use("core.chan.recv")
+		fe.w("%s.Recv(_t)\nrt.Wait(_t)\n", fe.chanVal(i.Ch))
+		fe.resume(i)
+	case *ir.Select:
+		e.use("core.select")
+		var cs []string
+		for _, c := range i.Cases {
+			if c.Send {
+				cs = append(cs, fmt.Sprintf("rt.Case(%s, true, %s)", fe.chanVal(c.Ch), fe.val(c.V)))
+			} else {
+				cs = append(cs, fmt.Sprintf("rt.RecvCase(%s)", fe.chanVal(c.Ch)))
+			}
+		}
+		fe.w("rt.Select(_t, []rt.SelectCase{%s}, %v)\nrt.Wait(_t)\n", strings.Join(cs, ", "), i.Default)
+		fe.resume(i)
+	default:
+		panic(fmt.Sprintf("golang: pause on %T", p.Op))
+	}
+}
+
+// taskCallExpr renders a call using the native-pause convention: the
+// current task is the first argument of a suspending callee.
+func (fe *fnEmitter) taskCallExpr(c *ir.Call) string {
+	switch c.Kind {
+	case ir.CallStatic:
+		if c.Func.MaySuspend {
+			return fe.e.names.Symbol(c.Func.Sym) + "(" + strings.Join(append([]string{"_t"}, fe.argList(c, c.Func.Sig, 0)...), ", ") + ")"
+		}
+	case ir.CallValue:
+		if fe.e.susp(c.Fn.IRType()) {
+			return fe.val(c.Fn) + "(" + strings.Join(append([]string{"_t"}, fe.argList(c, c.Fn.IRType().U(), 0)...), ", ") + ")"
+		}
+	case ir.CallInterface:
+		if fe.e.p.SuspMethods[c.Method] {
+			it := c.Recv.IRType().U()
+			var sig *ir.Type
+			name := c.Method
+			for _, m := range it.Methods {
+				if m.ID == c.Method {
+					sig, name = m.Sig, m.Name
+				}
+			}
+			return fe.val(c.Recv) + "." + fe.e.methodName(c.Method, name) + "(" + strings.Join(append([]string{"_t"}, fe.argList(c, sig, 0)...), ", ") + ")"
+		}
+	}
+	return fe.callExpr(c)
 }
 
 // externAdapts emits a capability call whose function-typed results must be
@@ -1001,7 +1128,7 @@ func (fe *fnEmitter) externAdapts(c *ir.Call) bool {
 	}
 	var tmps []string
 	for k := range c.Dsts {
-		tmps = append(tmps, fmt.Sprintf("x%d_", k))
+		tmps = append(tmps, fmt.Sprintf("_x%d", k))
 	}
 	fe.w("{\n%s := %s\n", strings.Join(tmps, ", "), fe.callExpr(c))
 	for k, d := range c.Dsts {
@@ -1026,10 +1153,11 @@ func (fe *fnEmitter) externArg(a ir.Value) string {
 	return v
 }
 
-// body writes local declarations and the block-structured body.
+// body writes local declarations and the structured body.
 func (fe *fnEmitter) body() {
 	f := fe.f
 	fe.scanFuncs()
+	fe.analyze()
 	params := map[*ir.Local]bool{}
 	for _, p := range f.Params {
 		params[p] = true
@@ -1038,7 +1166,7 @@ func (fe *fnEmitter) body() {
 		params[l] = true
 	}
 	for _, l := range f.Locals {
-		if params[l] && !l.Boxed {
+		if params[l] && !l.Boxed || fe.folds.Temp(l) {
 			continue
 		}
 		if params[l] && l.Boxed && containsLocal(f.Env, l) {
@@ -1052,34 +1180,112 @@ func (fe *fnEmitter) body() {
 	}
 	for _, p := range f.Params {
 		if p.Boxed {
-			fe.w("%s = &p_%s\n", fe.local(p), fe.local(p))
+			fe.w("%s = &_p_%s\n", fe.local(p), fe.local(p))
 		}
 	}
 	if hasDefer(f) && len(f.Results) > 0 {
 		// Runs after every source defer, so results reflect deferred writes.
 		fe.w("defer func() {\n")
 		for i, r := range f.Results {
-			fe.w("gres%d = %s\n", i, fe.val(r))
+			fe.w("_res%d = %s\n", i, fe.val(r))
 		}
 		fe.w("}()\n")
 	}
-	targets := map[*ir.Block]bool{}
-	for _, b := range f.Blocks {
-		for _, s := range ir.Successors(b.Term) {
-			targets[s] = true
+	fe.structured()
+}
+
+// analyze decides which temporaries fold into the expressions using them.
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Inline: fe.inline(), Order: structure.CallsInOrder}, goProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+func (fe *fnEmitter) inline() bool { return !fe.frame }
+
+var goSyntax = structure.Syntax{
+	Indent: "\t", If: "if %s {", ElseIf: "} else if %s {", Else: "} else {", End: "}",
+	Loop: "for {", While: "for %s {", LoopLabel: "%s:\n", LabelName: "L%d",
+	Break: "break", BreakTo: "break %s", Continue: "continue", ContinueTo: "continue %s",
+	Goto: "goto %s", Label: "%s:", Not: "!%s", And: "%s && %s", Or: "%s || %s",
+	EntryLabel: "b%d:", GotoEntry: "goto b%d",
+}
+
+// structured writes the function's control flow as structured statements;
+// resumable frames start with a switch to the block their task resumes at.
+func (fe *fnEmitter) structured() {
+	inline := fe.inline()
+	body := structure.Build(fe.f, structure.Options{Inline: inline, Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, inline) }})
+	syn := goSyntax
+	syn.Resume = func(heads []*ir.Block) string {
+		var b strings.Builder
+		b.WriteString("switch _fr.PC {\n")
+		for _, h := range heads {
+			fmt.Fprintf(&b, "case %d:\ngoto b%d\n", h.ID, h.ID)
 		}
+		b.WriteString("}")
+		return b.String()
 	}
-	for _, b := range f.Blocks {
-		if targets[b] {
-			fe.w("b%d:\n", b.ID)
+	fe.w("%s", structure.Resolve(structure.Print(body, syn, goEmitter{fe}, 0)))
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	var b bytes.Buffer
+	fe.b = &b
+	fn()
+	fe.b = saved
+	return b.String()
+}
+
+// goEmitter prints the target-specific statements of a structured body.
+type goEmitter struct{ fe *fnEmitter }
+
+func (g goEmitter) Code(b *ir.Block) string {
+	fe := g.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil && fe.frame {
+			fe.resume(b.ResumeOf)
 		}
 		for _, in := range b.Instrs {
+			if fe.folds.Folded(in) {
+				continue
+			}
 			fe.line(in.Position())
 			fe.instr(in)
 		}
-		fe.line(b.Term.Position())
-		fe.term(b.Term)
+	})
+}
+
+func (g goEmitter) Leaf(b *ir.Block, t ir.Terminator) string {
+	return g.fe.capture(func() {
+		g.fe.line(t.Position())
+		g.fe.term(t)
+	})
+}
+
+func (g goEmitter) Pause(p *ir.Pause) string {
+	if g.fe.folds.FoldedPause(p) {
+		return ""
 	}
+	return g.fe.capture(func() {
+		g.fe.line(p.Position())
+		g.fe.nativePause(p)
+	})
+}
+
+func (g goEmitter) Cond(v ir.Value) string    { return g.fe.val(v) }
+func (g goEmitter) Mark(pos token.Pos) string { return g.fe.e.lineDirective(pos) }
+
+// goProbe renders statements for fold analysis.
+type goProbe struct{ fe *fnEmitter }
+
+func (g goProbe) Instr(in ir.Instr) string { return g.fe.capture(func() { g.fe.instr(in) }) }
+func (g goProbe) Pause(p *ir.Pause) string { return g.fe.capture(func() { g.fe.nativePause(p) }) }
+func (g goProbe) Cond(v ir.Value) string   { return g.fe.val(v) }
+func (g goProbe) Assign(l *ir.Local) (string, string) {
+	return g.fe.val(l) + " = ", ""
+}
+func (g goProbe) Leaf(b *ir.Block, t ir.Terminator) string {
+	return g.fe.capture(func() { g.fe.term(t) })
 }
 
 // line emits a line directive so compiler and runtime positions refer to
@@ -1089,7 +1295,7 @@ func (fe *fnEmitter) line(pos token.Pos) {
 }
 
 func (e *emitter) lineDirective(pos token.Pos) string {
-	if !pos.IsValid() || e.p.Fset == nil {
+	if !pos.IsValid() || e.p.Fset == nil || e.p.NoLineDirectives {
 		return ""
 	}
 	p := e.p.Fset.Position(pos)
@@ -1117,6 +1323,10 @@ func (fe *fnEmitter) assignDst(l *ir.Local) string {
 }
 
 func (fe *fnEmitter) args(c *ir.Call, sig *ir.Type, skip int) string {
+	return strings.Join(fe.argList(c, sig, skip), ", ")
+}
+
+func (fe *fnEmitter) argList(c *ir.Call, sig *ir.Type, skip int) []string {
 	var as []string
 	for i, a := range c.Args {
 		s := fe.val(a)
@@ -1125,7 +1335,7 @@ func (fe *fnEmitter) args(c *ir.Call, sig *ir.Type, skip int) string {
 		}
 		as = append(as, s)
 	}
-	return strings.Join(as[skip:], ", ")
+	return as[skip:]
 }
 
 func (fe *fnEmitter) callExpr(c *ir.Call) string {
@@ -1217,6 +1427,14 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.New:
 		fe.w("%s = new(%s)\n", fe.val(i.Dst), e.typ(i.Dst.Type.U().Elem))
 	case *ir.UnOp:
+		if x, ok := i.X.(*ir.Local); ok && i.Op == ir.Not {
+			if d, ok := fe.folds.Def(x); ok {
+				if b, ok := d.(*ir.BinOp); ok && (b.Op == ir.Eq || b.Op == ir.Ne) {
+					fe.w("%s = %s\n", fe.val(i.Dst), fe.binExpr(b, map[ir.BinOpKind]ir.BinOpKind{ir.Eq: ir.Ne, ir.Ne: ir.Eq}[b.Op]))
+					return
+				}
+			}
+		}
 		op := map[ir.UnOpKind]string{ir.Neg: "-", ir.Not: "!", ir.BitNot: "^"}[i.Op]
 		fe.w("%s = %s%s\n", fe.val(i.Dst), op, fe.val(i.X))
 	case *ir.BinOp:
@@ -1228,14 +1446,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 				fe.w("%s = %s(%s %s %s)\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.val(i.X), i.Op, fe.val(i.Y))
 				break
 			}
-			x, y := fe.val(i.X), fe.val(i.Y)
-			if c, ok := i.X.(*ir.Const); ok && c.Nil && !nilWrapper(i.X.IRType()) {
-				x = "nil"
-			}
-			if c, ok := i.Y.(*ir.Const); ok && c.Nil && !nilWrapper(i.Y.IRType()) {
-				y = "nil"
-			}
-			fe.w("%s = %s %s %s\n", fe.val(i.Dst), x, i.Op, y)
+			fe.w("%s = %s\n", fe.val(i.Dst), fe.binExpr(i, i.Op))
 		}
 	case *ir.Convert:
 		switch i.Kind {
@@ -1252,7 +1463,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.MakeInterface:
 		fe.w("%s = %s(%s)\n", fe.val(i.Dst), parenType(e.typ(i.Dst.Type)), fe.val(i.X))
 	case *ir.TypeAssert:
-		ok := "ok_"
+		ok := "_ok"
 		if i.Ok != nil {
 			fe.w("%s, %s = %s.(%s)\n", fe.val(i.Dst), fe.val(i.Ok), fe.val(i.X), e.typ(i.T))
 			return
@@ -1398,6 +1609,10 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			fe.frameDefer(i.Call)
 			return
 		}
+		if fe.task {
+			fe.nativeDefer(i.Call)
+			return
+		}
 		fe.w("defer %s\n", fe.callExpr(i.Call))
 	case *ir.Recover:
 		switch {
@@ -1409,7 +1624,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			fe.w("%s = recover()\n", fe.val(i.Dst))
 		}
 	case *ir.Rebind:
-		fe.w("{\nn_ := new(%s)\n*n_ = *%s\n%s = n_\n}\n", e.typ(i.L.Type), fe.local(i.L), fe.local(i.L))
+		fe.w("{\n_n := new(%s)\n*_n = *%s\n%s = _n\n}\n", e.typ(i.L.Type), fe.local(i.L), fe.local(i.L))
 	case *ir.BoxParam:
 	case *ir.MakeChan:
 		e.use("core.chan.make")
@@ -1430,6 +1645,18 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	}
 }
 
+// binExpr renders a non-float binary operation with operator op.
+func (fe *fnEmitter) binExpr(i *ir.BinOp, op ir.BinOpKind) string {
+	x, y := fe.val(i.X), fe.val(i.Y)
+	if c, ok := i.X.(*ir.Const); ok && c.Nil && !nilWrapper(i.X.IRType()) {
+		x = "nil"
+	}
+	if c, ok := i.Y.(*ir.Const); ok && c.Nil && !nilWrapper(i.Y.IRType()) {
+		y = "nil"
+	}
+	return x + " " + op.String() + " " + y
+}
+
 // chanVal renders a channel operand as the runtime channel type.
 func (fe *fnEmitter) chanVal(v ir.Value) string {
 	t := v.IRType()
@@ -1444,7 +1671,7 @@ func (fe *fnEmitter) chanVal(v ir.Value) string {
 // the call rendered with the bound names.
 func (fe *fnEmitter) bindCall(c *ir.Call) (params, args []string, call string) {
 	bind := func(v ir.Value, t string) string {
-		name := fmt.Sprintf("g%d_", len(params))
+		name := fmt.Sprintf("_g%d", len(params))
 		params = append(params, name+" "+t)
 		args = append(args, fe.val(v))
 		return name
@@ -1486,7 +1713,7 @@ func (fe *fnEmitter) bindCall(c *ir.Call) (params, args []string, call string) {
 		fe.e.use(c.Extern.Contract)
 		call = fe.e.externSym(c.Extern.Contract) + "(" + strings.Join(callArgs, ", ") + ")"
 		if c.Suspends {
-			call = "rt.NativeFrame(func(t *rt.Task) { " + fe.e.externSym(c.Extern.Contract) + "(" + strings.Join(append([]string{"t"}, callArgs...), ", ") + ") })"
+			call = "rt.NativeFrame(func(_t *rt.Task) { " + fe.e.externSym(c.Extern.Contract) + "(" + strings.Join(append([]string{"_t"}, callArgs...), ", ") + ") })"
 		}
 	}
 	return params, args, call
@@ -1494,12 +1721,87 @@ func (fe *fnEmitter) bindCall(c *ir.Call) (params, args []string, call string) {
 
 // goStmt starts a task running the evaluated call.
 func (fe *fnEmitter) goStmt(c *ir.Call) {
+	if fe.e.native() && c.Suspends {
+		params, args, call := fe.bindTaskCall(c)
+		fe.w("func(%s) {\nrt.Spawn(rt.NativeTask(func(_t *rt.Task) []any { %s; return nil }))\n}(%s)\n", strings.Join(params, ", "), call, strings.Join(args, ", "))
+		return
+	}
 	params, args, call := fe.bindCall(c)
 	frame := call
 	if !c.Suspends {
 		frame = "rt.Sync(func() []any { " + call + "; return nil })"
 	}
 	fe.w("func(%s) {\nrt.Spawn(%s)\n}(%s)\n", strings.Join(params, ", "), frame, strings.Join(args, ", "))
+}
+
+// bindTaskCall binds an evaluated suspending callee and arguments like
+// bindCall; the call takes the task t and waits on runtime primitives.
+func (fe *fnEmitter) bindTaskCall(c *ir.Call) (params, args []string, call string) {
+	bind := func(v ir.Value, t string) string {
+		name := fmt.Sprintf("_g%d", len(params))
+		params = append(params, name+" "+t)
+		args = append(args, fe.val(v))
+		return name
+	}
+	var sig *ir.Type
+	switch c.Kind {
+	case ir.CallStatic:
+		sig = c.Func.Sig
+	case ir.CallValue:
+		sig = c.Fn.IRType().U()
+	case ir.CallExtern:
+		sig = c.Extern.Sig
+	default:
+		panic("golang: interface call in go or defer")
+	}
+	callArgs := []string{"_t"}
+	for j, a := range c.Args {
+		t := a.IRType()
+		if j < len(sig.Params) {
+			t = sig.Params[j]
+		}
+		n := bind(a, fe.e.typ(t))
+		if sig.Variadic && j == len(c.Args)-1 {
+			n += "..."
+		}
+		callArgs = append(callArgs, n)
+	}
+	switch c.Kind {
+	case ir.CallStatic:
+		call = fe.e.names.Symbol(c.Func.Sym) + "(" + strings.Join(callArgs, ", ") + ")"
+	case ir.CallValue:
+		f := bind(c.Fn, fe.e.typ(c.Fn.IRType()))
+		call = f + "(" + strings.Join(callArgs, ", ") + ")"
+	case ir.CallExtern:
+		fe.e.use(c.Extern.Contract)
+		call = fe.e.externSym(c.Extern.Contract) + "(" + strings.Join(callArgs, ", ") + "); rt.Wait(_t)"
+	}
+	return params, args, call
+}
+
+// nativeDefer defers a call through rt.Defer, which keeps the frame model's
+// panic chain and recover identity on the native stack.
+func (fe *fnEmitter) nativeDefer(c *ir.Call) {
+	params, args, call := fe.bindCall(c)
+	if c.Suspends {
+		params, args, call = fe.bindTaskCall(c)
+	}
+	fid := fe.deferFid(c)
+	fe.w("defer rt.Defer(_t, %d, func(%s) func() { return func() { %s } }(%s))\n", fid, strings.Join(params, ", "), call, strings.Join(args, ", "))
+}
+
+func (fe *fnEmitter) deferFid(c *ir.Call) int {
+	switch c.Kind {
+	case ir.CallStatic:
+		return c.Func.ID
+	case ir.CallValue:
+		if l, ok := c.Fn.(*ir.Local); ok {
+			if f := fe.funcOf[l]; f != nil {
+				return f.ID
+			}
+		}
+	}
+	return -1
 }
 
 // frameDefer registers a deferred call on the frame for the runtime to run.
@@ -1520,7 +1822,7 @@ func (fe *fnEmitter) frameDefer(c *ir.Call) {
 	if c.Suspends {
 		d = fmt.Sprintf("rt.Deferred{Start: func() rt.Frame { return %s }, Fid: %d}", call, fid)
 	}
-	fe.w("fr.Defers = append(fr.Defers, func(%s) rt.Deferred { return %s }(%s))\n", strings.Join(params, ", "), d, strings.Join(args, ", "))
+	fe.w("_fr.Defers = append(_fr.Defers, func(%s) rt.Deferred { return %s }(%s))\n", strings.Join(params, ", "), d, strings.Join(args, ", "))
 }
 
 // makeBound creates a method value bound to an evaluated receiver.
@@ -1533,9 +1835,15 @@ func (fe *fnEmitter) makeBound(i *ir.MakeBound) {
 	}
 	u := dt.U()
 	ps, as := e.forward(u)
-	call := e.funcRef(i.Func) + "(" + strings.Join(append([]string{"r_"}, as...), ", ") + ")"
+	call := e.funcRef(i.Func) + "(" + strings.Join(append([]string{"_r"}, as...), ", ") + ")"
 	var lit string
 	switch {
+	case e.native() && e.susp(dt):
+		recv := []string{"_r"}
+		if i.Func.MaySuspend {
+			recv = []string{"_t", "_r"}
+		}
+		lit = fmt.Sprintf("func(%s) %s { %s }", strings.Join(append([]string{"_t *rt.Task"}, ps...), ", "), syncResults(e, u), nativeBody(len(u.Results), e.funcRef(i.Func)+"("+strings.Join(append(recv, as...), ", ")+")"))
 	case e.susp(dt) && i.Func.MaySuspend:
 		lit = fmt.Sprintf("func(%s) rt.Frame { return %s }", strings.Join(ps, ", "), call)
 	case e.susp(dt):
@@ -1545,7 +1853,7 @@ func (fe *fnEmitter) makeBound(i *ir.MakeBound) {
 	default:
 		lit = fmt.Sprintf("func(%s) %s { return %s }", strings.Join(ps, ", "), syncResults(e, u), call)
 	}
-	fe.w("%s = func(r_ %s) %s { return %s }(%s)\n", fe.val(i.Dst), e.typ(i.Recv.IRType()), e.typ(dt), lit, fe.val(i.Recv))
+	fe.w("%s = func(_r %s) %s { return %s }(%s)\n", fe.val(i.Dst), e.typ(i.Recv.IRType()), e.typ(dt), lit, fe.val(i.Recv))
 }
 
 // mapVal renders a map operand as the runtime map type, converting named
@@ -1568,15 +1876,11 @@ func parenType(t string) string {
 
 func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.w("goto b%d\n", t.Target.ID)
-	case *ir.If:
-		fe.w("if %s {\ngoto b%d\n}\ngoto b%d\n", fe.val(t.Cond), t.Then.ID, t.Else.ID)
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
 		if fe.frame {
-			fe.w("rt.Ret(t, fr)\nreturn\n")
+			fe.w("rt.Ret(_t, _fr)\nreturn\n")
 			return
 		}
 		if hasDefer(fe.f) {
@@ -1608,12 +1912,17 @@ func (fe *fnEmitter) closure(i *ir.MakeClosure) {
 		u := f.Sig.U()
 		var envPs, envAs, call []string
 		for j, l := range f.Env {
-			envPs = append(envPs, fmt.Sprintf("e%d_ *%s", j, e.typ(l.Type)))
+			envPs = append(envPs, fmt.Sprintf("_e%d *%s", j, e.typ(l.Type)))
 			envAs = append(envAs, fe.local(i.Env[j]))
-			call = append(call, fmt.Sprintf("e%d_", j))
+			call = append(call, fmt.Sprintf("_e%d", j))
 		}
 		ps, as := e.forward(u)
 		call = append(call, as...)
+		if e.native() {
+			fe.w("%s = func(%s) %s { return func(%s) %s { %s } }(%s)\n", fe.val(i.Dst), strings.Join(envPs, ", "),
+				e.startType(u), strings.Join(append([]string{"_t *rt.Task"}, ps...), ", "), syncResults(e, u), nativeBody(len(u.Results), fe.e.names.Symbol(f.Sym)+"("+strings.Join(append([]string{"_t"}, call...), ", ")+")"), strings.Join(envAs, ", "))
+			return
+		}
 		fe.w("%s = func(%s) %s { return func(%s) rt.Frame { return %s(%s) } }(%s)\n", fe.val(i.Dst), strings.Join(envPs, ", "),
 			e.startType(u), strings.Join(ps, ", "), fe.e.names.Symbol(f.Sym), strings.Join(call, ", "), strings.Join(envAs, ", "))
 		return

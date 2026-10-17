@@ -38,6 +38,7 @@ type Registry struct {
 
 func NewRegistry(cat *contracts.Catalog) *Registry {
 	r := &Registry{Symbols: map[string]string{}, Packages: map[string]bool{}, Opaque: map[string]bool{}, Suspends: map[string]bool{}}
+	r.Opaque[TaskPackage+".FutureState"] = true
 	if cat == nil {
 		return r
 	}
@@ -85,6 +86,9 @@ func SymbolKey(obj types.Object) string {
 func (r *Registry) External(obj types.Object) bool {
 	if obj.Pkg() == nil {
 		return false
+	}
+	if TaskIntrinsic(obj) != "" || obj.Pkg().Path() == TaskPackage && obj.Name() == "Future" {
+		return true
 	}
 	lib := r.Packages[obj.Pkg().Path()] || strings.HasPrefix(obj.Pkg().Path(), LibModule)
 	switch o := obj.(type) {

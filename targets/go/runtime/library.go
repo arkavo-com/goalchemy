@@ -280,9 +280,7 @@ func runLibrary(ctx context.Context, callbacks Callbacks, state *LibraryState, h
 	main := &Task{Frame: frame, deferTarget: -1}
 	s.main = main
 	s.ready(main)
-	for !main.done {
-		s.run(s.next())
-	}
+	s.drive()
 	rv = frame.Results()
 	// A canceled root cannot report successful partial plaintext/results.
 	if ctx.Err() != nil {

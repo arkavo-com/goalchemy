@@ -42,7 +42,7 @@ func TestPackageOutput(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			p := *res.IR
-			p.CompactNames = compact
+			p.Names = testutil.Names(compact)
 			output, err := java.Emit(&p, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -87,7 +87,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, f := range p.Funcs {
 				count := 0
-				declaration := regexp.MustCompile(`(?m)^\s+static [^\n(]+ ` + regexp.QuoteMeta(naming.Symbol(&p, f.Sym)) + `\(`)
+				declaration := regexp.MustCompile(`(?m)^\s+static [^\n(]+ ` + regexp.QuoteMeta(naming.New(&p, java.NameRules(&p)).Symbol(f.Sym)) + `\(`)
 				for _, file := range output.Files {
 					if declaration.Match(file.Source) {
 						count++
@@ -102,7 +102,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, global := range p.Globals {
 				count := 0
-				declaration := naming.Symbol(&p, global.Sym) + " = "
+				declaration := naming.New(&p, java.NameRules(&p)).Symbol(global.Sym) + " = "
 				for _, file := range output.Files {
 					for _, line := range strings.Split(string(file.Source), "\n") {
 						if strings.Contains(line, declaration) && strings.HasPrefix(strings.TrimSpace(line), "static ") {
@@ -119,7 +119,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, typ := range p.Types.All {
 				if typ.Boxed {
-					if count := strings.Count(combined, naming.Type(&p, typ, "TD$")+" = "); count != 1 {
+					if count := strings.Count(combined, naming.New(&p, java.NameRules(&p)).Type(typ, "TD$")+" = "); count != 1 {
 						t.Fatalf("descriptor %d bindings %d", typ.ID, count)
 					}
 				}
@@ -132,14 +132,14 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, global := range p.Globals {
 				if strings.HasSuffix(global.Pkg, "/first/value") && global.Name == "Counter" {
-					reference := strings.TrimSuffix(owned[global.Pkg], ".java") + "." + naming.Symbol(&p, global.Sym)
+					reference := strings.TrimSuffix(owned[global.Pkg], ".java") + "." + naming.New(&p, java.NameRules(&p)).Symbol(global.Sym)
 					if !strings.Contains(worker, reference) {
 						t.Fatal("worker lacks qualified live package storage")
 					}
 				}
 			}
 			out := t.TempDir()
-			if ds := driver.EmitWithOptions("java", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("java", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			data, err := os.ReadFile(filepath.Join(out, "goalchemy.manifest.json"))
@@ -218,7 +218,7 @@ func checkDeclarationMap(t *testing.T, p *ir.Program, source []byte, owner, out,
 	}
 	for _, global := range p.Globals {
 		if global.Pkg == owner {
-			declaration := naming.Symbol(p, global.Sym) + " = "
+			declaration := naming.New(p, java.NameRules(p)).Symbol(global.Sym) + " = "
 			for index, line := range strings.Split(string(source), "\n") {
 				if strings.Contains(line, declaration) && strings.HasPrefix(strings.TrimSpace(line), "static ") {
 					expected := p.Fset.Position(global.Pos)

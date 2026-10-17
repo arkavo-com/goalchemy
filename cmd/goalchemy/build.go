@@ -20,7 +20,9 @@ func runBuild(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fs.SetOutput(stderr)
 	cfgPath := fs.String("config", project.FileName, "project configuration file")
 	asJSON := fs.Bool("json", false, "write diagnostics as JSON")
-	compactNames := fs.Bool("compact-names", false, "override compact_names in the project configuration")
+	nf := registerNameFlags(fs)
+	pauseModel := fs.String("pause-model", "frames", "override pause_model in the project configuration: frames or native")
+	lineDirectives := fs.Bool("line-directives", true, "override line_directives in the project configuration")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -29,9 +31,17 @@ func runBuild(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stderr, "goalchemy build:", err)
 		return 2
 	}
+	names, collisions, err := nf.resolve(fs, cfg.NameMode(), cfg.NameCollisions)
+	if err != nil {
+		fmt.Fprintln(stderr, "goalchemy build:", err)
+		return 2
+	}
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "compact-names" {
-			cfg.CompactNames = *compactNames
+		if f.Name == "pause-model" {
+			cfg.PauseModel = *pauseModel
+		}
+		if f.Name == "line-directives" {
+			cfg.LineDirectives = lineDirectives
 		}
 	})
 	res, ds := driver.Build(ctx, driver.Options{Dir: cfg.Dir, Patterns: cfg.Packages, Tags: cfg.Tags, Gate: subset.Gate(cfg.Gate)})
@@ -46,7 +56,7 @@ func runBuild(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		if eds := driver.EmitWithOptions(t, res, out, driver.EmitOptions{CompactNames: cfg.CompactNames}); len(eds) > 0 {
+		if eds := driver.EmitWithOptions(t, res, out, driver.EmitOptions{Names: names, NameCollisions: collisions, PauseModel: cfg.PauseModel, NoLineDirectives: cfg.LineDirectives != nil && !*cfg.LineDirectives}); len(eds) > 0 {
 			_ = diagnostics.Write(stderr, eds, *asJSON)
 			return 1
 		}
@@ -63,8 +73,15 @@ func runRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	sf.register(fs)
 	target := fs.String("target", "typescript", "target to run")
 	keep := fs.Bool("keep", false, "keep the generated directory and print its path")
-	compactNames := fs.Bool("compact-names", false, "use short private generated identifiers")
+	nf := registerNameFlags(fs)
+	pauseModel := fs.String("pause-model", "frames", "suspending function form: frames or native")
+	lineDirectives := fs.Bool("line-directives", true, "annotate generated code with source positions")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	names, collisions, err := nf.resolve(fs, "", "")
+	if err != nil {
+		fmt.Fprintln(stderr, "goalchemy run:", err)
 		return 2
 	}
 	res, ds := driver.Build(ctx, driver.Options{Dir: sf.dir, Patterns: fs.Args(), Tags: sf.tagList(), Gate: subset.Gate(sf.gate)})
@@ -83,7 +100,7 @@ func runRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	} else {
 		defer os.RemoveAll(out)
 	}
-	if eds := driver.EmitWithOptions(*target, res, out, driver.EmitOptions{CompactNames: *compactNames}); len(eds) > 0 {
+	if eds := driver.EmitWithOptions(*target, res, out, driver.EmitOptions{Names: names, NameCollisions: collisions, PauseModel: *pauseModel, NoLineDirectives: !*lineDirectives}); len(eds) > 0 {
 		_ = diagnostics.Write(stderr, eds, sf.json)
 		return 1
 	}

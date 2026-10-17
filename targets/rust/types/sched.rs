@@ -120,13 +120,22 @@ pub struct HostPending {
 pub type Step = fn(&Rc<Task>, &Rc<Frame>);
 pub type Results = fn(&Frame) -> Vec<V>;
 
+pub type NativeFuture = std::pin::Pin<Box<dyn std::future::Future<Output = V>>>;
+pub struct NativeBody {
+    pub start: Option<Box<dyn FnOnce(Rc<Task>) -> NativeFuture>>,
+    pub future: Option<NativeFuture>,
+    pub results: usize,
+}
+
 pub struct Frame {
+    pub native: RefCell<Option<NativeBody>>,
     pub l: Fr,
     pub pc: Cell<u32>,
     pub parent: RefCell<Option<Rc<Frame>>>,
     pub panicking: RefCell<V>,
     pub step: Step,
     pub results: Results,
+    pub completion: Cell<Option<fn(&Rc<Task>, &Rc<Frame>, V)>>,
     /// Links used by runtime frames (defer runners).
     pub a: RefCell<Option<Rc<Frame>>>,
     pub b: RefCell<Option<Rc<Frame>>>,
@@ -141,12 +150,14 @@ fn no_results(_: &Frame) -> Vec<V> {
 impl Frame {
     pub fn new(n: usize, step: Step, results: Option<Results>) -> Rc<Frame> {
         Rc::new(Frame {
+            native: RefCell::new(None),
             l: Fr::unrooted(n),
             pc: Cell::new(0),
             parent: RefCell::new(None),
             panicking: RefCell::new(V::Nil),
             step,
             results: results.unwrap_or(no_results),
+            completion: Cell::new(None),
             a: RefCell::new(None),
             b: RefCell::new(None),
             prim: RefCell::new(None),
@@ -155,6 +166,8 @@ impl Frame {
 }
 
 pub struct Task {
+    pub native_roots: RefCell<Vec<*mut FrData>>,
+    pub native_depth: Cell<usize>,
     pub id: usize,
     pub owner: Cell<u64>,
     pub thread: ThreadId,
@@ -176,6 +189,8 @@ pub struct Task {
 impl Task {
     pub fn new(id: usize, frame: Option<Rc<Frame>>) -> Rc<Task> {
         Rc::new(Task {
+            native_roots: RefCell::new(Vec::new()),
+            native_depth: Cell::new(0),
             id,
             owner: Cell::new(0), thread: std::thread::current().id(), retired: Cell::new(false),
             cleanup_roots: RefCell::new(Vec::new()),
@@ -224,6 +239,7 @@ pub struct Sched {
     pub thread: ThreadId, pub epoch: Option<Instant>,
     pub mailbox: Arc<HostMailbox>, pub pending: BTreeMap<u64, HostPending>, pub operation: u64,
     pub contexts: Vec<V>,
+    pub unawaited: Vec<(V, V)>,
     /// Independently removable roots also cover a decoder while it runs outside
     /// the scheduler borrow. Never hold a LIFO TempRoots for operation lifetime.
     pub host_roots: BTreeMap<u64, Vec<V>>,
@@ -249,7 +265,7 @@ impl Sched {
             harness,
             owner, domain: owner, active: true, retiring: false, thread: std::thread::current().id(), epoch: None,
             mailbox: HostMailbox::new(owner), pending: BTreeMap::new(), operation: 0,
-            contexts: Vec::new(), host_roots: BTreeMap::new(),
+            contexts: Vec::new(), host_roots: BTreeMap::new(), unawaited: Vec::new(),
         }
     }
 }
@@ -279,6 +295,7 @@ pub fn trace_sched(out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) {
             trace_task(t, out, frames);
         }
         out.extend(s.contexts.iter().cloned());
+        for (future, panic) in &s.unawaited { out.push(future.clone()); out.push(panic.clone()); }
         for roots in s.host_roots.values() { out.extend(roots.iter().cloned()); }
         for p in s.pending.values() {
             trace_task(&p.task, out, frames);

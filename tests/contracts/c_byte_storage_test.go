@@ -21,14 +21,14 @@ func TestCByteValuesNativeOracle(t *testing.T) {
 }
 func TestCByteStorage(t *testing.T) {
 	outDir := t.TempDir()
-	if ds := testutil.CompileGate("../language/testdata/byte_storage", "c", outDir, "sequential"); len(ds) > 0 {
+	if ds := testutil.CompileGateOptions("../language/testdata/byte_storage", "c", outDir, "sequential", driver.EmitOptions{Names: "readable"}); len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	src, err := testutil.GeneratedSource(outDir, ".c")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"gx_byte_array(4)", "gx_byte_array_clone(x, 4)", "gx_byte_array_set(d, s, 4)", "gx_byte_array_eq(a, b, 4)", "gx_byte_array_key(a, 4, out)", "gx_nil_byte_slice()", "gx_make_byte_slice(", "gx_append_bytes(", "(const uint8_t[]){", "(uint8_t)gx_i(", "gx_make_slice("} {
+	for _, want := range []string{"gx_byte_array(4)", "gx_byte_array_clone(_x, 4)", "gx_byte_array_set(_d, _s, 4)", "gx_byte_array_eq(_a, _b, 4)", "gx_byte_array_key(_a, 4, _out)", "gx_nil_byte_slice()", "gx_make_byte_slice(", "gx_append_bytes(", "(const uint8_t[]){", "(uint8_t)gx_i(", "gx_make_slice("} {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("emitted byte program lacks %q", want)
 		}

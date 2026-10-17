@@ -20,12 +20,19 @@ type Target struct {
 }
 
 type Config struct {
-	SchemaVersion int               `json:"schema_version"`
-	Packages      []string          `json:"packages"`
-	Tags          []string          `json:"tags,omitempty"`
-	Gate          string            `json:"gate,omitempty"`
-	CompactNames  bool              `json:"compact_names,omitempty"`
-	Targets       map[string]Target `json:"targets"`
+	SchemaVersion int      `json:"schema_version"`
+	Packages      []string `json:"packages"`
+	Tags          []string `json:"tags,omitempty"`
+	Gate          string   `json:"gate,omitempty"`
+	// Names is source (the default), readable or compact; compact_names is
+	// the older spelling of names: compact.
+	Names          string `json:"names,omitempty"`
+	NameCollisions string `json:"name_collisions,omitempty"`
+	CompactNames   bool   `json:"compact_names,omitempty"`
+	PauseModel     string `json:"pause_model,omitempty"`
+	// LineDirectives, when false, omits source annotations; nil means on.
+	LineDirectives *bool             `json:"line_directives,omitempty"`
+	Targets        map[string]Target `json:"targets"`
 
 	// Dir is the directory containing the configuration file.
 	Dir string `json:"-"`
@@ -62,6 +69,24 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: target %s needs an out directory", path, name)
 		}
 	}
+	switch c.PauseModel {
+	case "", "frames", "native":
+	default:
+		return nil, fmt.Errorf("%s: unknown pause_model %q", path, c.PauseModel)
+	}
+	switch c.Names {
+	case "", "source", "readable", "compact":
+	default:
+		return nil, fmt.Errorf("%s: unknown names %q", path, c.Names)
+	}
+	if c.CompactNames && c.Names != "" && c.Names != "compact" {
+		return nil, fmt.Errorf("%s: compact_names conflicts with names: %s", path, c.Names)
+	}
+	switch c.NameCollisions {
+	case "", "rename", "fail":
+	default:
+		return nil, fmt.Errorf("%s: unknown name_collisions %q", path, c.NameCollisions)
+	}
 	switch c.Gate {
 	case "", "sequential", "cooperative":
 	default:
@@ -70,6 +95,14 @@ func Load(path string) (*Config, error) {
 	abs, _ := filepath.Abs(path)
 	c.Dir = filepath.Dir(abs)
 	return &c, nil
+}
+
+// NameMode returns the configured names mode; empty means the default.
+func (c *Config) NameMode() string {
+	if c.Names == "" && c.CompactNames {
+		return "compact"
+	}
+	return c.Names
 }
 
 // TargetNames returns configured targets in sorted order.

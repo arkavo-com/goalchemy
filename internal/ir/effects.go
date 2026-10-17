@@ -64,7 +64,7 @@ func ComputeEffects(p *Program) {
 				case *Send, *Recv, *Select, *Go, *MakeChan, *Close:
 					p.Cooperative = true
 				}
-				if c, ok := in.(*Call); ok && c.Kind == CallExtern && c.Extern.MaySuspend {
+				if c, ok := in.(*Call); ok && c.Kind == CallExtern && (c.Extern.MaySuspend || c.Extern.Contract == "lib.task.start") {
 					p.Cooperative = true
 				}
 				if direct(in) {

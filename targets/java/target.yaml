@@ -21,7 +21,7 @@ representations:
   - {type: type.function, contract_version: 1.0.0, representation: "Fn objects with boxed arguments, tagged with an identity for recover; nil is null."}
   - {type: type.error, contract_version: 1.0.0, representation: "Interface Boxes; runtime errors use the RUNTIME_ERROR, PLAIN_ERROR, and TYPE_ASSERTION_ERROR descriptors (types/Panics.java)."}
   - {type: type.channel, contract_version: 1.0.0, representation: "Chan objects with a buffer and FIFO wait queues (runtime/ChanMake.java); null is the nil channel."}
-  - {type: type.task, contract_version: 1.0.0, representation: "A stack of resumable frames per task driven by a trampoline (runtime/TaskSpawn.java): suspending functions compile to Frame subclasses with a step method; exactly one task runs at a time, dispatched FIFO. Default entry retains virtual time; explicit serialized runMainHost uses System.nanoTime, owner mailbox completions, cleanup acknowledgement and retirement."}
+  - {type: type.task, contract_version: 1.0.0, representation: "A stack of resumable frames per task driven by a trampoline (runtime/TaskSpawn.java): suspending functions compile to Frame subclasses with a step method; exactly one task runs at a time, dispatched FIFO. Default entry retains virtual time; explicit serialized runMainHost uses System.nanoTime, owner mailbox completions, cleanup acknowledgement and retirement. Under the native pause model a suspending function is a method taking the task, each task body runs on its own virtual thread, and the thread holding the turn hands it directly to the next task the scheduler chooses."}
 harness:
   support: [tests/harness/Harness.java, tests/harness/Codec.java, tests/harness/Json.java, tests/harness/run.sh]
   generated: tests/harness/HarnessGen.java
@@ -156,3 +156,5 @@ functions:
   - {id: lib.http.exchange_close, contract_version: 1.0.0, symbol: LibHttpExchangeClose.libHttpExchangeClose, implementation: runtime/LibHttpExchangeClose.java, requires: [lib.http.do, std.context.err]}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: LibChecksumCRC32IEEE.libChecksumCRC32IEEE, implementation: runtime/LibChecksumCRC32IEEE.java, harness: "LibChecksumCRC32IEEE.libChecksumCRC32IEEE({0})"}
+  - {id: lib.task.start, contract_version: 1.0.0, symbol: "LibTaskStart.libTaskStart", implementation: runtime/LibTaskStart.java, requires: [core.task.spawn], harness: "unsupported"}
+  - {id: lib.task.await, contract_version: 1.0.0, symbol: "LibTaskAwait.libTaskAwait", implementation: runtime/LibTaskAwait.java, requires: [lib.task.start], harness: "unsupported"}

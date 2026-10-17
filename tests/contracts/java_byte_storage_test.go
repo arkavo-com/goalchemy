@@ -22,14 +22,14 @@ func TestJavaByteValuesNativeOracle(t *testing.T) {
 
 func TestJavaByteStorage(t *testing.T) {
 	outDir := t.TempDir()
-	if ds := testutil.CompileGate("../language/testdata/byte_storage", "java", outDir, "sequential"); len(ds) > 0 {
+	if ds := testutil.CompileGateOptions("../language/testdata/byte_storage", "java", outDir, "sequential", driver.EmitOptions{Names: "readable"}); len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	src, err := testutil.GeneratedSource(outDir, ".java")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"new byte[4]", "byte[] s", "byte[] d", "Slice.BYTE_NIL", "() -> 0L, true)", ".appendBytes(", ".sliceToByteArray(", ".bget(", ".bset("} {
+	for _, want := range []string{"new byte[4]", "byte[] _s", "byte[] _d", "Slice.BYTE_NIL", "() -> 0L, true)", ".appendBytes(", ".sliceToByteArray(", ".bget(", ".bset("} {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("emitted byte program lacks %q", want)
 		}

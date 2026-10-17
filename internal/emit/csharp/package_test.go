@@ -43,7 +43,7 @@ func TestPackageOutput(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			p := *res.IR
-			p.CompactNames = compact
+			p.Names = testutil.Names(compact)
 			output, err := csharp.Emit(&p, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -88,7 +88,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, f := range p.Funcs {
 				count := 0
-				declaration := regexp.MustCompile(`(?m)^\s+static [^\n(]+ ` + regexp.QuoteMeta(naming.Symbol(&p, f.Sym)) + `\(`)
+				declaration := regexp.MustCompile(`(?m)^\s+static [^\n(]+ ` + regexp.QuoteMeta(naming.New(&p, csharp.NameRules(&p)).Symbol(f.Sym)) + `\(`)
 				for _, file := range output.Files {
 					if declaration.Match(file.Source) {
 						count++
@@ -103,7 +103,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, global := range p.Globals {
 				count := 0
-				declaration := naming.Symbol(&p, global.Sym) + " = "
+				declaration := naming.New(&p, csharp.NameRules(&p)).Symbol(global.Sym) + " = "
 				for _, file := range output.Files {
 					for _, line := range strings.Split(string(file.Source), "\n") {
 						if strings.Contains(line, declaration) && strings.HasPrefix(strings.TrimSpace(line), "static ") {
@@ -120,7 +120,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, typ := range p.Types.All {
 				if typ.Boxed {
-					if count := strings.Count(combined, naming.Type(&p, typ, "td_")+" = "); count != 1 {
+					if count := strings.Count(combined, naming.New(&p, csharp.NameRules(&p)).Type(typ, "td_")+" = "); count != 1 {
 						t.Fatalf("descriptor %d bindings %d", typ.ID, count)
 					}
 				}
@@ -133,7 +133,7 @@ func TestPackageOutput(t *testing.T) {
 				if typ.U().Kind != ir.KStruct {
 					continue
 				}
-				name := naming.Type(&p, typ.U(), "s_")
+				name := naming.New(&p, csharp.NameRules(&p)).Type(typ.U(), "s_")
 				count := 0
 				for _, file := range output.Files {
 					if strings.Contains(string(file.Source), "sealed class "+name+" {") {
@@ -148,7 +148,7 @@ func TestPackageOutput(t *testing.T) {
 				}
 			}
 			out := t.TempDir()
-			if ds := driver.EmitWithOptions("csharp", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("csharp", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			data, err := os.ReadFile(filepath.Join(out, "goalchemy.manifest.json"))
@@ -227,7 +227,7 @@ func checkDeclarationMap(t *testing.T, p *ir.Program, source []byte, owner, out,
 	}
 	for _, global := range p.Globals {
 		if global.Pkg == owner {
-			declaration := naming.Symbol(p, global.Sym) + " = "
+			declaration := naming.New(p, csharp.NameRules(p)).Symbol(global.Sym) + " = "
 			for index, line := range strings.Split(string(source), "\n") {
 				if strings.Contains(line, declaration) && strings.HasPrefix(strings.TrimSpace(line), "static ") {
 					expected := p.Fset.Position(global.Pos)

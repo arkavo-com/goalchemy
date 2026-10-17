@@ -10,10 +10,11 @@ This document selects concrete defaults so implementation can begin. Changes are
 
 ## Readable generated names and release
 
-Preserve readable Go-derived internal names by default across Go, TypeScript,
-Python, Java, C#, Rust and C. Provide opt-in `--compact-names` for generated
-internal identifiers, with equivalent command/config behavior. Public export and
-wire names stay consistent between modes. Escape target keywords and invalid
+Keep Go source identifiers by default across Go, TypeScript, Python, Java, C#,
+Rust, C and Swift, renaming only on a collision (issue #93); readable Go-derived
+names stay available with `--names=readable`. Provide opt-in `--compact-names`
+for generated internal identifiers, with equivalent command/config behavior.
+Public export and wire names stay consistent between modes. Escape target keywords and invalid
 identifier characters, disambiguate packages/shadowing, and provide deterministic
 names for anonymous types and compiler temporaries without changing runtime IDs
 or Go value semantics.
@@ -99,7 +100,7 @@ The first release is complete when the CLI can validate and compile documented s
 | C memory | Boehm GC initially; generated execution stays single-threaded |
 | Overrides | Explicit, version-checked source replacements; no silent name-based shadowing |
 | Repository | One monorepo; independently testable compiler and target runtime directories |
-| Generated naming | Readable Go-derived names by default; opt-in compact internal names; consistent public wrappers in both modes |
+| Generated naming | Source names by default, renamed only on a collision; opt-in readable and compact internal names; consistent public wrappers in every mode |
 | Optimization | Correctness first; optimizations must preserve observations and pass differential tests |
 
 The installed workspace toolchain was Go 1.25.1 when this plan was written. Bootstrap must select the reference toolchain before oracle results are recorded. Toolchain installation is implementation work, not a completed action in this plan.

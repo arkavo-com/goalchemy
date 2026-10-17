@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 18188898e89dfd95e170f4a31ac59533249e6351204a53928c0f53baf2088fb8
 symbol: "rt.select"
 implementation: runtime/select.ts
-implementation_hash: 0dfb13738c96964553c7620468f8d0fb7c6ae7cc178d8cff8d92affb119815b2
+implementation_hash: a521895d4001bd10214d333c5335567f737950c3f9249ecfe4d65008a6d3172b
 summary: "select: commit exactly one ready case, chosen uniformly by the scheduler's choice source."
 suspension: may
 determinism: controlled

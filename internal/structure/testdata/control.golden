@@ -1,0 +1,243 @@
+== main.labelled inline=false
+var t#1 int
+var s#2 = 0:int
+var i#3 = 0:int
+L1: for {
+	t#4 = i#3 < n#0
+	if !t#4 {
+		break
+	}
+	var j#5 = 0:int
+	for {
+		t#6 = j#5 < n#0
+		if !t#6 {
+			break
+		}
+		t#7 = j#5 == 3:int
+		if t#7 {
+			break
+		}
+		t#8 = i#3 * j#5
+		t#9 = t#8 > 20:int
+		if t#9 {
+			break L1
+		}
+		t#10 = j#5 % 2:int
+		t#11 = t#10 == 0:int
+		if !t#11 {
+			t#12 = i#3 * j#5
+			t#13 = load s#2
+			t#14 = t#13 + t#12
+			store s#2 = t#14
+		}
+		t#15 = load j#5
+		t#16 = t#15 + 1:int
+		store j#5 = t#16
+	}
+	t#17 = load i#3
+	t#18 = t#17 + 1:int
+	store i#3 = t#18
+}
+store t#1 = s#2
+return
+
+== main.fallthroughs inline=false
+L1: {
+	var t#1 int
+	var r#2 = 0:int
+	t#3 := x#0
+	t#4 = t#3 == 1:int
+	if t#4 {
+		store r#2 = 10:int
+	} else {
+		t#5 = t#3 == 2:int
+		if !t#5 {
+			t#6 = t#3 == 3:int
+			if !t#6 {
+				t#7 = t#3 == 4:int
+				if !t#7 {
+					store r#2 = -1:int
+					break L1
+				}
+			}
+			t#10 = r#2 == 0:int
+			if t#10 {
+				break L1
+			}
+			store r#2 = 30:int
+			break L1
+		}
+	}
+	t#8 = load r#2
+	t#9 = t#8 + 2:int
+	store r#2 = t#9
+}
+store t#1 = r#2
+return
+
+== main.recovers inline=false
+var r#0^ int
+t#1 = closure main_recovers_func1[r#0^]
+defer  = call t#1()
+var i#2 = 0:int
+for {
+	t#3 = i#2 < 10:int
+	if !t#3 {
+		break
+	}
+	t#4 = i#2 == 5:int
+	if t#4 {
+		t#5 = box "boom":string as interface {}
+		panic(t#5)
+	}
+	t#6 = load r#0^
+	t#7 = t#6 + i#2
+	store r#0^ = t#7
+	t#8 = load i#2
+	t#9 = t#8 + 1:int
+	store i#2 = t#9
+}
+t#10 = load r#0^
+store r#0^ = t#10
+return
+
+== main.recovers inline=true
+var r#0^ int
+t#1 = closure main_recovers_func1[r#0^]
+defer  = call t#1()
+var i#2 = 0:int
+for {
+	t#3 = i#2 < 10:int
+	if !t#3 {
+		break
+	}
+	t#4 = i#2 == 5:int
+	if t#4 {
+		t#5 = box "boom":string as interface {}
+		panic(t#5)
+	}
+	t#6 = load r#0^
+	t#7 = t#6 + i#2
+	store r#0^ = t#7
+	t#8 = load i#2
+	t#9 = t#8 + 1:int
+	store i#2 = t#9
+}
+t#10 = load r#0^
+store r#0^ = t#10
+return
+
+== main.short inline=false
+var t#4 int
+if a#0 && (b#1 || c#2) {
+	t#5 = load x#3
+	t#6 = t#5 + 1:int
+	store x#3 = t#6
+}
+L1: {
+	if a#0 {
+		if !b#1 {
+			break L1
+		}
+		t#7 = x#3 > 3:int
+		if !t#7 {
+			break L1
+		}
+	}
+	t#8 = load x#3
+	t#9 = t#8 - 1:int
+	store x#3 = t#9
+}
+for {
+	t#10 = x#3 > 0:int
+	if !(t#10 && !c#2) {
+		break
+	}
+	t#11 = load x#3
+	t#12 = t#11 - 2:int
+	store x#3 = t#12
+}
+store t#4 = x#3
+return
+
+== main.selects inline=false
+for {
+switch pc {
+	case 0:
+		var t#3 int
+		var n#4 = 0:int
+		pc = 1
+		continue
+	case 1:
+		t#6 := a#0
+		t#8 := b#1
+		t#11 := quit#2
+		pause t#5 = select(3 cases, default=false) -> b13
+	case 13:
+		t#12 = t#5 == 0:int
+		if t#12 {
+			var v#13 = t#7
+			t#14 = load n#4
+			t#15 = t#14 + v#13
+			store n#4 = t#15
+		} else {
+			t#16 = t#5 == 1:int
+			if t#16 {
+				var v#17 = t#9
+				var ok#18 = t#10
+				if !ok#18 {
+					store t#3 = n#4
+					return
+				}
+				t#19 = load n#4
+				t#20 = t#19 - v#17
+				store n#4 = t#20
+			} else {
+				t#21 = t#5 == 2:int
+				if t#21 {
+					store t#3 = n#4
+					return
+				}
+			}
+		}
+		pc = 1
+		continue
+}
+}
+
+== main.selects inline=true
+var t#3 int
+var n#4 = 0:int
+for {
+	t#6 := a#0
+	t#8 := b#1
+	t#11 := quit#2
+	t#5 = select(3 cases, default=false)
+	t#12 = t#5 == 0:int
+	if t#12 {
+		var v#13 = t#7
+		t#14 = load n#4
+		t#15 = t#14 + v#13
+		store n#4 = t#15
+	} else {
+		t#16 = t#5 == 1:int
+		if t#16 {
+			var v#17 = t#9
+			var ok#18 = t#10
+			if !ok#18 {
+				store t#3 = n#4
+				return
+			}
+			t#19 = load n#4
+			t#20 = t#19 - v#17
+			store n#4 = t#20
+		} else {
+			t#21 = t#5 == 2:int
+			if t#21 {
+				store t#3 = n#4
+				return
+			}
+		}
+	}
+}
+

@@ -30,7 +30,7 @@ let package = Package(name:"HandlesConsumer",dependencies:[.package(name:"Goalch
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release")
+	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release -Xswiftc -Onone")
 	cmd.Dir, cmd.Env = consumer, driver.ToolEnv()
 	if data, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("handles consumer: %v\n%s", err, data)

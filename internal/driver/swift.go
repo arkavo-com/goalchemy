@@ -38,7 +38,7 @@ import PackageDescription
 
 let package = Package(
     name: "GoalchemyGenerated",
-    products: [.library(name: "GoalchemyGenerated", targets: ["GoalchemyGenerated"])],
+@GOALCHEMY_SWIFT_PLATFORMS@    products: [.library(name: "GoalchemyGenerated", targets: ["GoalchemyGenerated"])],
     targets: [
         .systemLibrary(name: "COpenSSL", path: "system/openssl", pkgConfig: "openssl",
                        providers: [.apt(["libssl-dev"]), .brew(["openssl@3"])]),
@@ -91,15 +91,24 @@ func emitSwift(res *Result, out string) []diagnostics.Diagnostic {
 			maps = append(maps, fmt.Sprintf("%q, ", file))
 		}
 	}
+	native := ""
+	if res.IR.PauseModel == "native" {
+		native = " The native pause model uses Swift task executors: on Apple platforms it requires macOS 15, iOS 18, tvOS 18, watchOS 11 or visionOS 2."
+	}
 	generated := map[string][]byte{
 		"run.sh":    []byte(strings.Replace(swiftRun, "@GOALCHEMY_SWIFT_SOURCES@", sourceArgs.String(), 1)),
-		"README.md": []byte(readme("swift", "sh run.sh", "Requires Swift 6.4 or later, a C compiler, pkg-config, OpenSSL 3, zlib, and libcurl development headers/libraries. Native dependencies are currently included in every Swift output. The verified baseline is Linux x86_64; Apple SDK integration is not yet verified.")),
+		"README.md": []byte(readme("swift", "sh run.sh", "Requires Swift 6.4 or later, a C compiler, pkg-config, OpenSSL 3, zlib, and libcurl development headers/libraries. Native dependencies are currently included in every Swift output. The verified baseline is Linux x86_64; Apple SDK integration is not yet verified."+native)),
 	}
 	if res.IR.Library {
 		delete(generated, "run.sh")
 		generated["build.sh"] = []byte(swiftLibraryBuild)
 		packageSource := strings.Replace(swiftPackage, "@GOALCHEMY_SWIFT_SOURCES@", strings.Join(sources, ", "), 1)
 		packageSource = strings.Replace(packageSource, "@GOALCHEMY_SWIFT_MAPS@", strings.Join(maps, ""), 1)
+		platforms := ""
+		if res.IR.PauseModel == "native" {
+			platforms = "    platforms: [.macOS(.v15), .iOS(.v18), .tvOS(.v18), .watchOS(.v11), .visionOS(.v2)],\n"
+		}
+		packageSource = strings.Replace(packageSource, "@GOALCHEMY_SWIFT_PLATFORMS@", platforms, 1)
 		generated["Package.swift"] = []byte(packageSource)
 		generated["system/openssl/module.modulemap"] = []byte("module COpenSSL [system] {\n    header \"shim.h\"\n    link \"crypto\"\n    export *\n}\n")
 		generated["system/openssl/shim.h"] = []byte("#include <openssl/evp.h>\n")
@@ -107,7 +116,7 @@ func emitSwift(res *Result, out string) []diagnostics.Diagnostic {
 		generated["system/zlib/shim.h"] = []byte("#include <zlib.h>\n")
 		generated["system/curl/module.modulemap"] = []byte("module CCurl [system] {\n    header \"shim.h\"\n    link \"curl\"\n    export *\n}\n")
 		generated["system/curl/shim.h"] = []byte("#include <curl/curl.h>\n")
-		generated["README.md"] = []byte(readme("swift", "sh build.sh", "SwiftPM library product/module GoalchemyGenerated. Add this directory as a local package dependency or publish it under your SDK package name. Requires Swift 6.4 or later, OpenSSL 3, zlib, and libcurl development files. Native dependency discovery uses pkg-config. Verified on Linux x86_64; Apple SDK integration is not yet verified."))
+		generated["README.md"] = []byte(readme("swift", "sh build.sh", "SwiftPM library product/module GoalchemyGenerated. Add this directory as a local package dependency or publish it under your SDK package name. Requires Swift 6.4 or later, OpenSSL 3, zlib, and libcurl development files. Native dependency discovery uses pkg-config. Verified on Linux x86_64; Apple SDK integration is not yet verified."+native))
 	}
 	license, err := fs.ReadFile(res.Catalog.FS, "LICENSE")
 	if err != nil {

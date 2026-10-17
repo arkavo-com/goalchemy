@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 6f0a76d917ebb6db12f234b4d02ce65d3c31540da84d025a27a6dcd5b26b19ca
 symbol: "StdSyncMutexLock.stdSyncMutexLock"
 implementation: runtime/StdSyncMutexLock.java
-implementation_hash: a4e641568cfab164eabdb7622d42c4b1eae6c2057d291f8a0c783637c8e920d3
+implementation_hash: 16d42b99bde3d4d994424d008e24c38a8c1aa343ecb97abf3507c835408a16b2
 summary: "sync.Mutex.Lock: acquire, or wait in FIFO order."
 suspension: may
 determinism: controlled

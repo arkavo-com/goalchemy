@@ -21,7 +21,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), symbols: symbols, contracts: map[string]bool{}, classes: map[*ir.Type]string{},
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), symbols: symbols, contracts: map[string]bool{}, classes: map[*ir.Type]string{},
 		tds: map[*ir.Type]string{}, seenHelp: map[*ir.Type]bool{}, locations: map[string]string{}}
 	entry := e.mainClass()
 	bodies := map[string]*bytes.Buffer{supportClass: {}, entry: {}}
@@ -95,9 +95,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		if ir.HostEntry(e.contracts) {
 			run = "runHost();\n        System.out.flush();\n        System.exit(0);"
 		}
-		fmt.Fprintf(bodies[entry], "    public static void runHost() {\n        TaskSpawn.runMainHost(() -> %s);\n    }\n\n    public static void main(String[] args) {\n        %s\n    }\n", start, run)
+		fmt.Fprintf(bodies[entry], "    public static void runHost() {\n        TaskSpawn.runMainHost(() -> %s);\n    }\n\n    public static void main(String[] _args) {\n        %s\n    }\n", start, run)
 	} else {
-		fmt.Fprintf(bodies[entry], "    public static void main(String[] args) {\n        Program.main(() -> {\n            %s();\n", e.symbol(p.Init.Sym))
+		fmt.Fprintf(bodies[entry], "    public static void main(String[] _args) {\n        Program.main(() -> {\n            %s();\n", e.symbol(p.Init.Sym))
 		if p.Main != nil {
 			fmt.Fprintf(bodies[entry], "            %s();\n", e.symbol(p.Main.Sym))
 		}
@@ -139,6 +139,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		source.Write(bodies[class].Bytes())
 		source.WriteString("}\n")
 		src, lines := e.resolveMarkers(source.String())
+		if e.p.NoLineDirectives {
+			lines = nil
+		}
 		files = append(files, artifact.File{Path: class + ".java", Source: []byte(src), Owner: owners[class], Lines: lines})
 	}
 	var contracts []string

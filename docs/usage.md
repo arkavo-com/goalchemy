@@ -30,7 +30,10 @@ schema_version: 1
 packages: [./cmd/app]      # package patterns, relative to this file
 tags: [prod]               # optional build tags
 gate: sequential           # sequential (default) or cooperative
-compact_names: false        # readable private identifiers (default)
+names: source               # source (default), readable or compact private identifiers
+name_collisions: rename     # under source names: rename (default) or fail on a collision
+pause_model: frames         # frames (default) or native (Go, TypeScript, Swift, C#, Python, Rust and Java, experimental)
+line_directives: true       # map generated code back to the source (default)
 targets:
   go: {out: out/go}
   typescript: {out: out/ts}
@@ -44,46 +47,139 @@ targets:
 
 The file uses the same restricted YAML as the contract catalog: no anchors, aliases, or floats, and no unknown keys.
 
-`compile`, `run`, and `build` accept `--compact-names`. `compile` and `run`
-default to readable names and do not load `goalchemy.yaml`. `build` uses the
-configuration's `compact_names` setting unless the flag is explicitly present:
-`--compact-names` selects compact names and `--compact-names=false` selects
-readable names.
+`compile`, `run`, and `build` accept `--names=source|readable|compact` and
+`--name-collisions=rename|fail`. `compile` and `run` default to source names and
+do not load `goalchemy.yaml`; `build` uses the configuration's `names` and
+`name_collisions` unless a flag is explicitly present. The older
+`--compact-names` flag and `compact_names: true` key still select compact
+names; `--compact-names=false` selects the default.
 
 ```sh
-goalchemy compile -target rust -out out/rust --compact-names .
-goalchemy run -target python --compact-names .
-goalchemy build --compact-names=false
+goalchemy compile -target rust -out out/rust --names=readable .
+goalchemy run -target python --names=compact .
+goalchemy build --name-collisions=fail
 ```
+
+`compile`, `run`, and `build` also accept `--pause-model=frames|native`
+(`build` overrides `pause_model`). `frames` emits suspending functions as
+resumable frames. `native` is implemented by the Go, TypeScript, Swift, C#,
+Python, Rust and Java targets.
+On Go it emits them as ordinary Go functions that take the current task and
+block at pause points; a turn-passing scheduler keeps exactly one task
+goroutine running, and a task that blocks hands the turn directly to the next
+task in the same FIFO order as frames. On TypeScript it emits `async`
+functions that take the current task as their last parameter and `await`
+their suspending callees; a primitive that blocks the task awaits a promise
+that only Goalchemy's scheduler settles, when it chooses that task next, so
+the JavaScript event loop never decides the order. On Swift it emits
+`async throws` functions that take the task first; each task's body runs as a
+Swift task on its owner's own executor, on the owner thread, and only
+Goalchemy's scheduler resumes a blocked task, so Swift's cooperative pool
+never runs source code. Swift native output needs task executors: on Apple
+platforms, macOS 15, iOS 18, tvOS 18, watchOS 11 or visionOS 2 (the generated
+package declares these minimums); frames output has no such requirement. On
+C# it emits `async` methods that take the task first and return the
+runtime's own `Async`/`Async<T>` types, whose builders never use the .NET
+thread pool, `SynchronizationContext` or `TaskScheduler`: a blocked task's
+continuation runs only when Goalchemy's scheduler chooses that task next, on
+the owner thread. On Python it emits `async def` coroutines that take the task
+first and `await` their suspending callees; Goalchemy's scheduler drives each
+task's coroutine itself with `send`, and a blocked task's coroutine resumes
+only when the scheduler chooses that task next, so no asyncio event loop is
+involved. On Rust, pausing functions become `async fn` with boxed
+`.await` calls. The existing FIFO scheduler polls their futures on the owner
+thread; wakers never dispatch source code. Primitive calls that complete
+immediately do not await. Per-task roots retain source values across awaits,
+and frame adapters preserve function values, defers and library exports.
+Rust keeps frames as its default. See [Rust native pausing](rust-native-pausing.md)
+for execution limits and validation, and issue #92 for the overall redesign.
+On Java it emits ordinary methods that take the task first
+and block at pause points, as on Go: each task body runs on its own virtual
+thread, exactly one holds the turn, and a task that blocks hands it directly
+to the next task Goalchemy's scheduler chooses. The generated `run.sh` starts
+the JVM with `-Xss1g` (virtual thread stacks are bounded by the thread stack
+size) and one virtual-thread carrier. Output is identical to frames on all
+seven. See issue #92.
+
+`compile`, `run`, and `build` accept `--line-directives` (default on; `build`
+overrides `line_directives`). With `--line-directives=false`, generated code
+carries no source annotations: Go output has no `/*line*/` comments,
+TypeScript output has no source map, and the other targets write no `.lines`
+tables. Runtime positions and compiler diagnostics then refer to the
+generated files instead of the Go source.
+
+```sh
+goalchemy compile -target go -out out/go --line-directives=false .
+```
+
+## Generated control flow
+
+Every target prints structured control flow rebuilt from the IR's basic
+blocks: `if`/`else`, loops with `while` conditions, labelled `break` and
+`continue`, and short-circuit conditions. Targets without labelled blocks use
+`goto` (Go, C, C#) or a small exit variable (Python). Single-use temporaries
+are folded into the expression that uses them when that keeps Go's evaluation
+order. Two cases keep a dispatch over block numbers: a resumable frame
+(`--pause-model=frames`) switches on the block its task resumes at, so a loop
+that pauses runs as a dispatch, and an irreducible block graph (not produced
+from Go source) is dispatched rather than structured. Swift functions that
+cannot pause, defer or recover are plain Swift functions; the others are
+frames.
 
 ## Generated names
 
-Generated private names are readable by default for Go, TypeScript, Python,
-Java, C#, Rust, C, and Swift. Source package, type, function, global, local, and field
-names supply identifier stems. Category prefixes and deterministic numeric
-suffixes distinguish reserved words, shadowed locals, and repeated names across
-packages. Unicode characters are encoded in ASCII as `_u` followed by their
-hexadecimal code point and `_`.
+By default (`--names=source`) generated code keeps the source identifiers of
+types, functions, methods, globals and locals, and renames one only on a
+collision:
 
-For example, an internal function for `main.Calculate` may be named
-`fn_main_Calculate_2`; a source local `count` may be `v_count_7`. Targets use
-their own legal separators and type prefixes. A named Go struct contributes its
-package/type stem to the generated representation; when several named types
-share an underlying representation, the lexicographically smallest source name
-is chosen deterministically. Anonymous aggregates use shape names such as
-`struct`, `array`, or `map`. Unnamed parameters, results, captures, and
-temporaries use `param`, `result`, `capture`, and `temp` stems.
+- A top-level name that several source packages declare is qualified with the
+  package name (`left_New`, `right_New`); other names stay unqualified.
+- A name that is a reserved word, a predeclared or builtin name, or a name the
+  target runtime uses unqualified on that target takes a numeric suffix
+  (`class_2` on TypeScript, Python, Java, C# and Swift).
+- Every target declares a function's locals in one scope, so a shadowed local
+  takes a suffix (`total`, `total_2`), as does a local that would hide a
+  top-level name the function may use.
+- A method becomes `Type_Method` where the target needs a top-level function.
+- Suffixes are assigned deterministically in source order, so output is stable
+  across runs; adding an unrelated colliding name can rename an existing one,
+  and internal names are not stable across compiler versions.
 
-`--compact-names` replaces compiler-private names with shorter identifiers
+Every compiler-generated identifier, such as the task parameter `_t`, frame
+helpers, temporaries (`_4`), closures (`_fetchTasks_1`) and helper functions
+(`_a_fetchTasks`, `_z_Task`), starts with `_`, a prefix source names never
+keep: a source name starting with `_` is renamed (`_hidden` becomes
+`x_hidden`), and non-ASCII letters are encoded as `_u` followed by their
+hexadecimal code point and `_`. TypeScript and Java also use names containing
+`$`, which Go identifiers cannot contain. On C, functions and globals have
+external linkage, so they keep generated names (`_f_fetchTasks`,
+`_g_count`) and source names appear as locals.
+
+`--name-collisions=fail` (or `name_collisions: fail`) reports each source name
+that would be renamed as a `GCE009` diagnostic with its position and the
+declaration it collides with, instead of emitting code. The program's entry
+point and package initializers are exempt, since the source never names them.
+
+`--names=readable` decorates every private name with its category and
+identity: an internal function for `main.Calculate` may be named
+`fn_main_Calculate_2` and a source local `count` `v_count_7`. A named Go struct
+contributes its package/type stem to the generated representation; when
+several named types share an underlying representation, the lexicographically
+smallest source name is chosen deterministically. Anonymous aggregates use
+shape names such as `struct`, `array`, or `map`. Unnamed parameters, results,
+captures, and temporaries use `param`, `result`, `capture`, and `temp` stems.
+
+`--names=compact` replaces compiler-private names with shorter identifiers
 derived from the same IR identities. Public library function/type/field names,
 capability symbols, runtime type strings, and serialized identities retain
-their established contracts in both modes. Native Go embedding and field rules
+their established contracts in every mode; under source names, a private
+name that equals a public library name takes a suffix. Native Go embedding and field rules
 also remain intact. Go boundary values from dependency packages receive stable
 exported `Source_<qualified-type>_<ID>` aliases, including values nested in
 fields and collections.
 
 Public façade names cannot occupy names reserved by their target's generated
-API. These collisions produce a library-boundary diagnostic in both modes,
+API. These collisions produce a library-boundary diagnostic in every mode,
 rather than invalid target code. For example, Rust rejects public structs named
 `V`, `LibraryError`, or `Vec`, and exported functions named `Some`, `None`, `Ok`,
 or `Err`; Python rejects exported functions named `None`, `True`, or `False`.
@@ -476,6 +572,55 @@ Browsers cannot stream request bodies over HTTP/1.1, so in a browser the
 request body is collected (at most 64 MiB) and sent when the response is
 requested; the response body still streams. Browser `fetch` decodes
 compressed responses itself.
+
+## `lib/task`: optional futures
+
+Ordinary calls infer whether they can pause; they need no `task.Await`.
+Use futures when work should start now and its results are needed later:
+
+```go
+import "github.com/eugenioenko/goalchemy/lib/task"
+
+a := task.Start(func() ([]Task, error) { return fetchTasks(u1) })
+b := task.Start(func() ([]Task, error) { return fetchTasks(u2) })
+ta, errA := task.Await(a)
+tb, errB := task.Await(b)
+```
+
+`Start` accepts a function with no parameters and any number of results,
+including named functions and bound methods. It queues the task and returns
+without yielding. `Await` returns the function's original result list. A
+completed future returns immediately; a pending future parks its awaiter.
+Waiters resume through Goalchemy's FIFO scheduler under both pause models.
+
+Awaiting again returns the same results. Struct and array results copy by
+value; pointers, slices, and maps retain their usual Go sharing rules.
+A started task's panic is raised independently in every awaiter, so each
+awaiter can recover it. An unobserved panic is fatal when the program entry
+finishes or before the scheduler reports a deadlock. Cancellation follows
+the contexts captured by the started function.
+
+Futures can be stored in containers and sent through channels. When an
+explicit type is needed, write the zero-argument function signature:
+
+```go
+var pending []task.Future[func() ([]Task, error)]
+pending = append(pending, task.Start(func() ([]Task, error) {
+    return fetchTasks(u1)
+}))
+tasks, err := task.Await(pending[0])
+```
+
+`Future` is a compiler-known typed carrier; this notation does not enable
+user-defined generic functions or types. A zero future never completes and
+participates in normal deadlock detection. Futures cannot cross an exported
+library API or be retained inside an exported handle: await inside the
+library and export the completed results. `task.All` and ordinary `go`
+statements can be mixed with futures.
+
+Goalchemy source uses `task.Await(f)`. The reference Go runner normalizes this
+to the callable result bridge `task.Await(f)()` before running the gc toolchain.
+Generated Go uses typed runtime calls and builds with the ordinary Go compiler.
 
 ## Behavior Go leaves open
 

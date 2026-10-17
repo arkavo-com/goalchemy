@@ -63,6 +63,7 @@ representations:
   representation: Owner-controlled FIFO stack of resumable frames; virtual timers by default, explicit
     host entries wait for immutable native mailbox completions and cleanup acknowledgements.
 support_files:
+- types/Async.swift
 - types/Channels.swift
 - types/Collections.swift
 - types/Files.swift
@@ -840,6 +841,11 @@ functions:
   symbol: GNative.lib_checksum_crc32_ieee
   implementation: runtime/lib_checksum_crc32_ieee.swift
   harness: 'native: GNative.lib_checksum_crc32_ieee({args}, {types})'
+
+- {id: lib.task.start, contract_version: 1.0.0, symbol: "GNative.lib_task_start", implementation: runtime/lib_task_start.swift, requires: [core.task.spawn], harness: "unsupported"}
+
+- {id: lib.task.await, contract_version: 1.0.0, symbol: "GNative.lib_task_await", implementation: runtime/lib_task_await.swift, requires: [lib.task.start], harness: "unsupported"}
+
 harness:
   support:
   - tests/harness/main.swift

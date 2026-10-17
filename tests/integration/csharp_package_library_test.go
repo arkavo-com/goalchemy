@@ -13,6 +13,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
 	"github.com/eugenioenko/goalchemy/internal/driver"
 	"github.com/eugenioenko/goalchemy/internal/subset"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestGeneratedCSharpPackageLibrary(t *testing.T) {
@@ -67,7 +68,7 @@ func Hold(ctx context.Context)([]byte,error){return callback.Request(ctx,"hold",
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			out, consumer := t.TempDir(), t.TempDir()
-			if ds := driver.EmitWithOptions("csharp", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("csharp", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			// SDK adapters remain ordinary root source members of main.csproj.

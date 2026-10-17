@@ -16,7 +16,7 @@ pub fn std_sync_mutex_lock(t: &Rc<Task>, m: V) {
             x.locked = true;
             return false;
         }
-        x.waiters.push(t.clone());
+        x.waiters.push_back(t.clone());
         true
     });
     if wait {

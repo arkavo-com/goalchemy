@@ -124,16 +124,17 @@ Domain formats such as ZIP archives for OpenTDF are candidates for the SDK that 
 | `-C <dir>` | Directory to load packages from. |
 | `-json` | Write diagnostics as JSON. |
 
-Generated source uses readable private names by default on all targets.
-Type and function names retain their source package/type/function stems, fields
-retain source names where the target representation permits, and source locals
-retain their names with deterministic suffixes for shadowing. Compiler-created
-values use names such as `temp`, `param`, and `result`.
+Generated source keeps Go identifiers by default on all targets: types,
+functions, globals and locals retain their source names, and a name is renamed
+only on a collision (a reserved word, a shadowed local, or the same name in two
+packages). Compiler-created names start with `_`, such as the task parameter
+`_t` and temporaries like `_4`.
 
-`compile`, `run`, and `build` accept `--compact-names` to emit short private
-identifiers. Project builds can also set `compact_names: true` in
-`goalchemy.yaml`; an explicit `--compact-names=false` overrides that setting.
-Public library names and runtime behavior stay the same in either mode. See
+`compile`, `run`, and `build` accept `--names=source|readable|compact` (and
+`names:` in `goalchemy.yaml`). Source names, the default, keep Go identifiers
+and rename only on a collision; `--name-collisions=fail` reports collisions
+instead. `--compact-names` remains a shorthand for `--names=compact`. Public
+library names and runtime behavior stay the same in every mode. See
 [generated naming conventions](docs/usage.md#generated-names) for the limits of
 these names.
 

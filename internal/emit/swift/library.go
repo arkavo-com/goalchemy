@@ -171,73 +171,73 @@ func (e *emitter) library() (string, error) {
 		} else if u.Kind == ir.KArray || u.Kind == ir.KSlice {
 			convert(u.Elem)
 		}
-		fmt.Fprintf(&b, "private func gInput%d(_ v: %s) throws -> GValue {\n", u.ID, typ(t))
+		fmt.Fprintf(&b, "private func _gInput%d(_ _v: %s) throws -> GValue {\n", u.ID, typ(t))
 		switch u.Kind {
 		case ir.KBool:
-			b.WriteString("    return .bool(v)\n")
+			b.WriteString("    return .bool(_v)\n")
 		case ir.KInt:
-			fmt.Fprintf(&b, "    return GNumeric.normalize(UInt64(truncatingIfNeeded: v), %d, %t)\n", u.Int.Bits(), u.Int.Signed())
+			fmt.Fprintf(&b, "    return GNumeric.normalize(UInt64(truncatingIfNeeded: _v), %d, %t)\n", u.Int.Bits(), u.Int.Signed())
 		case ir.KFloat:
-			fmt.Fprintf(&b, "    return .float(Double(v), %d)\n", u.FloatBits)
+			fmt.Fprintf(&b, "    return .float(Double(_v), %d)\n", u.FloatBits)
 		case ir.KString:
-			b.WriteString("    return .string(v.bytes)\n")
+			b.WriteString("    return .string(_v.bytes)\n")
 		case ir.KStruct:
-			fmt.Fprintf(&b, "    let result = GAggregate(%d)\n", u.ID)
+			fmt.Fprintf(&b, "    let _result = GAggregate(%d)\n", u.ID)
 			for i, f := range u.Fields {
-				fmt.Fprintf(&b, "    result.fields[%d].value = try gInput%d(v.%s)\n", i, f.Type.U().ID, swiftPublic(f.Name))
+				fmt.Fprintf(&b, "    _result.fields[%d].value = try _gInput%d(_v.%s)\n", i, f.Type.U().ID, swiftPublic(f.Name))
 			}
-			b.WriteString("    return .aggregate(result)\n")
+			b.WriteString("    return .aggregate(_result)\n")
 		case ir.KSlice, ir.KArray:
 			if u.Kind == ir.KSlice {
-				fmt.Fprintf(&b, "    guard let v = v else { return .slice(GSlice(nil, 0, 0, 0, %d)) }\n", u.Elem.ID)
+				fmt.Fprintf(&b, "    guard let _v = _v else { return .slice(GSlice(nil, 0, 0, 0, %d)) }\n", u.Elem.ID)
 			} else {
-				fmt.Fprintf(&b, "    if v.count != %d { throw GoalchemyFailure(\"invalid_argument\", \"array length must be %d\") }\n", u.Len, u.Len)
+				fmt.Fprintf(&b, "    if _v.count != %d { throw GoalchemyFailure(\"invalid_argument\", \"array length must be %d\") }\n", u.Len, u.Len)
 			}
 			if elem := u.Elem.U(); elem.Kind == ir.KInt && elem.Int.Bits() == 8 && !elem.Int.Signed() {
-				fmt.Fprintf(&b, "    let buffer = GBuffer(bytes: v, elem: %d)\n", u.Elem.ID)
+				fmt.Fprintf(&b, "    let _buffer = GBuffer(bytes: _v, elem: %d)\n", u.Elem.ID)
 			} else {
-				fmt.Fprintf(&b, "    let buffer = GBuffer(v.count, %d)\n    for i in v.indices { buffer.write(i, try gInput%d(v[i])) }\n", u.Elem.ID, u.Elem.U().ID)
+				fmt.Fprintf(&b, "    let _buffer = GBuffer(_v.count, %d)\n    for _i in _v.indices { _buffer.write(_i, try _gInput%d(_v[_i])) }\n", u.Elem.ID, u.Elem.U().ID)
 			}
 			if u.Kind == ir.KSlice {
-				fmt.Fprintf(&b, "    return .slice(GSlice(buffer, 0, v.count, v.count, %d))\n", u.Elem.ID)
+				fmt.Fprintf(&b, "    return .slice(GSlice(_buffer, 0, _v.count, _v.count, %d))\n", u.Elem.ID)
 			} else {
-				fmt.Fprintf(&b, "    let result = GAggregate(%d); result.buffer = buffer; return .aggregate(result)\n", u.ID)
+				fmt.Fprintf(&b, "    let _result = GAggregate(%d); _result.buffer = _buffer; return .aggregate(_result)\n", u.ID)
 			}
 		default:
 			if cryptoKey(t) {
-				b.WriteString("    guard let v = v else { return .nilValue }; return .pointer(v.cell)\n")
+				b.WriteString("    guard let _v = _v else { return .nilValue }; return .pointer(_v.cell)\n")
 			}
 		}
 		b.WriteString("}\n")
-		fmt.Fprintf(&b, "private func gOutput%d(_ v: GValue) throws -> %s {\n", u.ID, typ(t))
+		fmt.Fprintf(&b, "private func _gOutput%d(_ _v: GValue) throws -> %s {\n", u.ID, typ(t))
 		switch u.Kind {
 		case ir.KBool:
-			b.WriteString("    return v.boolValue\n")
+			b.WriteString("    return _v.boolValue\n")
 		case ir.KInt:
-			fmt.Fprintf(&b, "    return %s(truncatingIfNeeded: v.unsigned)\n", typ(t))
+			fmt.Fprintf(&b, "    return %s(truncatingIfNeeded: _v.unsigned)\n", typ(t))
 		case ir.KFloat:
-			fmt.Fprintf(&b, "    guard case .float(let number, _) = v else { throw GFault(\"float boundary\") }; return %s(number)\n", typ(t))
+			fmt.Fprintf(&b, "    guard case .float(let _number, _) = _v else { throw GFault(\"float boundary\") }; return %s(_number)\n", typ(t))
 		case ir.KString:
-			b.WriteString("    return GoString(bytes: v.bytes)\n")
+			b.WriteString("    return GoString(bytes: _v.bytes)\n")
 		case ir.KStruct:
-			fmt.Fprintf(&b, "    guard case .aggregate(let a) = v else { throw GFault(\"struct boundary\") }; return %s(\n", typ(t))
+			fmt.Fprintf(&b, "    guard case .aggregate(let _a) = _v else { throw GFault(\"struct boundary\") }; return %s(\n", typ(t))
 			var fs []string
 			for i, f := range u.Fields {
-				fs = append(fs, fmt.Sprintf("        %s: try gOutput%d(a.fields[%d].value)", swiftPublic(f.Name), f.Type.U().ID, i))
+				fs = append(fs, fmt.Sprintf("        %s: try _gOutput%d(_a.fields[%d].value)", swiftPublic(f.Name), f.Type.U().ID, i))
 			}
 			b.WriteString(strings.Join(fs, ",\n") + "\n    )\n")
 		case ir.KSlice, ir.KArray:
 			if u.Kind == ir.KSlice {
-				b.WriteString("    if case .slice(let s) = v, s.storage == nil { return nil }\n")
+				b.WriteString("    if case .slice(let _s) = _v, _s.storage == nil { return nil }\n")
 			}
 			if elem := u.Elem.U(); elem.Kind == ir.KInt && elem.Int.Bits() == 8 && !elem.Int.Signed() {
-				b.WriteString("    guard let bytes = GSlice.byteSource(v) else { throw GFault(\"byte boundary\") }; return Array(bytes)\n")
+				b.WriteString("    guard let _bytes = GSlice.byteSource(_v) else { throw GFault(\"byte boundary\") }; return Array(_bytes)\n")
 			} else {
-				fmt.Fprintf(&b, "    return try GElements(v).map { try gOutput%d($0) }\n", u.Elem.U().ID)
+				fmt.Fprintf(&b, "    return try GElements(_v).map { try _gOutput%d($0) }\n", u.Elem.U().ID)
 			}
 		default:
 			if cryptoKey(t) {
-				b.WriteString("    if case .nilValue = v { return nil }; guard case .pointer(let p) = v, case .opaque(let k) = p.value, let key = k as? GCryptoKey else { throw GFault(\"key boundary\") }; return GoalchemyKey(key, p)\n")
+				b.WriteString("    if case .nilValue = _v { return nil }; guard case .pointer(let _p) = _v, case .opaque(let _k) = _p.value, let _key = _k as? GCryptoKey else { throw GFault(\"_key boundary\") }; return GoalchemyKey(_key, _p)\n")
 			}
 		}
 		b.WriteString("}\n")
@@ -281,34 +281,34 @@ func (e *emitter) library() (string, error) {
 			errorTypes = append(errorTypes, t)
 		}
 	}
-	b.WriteString("private func gSourceError(_ value: GValue) throws -> GoalchemyFailure? {\n    if case .nilValue = value { return nil }\n    guard case .interface(let box) = value else { return GoalchemyFailure(\"source\", \"source error\") }\n")
+	b.WriteString("private func _gSourceError(_ _value: GValue) throws -> GoalchemyFailure? {\n    if case .nilValue = _value { return nil }\n    guard case .interface(let _box) = _value else { return GoalchemyFailure(\"source\", \"source error\") }\n")
 	for _, t := range errorTypes {
-		fmt.Fprintf(&b, "    if box.type == %d, case .pointer(let cell) = box.value {\n        let v = try gOutput%d(cell.value)\n", t.ID, t.U().Elem.U().ID)
+		fmt.Fprintf(&b, "    if _box.type == %d, case .pointer(let _cell) = _box.value {\n        let _v = try _gOutput%d(_cell.value)\n", t.ID, t.U().Elem.U().ID)
 		var fs []string
 		for _, f := range t.U().Elem.U().Fields {
-			fs = append(fs, fmt.Sprintf("            %s: v.%s as Any", quote(f.Name), swiftPublic(f.Name)))
+			fs = append(fs, fmt.Sprintf("            %s: _v.%s as Any", quote(f.Name), swiftPublic(f.Name)))
 		}
 		if len(fs) == 0 {
-			b.WriteString("        _ = v\n        return GoalchemyFailure(\"source\", \"source error\", [:])\n    }\n")
+			b.WriteString("        _ = _v\n        return GoalchemyFailure(\"source\", \"source error\", [:])\n    }\n")
 		} else {
 			b.WriteString("        return GoalchemyFailure(\"source\", \"source error\", [\n" + strings.Join(fs, ",\n") + "\n        ])\n    }\n")
 		}
 	}
-	b.WriteString("    return GoalchemyFailure(\"source\", String(decoding: GFormat(value), as: UTF8.self))\n}\nprivate func gLibraryReset() {\n    _ = gTypeRegistration\n    gSetupMethods()\n")
+	b.WriteString("    return GoalchemyFailure(\"source\", String(decoding: GFormat(_value), as: UTF8.self))\n}\nprivate func _gLibraryReset() {\n    _ = _gTypeRegistration\n    _gSetupMethods()\n")
 	for _, g := range e.p.Globals {
 		fmt.Fprintf(&b, "    %s.value = GTypes.zero(%d)\n", e.names.Symbol(g.Sym), g.Type.ID)
 	}
-	b.WriteString("}\nprivate func gLibrarySave() -> [GValue] {\n    return [")
+	b.WriteString("}\nprivate func _gLibrarySave() -> [GValue] {\n    return [")
 	var saves []string
 	for _, g := range e.p.Globals {
 		saves = append(saves, e.names.Symbol(g.Sym)+".value")
 	}
 	b.WriteString(strings.Join(saves, ", "))
-	b.WriteString("]\n}\nprivate func gLibraryLoad(_ v: [GValue]) {\n    _ = gTypeRegistration\n    gSetupMethods()\n")
+	b.WriteString("]\n}\nprivate func _gLibraryLoad(_ _v: [GValue]) {\n    _ = _gTypeRegistration\n    _gSetupMethods()\n")
 	for i, g := range e.p.Globals {
-		fmt.Fprintf(&b, "    %s.value = v[%d]\n", e.names.Symbol(g.Sym), i)
+		fmt.Fprintf(&b, "    %s.value = _v[%d]\n", e.names.Symbol(g.Sym), i)
 	}
-	b.WriteString("}\nprivate let gLibraryState = GLibraryState(reset: gLibraryReset, save: gLibrarySave, load: gLibraryLoad)\n")
+	b.WriteString("}\nprivate let _gLibraryState = GLibraryState(reset: _gLibraryReset, save: _gLibrarySave, load: _gLibraryLoad)\n")
 	initFrame := "{ " + e.names.Symbol(e.p.Init.Sym) + "([], []) }"
 	streamOps := func(name string, ops ir.StreamOps, obj string, closeStart string) {
 		op := func(fn string, params []string, out string) string {
@@ -316,30 +316,30 @@ func (e *emitter) library() (string, error) {
 			var inputs, args []string
 			args = append(args, obj)
 			for i, p := range params {
-				inputs = append(inputs, fmt.Sprintf("try gInput%d(%s)", f.Sig.Params[i+1].U().ID, p))
-				args = append(args, fmt.Sprintf("args[%d]", i))
+				inputs = append(inputs, fmt.Sprintf("try _gInput%d(%s)", f.Sig.Params[i+1].U().ID, p))
+				args = append(args, fmt.Sprintf("_args[%d]", i))
 			}
 			last := len(f.Sig.Results) - 1
-			return fmt.Sprintf("{ handle, %s in\n        let args = try GLibrary.prepare { [%s] }\n        return try GLibrary.submitHandles(args, CallOptions(), gLibraryState, [handle], nil, [], GStreamIDs(0), %s, { args, context, objects in %s([%s], []) }, { rv, _ in\n            if let error = try gSourceError(rv[%d]) { throw error }\n            return %s\n        }).wait()\n    }",
+			return fmt.Sprintf("{ handle, %s in\n        let _args = try GLibrary.prepare { [%s] }\n        return try GLibrary.submitHandles(_args, CallOptions(), _gLibraryState, [handle], nil, [], GStreamIDs(0), %s, { _args, _context, _objects in %s([%s], []) }, { _rv, _ in\n            if let error = try _gSourceError(_rv[%d]) { throw error }\n            return %s\n        }).wait()\n    }",
 				strings.Join(params, ", "), strings.Join(inputs, ", "), initFrame, e.names.Symbol(f.Sym), strings.Join(args, ", "), last, out)
 		}
 		res := func(fn string, i int) string {
-			return fmt.Sprintf("try gOutput%d(rv[%d])", e.p.HostIOFunc(fn).Sig.Results[i].U().ID, i)
+			return fmt.Sprintf("try _gOutput%d(_rv[%d])", e.p.HostIOFunc(fn).Sig.Results[i].U().ID, i)
 		}
 		read, write, seek := "nil", "nil", "nil"
 		if ops.Read {
-			read = op("ReadView", []string{"n"}, "("+res("ReadView", 0)+" ?? [], "+res("ReadView", 1)+")")
+			read = op("ReadView", []string{"_n"}, "("+res("ReadView", 0)+" ?? [], "+res("ReadView", 1)+")")
 		}
 		if ops.Write {
-			write = op("WriteView", []string{"d"}, "Int64("+res("WriteView", 0)+")")
+			write = op("WriteView", []string{"_d"}, "Int64("+res("WriteView", 0)+")")
 		}
 		if ops.Seek {
-			seek = op("SeekView", []string{"off", "wh"}, "Int64("+res("SeekView", 0)+")")
+			seek = op("SeekView", []string{"_off", "_wh"}, "Int64("+res("SeekView", 0)+")")
 		}
-		fmt.Fprintf(&b, "private let %s = GStreamOps(\n    read: %s,\n    write: %s,\n    seek: %s,\n    close: { handle in try GLibrary.close(handle, gLibraryState, %s, %s, { rv, _ in if let error = try gSourceError(rv[0]) { throw error } }) })\n",
+		fmt.Fprintf(&b, "private let %s = GStreamOps(\n    read: %s,\n    write: %s,\n    seek: %s,\n    close: { handle in try GLibrary.close(handle, _gLibraryState, %s, %s, { _rv, _ in if let error = try _gSourceError(_rv[0]) { throw error } }) })\n",
 			name, read, write, seek, initFrame, closeStart)
 	}
-	unwrap := "{ if case .pointer(let cell) = objects[0] { return cell.value }; return .nilValue }()"
+	unwrap := "{ if case .pointer(let _cell) = _objects[0] { return _cell.value }; return .nilValue }()"
 	kinds := map[string]bool{}
 	for _, f := range funcs {
 		for _, t := range f.Sig.Results {
@@ -347,9 +347,9 @@ func (e *emitter) library() (string, error) {
 				kinds[k] = true
 				start := "nil"
 				if ir.StreamCloses(k) {
-					start = fmt.Sprintf("{ args, context, objects in %s([%s], []) }", e.names.Symbol(e.p.HostIOFunc("CloseView").Sym), unwrap)
+					start = fmt.Sprintf("{ _args, _context, _objects in %s([%s], []) }", e.names.Symbol(e.p.HostIOFunc("CloseView").Sym), unwrap)
 				}
-				streamOps("gStreamOps"+k, ir.KindOps(k), unwrap, start)
+				streamOps("_gStreamOps"+k, ir.KindOps(k), unwrap, start)
 			}
 		}
 	}
@@ -357,20 +357,20 @@ func (e *emitter) library() (string, error) {
 		if h.Stream.Any() {
 			start := "nil"
 			if h.Close != nil {
-				start = fmt.Sprintf("{ args, context, objects in %s([%s], []) }", e.names.Symbol(h.Close.Sym), handleRecv(h, h.Close))
+				start = fmt.Sprintf("{ _args, _context, _objects in %s([%s], []) }", e.names.Symbol(h.Close.Sym), handleRecv(h, h.Close))
 			}
-			streamOps("gStreamOps"+h.Name, h.Stream, fmt.Sprintf(".interface(GInterface(%d, objects[0]))", h.Ptr.ID), start)
+			streamOps("_gStreamOps"+h.Name, h.Stream, fmt.Sprintf(".interface(GInterface(%d, _objects[0]))", h.Ptr.ID), start)
 		}
 	}
 	for _, h := range abi.Handles {
 		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close() when\n/// done; deinit releases it without running Close.\npublic final class %s {\n    let handle: GHandle\n    init(_ handle: GHandle) { self.handle = handle }\n    deinit { GLibrary.finalize(handle) }\n", h.Name, swiftPublic(handleNames[h]))
 		start := "nil"
 		if h.Close != nil {
-			start = fmt.Sprintf("{ args, context, objects in %s([%s], []) }", e.names.Symbol(h.Close.Sym), handleRecv(h, h.Close))
+			start = fmt.Sprintf("{ _args, _context, _objects in %s([%s], []) }", e.names.Symbol(h.Close.Sym), handleRecv(h, h.Close))
 		}
-		fmt.Fprintf(&b, "    /// Runs the source Close, if any, and releases the handle. Queued calls\n    /// fail and an active call is canceled first.\n    public func close() throws {\n        try GLibrary.close(handle, gLibraryState, %s, %s, { rv, _ in if let error = try gSourceError(rv[0]) { throw error } })\n    }\n", initFrame, start)
+		fmt.Fprintf(&b, "    /// Runs the source Close, if any, and releases the handle. Queued calls\n    /// fail and an active call is canceled first.\n    public func close() throws {\n        try GLibrary.close(handle, _gLibraryState, %s, %s, { _rv, _ in if let error = try _gSourceError(_rv[0]) { throw error } })\n    }\n", initFrame, start)
 		if h.Stream.Any() {
-			fmt.Fprintf(&b, "    /// The handle as a stream; each operation is a call on the handle and\n    /// closing the stream closes the handle.\n    public func io() -> GoalchemySourceStream { GoalchemySourceStream(handle, gStreamOps%s, owned: false) }\n", h.Name)
+			fmt.Fprintf(&b, "    /// The handle as a stream; each operation is a call on the handle and\n    /// closing the stream closes the handle.\n    public func io() -> GoalchemySourceStream { GoalchemySourceStream(handle, _gStreamOps%s, owned: false) }\n", h.Name)
 		}
 		for _, f := range h.Methods {
 			if err := e.libraryWrapper(&b, abi, ir.MethodName(f), h, f, typ, initFrame, used, reserved); err != nil {
@@ -396,9 +396,9 @@ func (e *emitter) library() (string, error) {
 // receiver gets a copy of the object the handle points to.
 func handleRecv(h *ir.Handle, f *ir.Func) string {
 	if h.ValueReceiver(f) {
-		return "{ if case .pointer(let cell) = objects[0] { return GCopy(cell.value) }; return .nilValue }()"
+		return "{ if case .pointer(let _cell) = _objects[0] { return GCopy(_cell.value) }; return .nilValue }()"
 	}
-	return "objects[0]"
+	return "_objects[0]"
 }
 
 func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name string, recv *ir.Handle, f *ir.Func, typ func(*ir.Type) string, initFrame string, used, reserved map[string]bool) error {
@@ -438,26 +438,26 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	inputIndex := 0
 	for i, t := range params {
 		if sourceContext(t) {
-			args = append(args, "context")
+			args = append(args, "_context")
 			continue
 		}
 		if k := ir.StreamKind(t); k != "" {
 			ps = append(ps, fmt.Sprintf("_ a%d: GoalchemyStream?", i))
 			n := len(streams)
 			streams = append(streams, fmt.Sprintf("try GLibrary.stream(a%d, %q)", i, k))
-			adapters = append(adapters, fmt.Sprintf("ids.values[%d] == 0 ? nil : { %s([.integer(UInt64(bitPattern: ids.values[%d]), 64, true)], []) }", n, e.names.Symbol(e.p.StreamAdapter(k).Sym), n))
+			adapters = append(adapters, fmt.Sprintf("_ids.values[%d] == 0 ? nil : { %s([.integer(UInt64(bitPattern: _ids.values[%d]), 64, true)], []) }", n, e.names.Symbol(e.p.StreamAdapter(k).Sym), n))
 			zeros = append(zeros, fmt.Sprintf("GTypes.zero(%d)", t.ID))
-			args = append(args, fmt.Sprintf("streams[%d]", n))
+			args = append(args, fmt.Sprintf("_streams[%d]", n))
 			continue
 		}
 		ps = append(ps, fmt.Sprintf("_ a%d: %s", i, ptyp(t)))
 		if abi.Handle(t) != nil {
 			hs = append(hs, fmt.Sprintf("a%d?.handle", i))
-			args = append(args, fmt.Sprintf("objects[%d]", len(hs)-1))
+			args = append(args, fmt.Sprintf("_objects[%d]", len(hs)-1))
 			continue
 		}
-		inputs = append(inputs, fmt.Sprintf("try gInput%d(a%d)", t.U().ID, i))
-		args = append(args, fmt.Sprintf("args[%d]", inputIndex))
+		inputs = append(inputs, fmt.Sprintf("try _gInput%d(a%d)", t.U().ID, i))
+		args = append(args, fmt.Sprintf("_args[%d]", inputIndex))
 		inputIndex++
 	}
 	ps = append(ps, "_ options: CallOptions = CallOptions()")
@@ -465,24 +465,24 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	if recv != nil {
 		indent, prefix = "    ", "public func"
 	}
-	fmt.Fprintf(b, "%s%s %s(%s) -> Operation<%s> {\n%s    do {\n%s        let args = try GLibrary.prepare {\n%s            _ = gTypeRegistration\n%s            return [%s]\n%s        }\n", indent, prefix, swiftPublic(name), strings.Join(ps, ", "), result, indent, indent, indent, indent, strings.Join(inputs, ", "), indent)
+	fmt.Fprintf(b, "%s%s %s(%s) -> Operation<%s> {\n%s    do {\n%s        let _args = try GLibrary.prepare {\n%s            _ = _gTypeRegistration\n%s            return [%s]\n%s        }\n", indent, prefix, swiftPublic(name), strings.Join(ps, ", "), result, indent, indent, indent, indent, strings.Join(inputs, ", "), indent)
 	call := fmt.Sprintf("%s([%s], [])", e.names.Symbol(f.Sym), strings.Join(args, ", "))
 	if len(streams) > 0 {
-		call = fmt.Sprintf("GLibrary.streamFrame([%s], [%s]) { streams in %s }", strings.Join(adapters, ", "), strings.Join(zeros, ", "), call)
+		call = fmt.Sprintf("GLibrary.streamFrame([%s], [%s]) { _streams in %s }", strings.Join(adapters, ", "), strings.Join(zeros, ", "), call)
 	}
-	fmt.Fprintf(b, "%s        let ids = GStreamIDs(%d)\n%s        let streams: [CallbackProvider?] = [%s]\n", indent, len(streams), indent, strings.Join(streams, ", "))
-	fmt.Fprintf(b, "%s        return GLibrary.submitHandles(args, options, gLibraryState, [%s], nil, streams, ids, %s, { args, context, objects in %s }, { rv, instance in\n", indent, strings.Join(hs, ", "), initFrame, call)
+	fmt.Fprintf(b, "%s        let _ids = GStreamIDs(%d)\n%s        let _streams: [CallbackProvider?] = [%s]\n", indent, len(streams), indent, strings.Join(streams, ", "))
+	fmt.Fprintf(b, "%s        return GLibrary.submitHandles(_args, options, _gLibraryState, [%s], nil, _streams, _ids, %s, { _args, _context, _objects in %s }, { _rv, _instance in\n", indent, strings.Join(hs, ", "), initFrame, call)
 	if hasErr {
-		fmt.Fprintf(b, "%s            if let error = try gSourceError(rv[%d]) { throw error }\n", indent, n)
+		fmt.Fprintf(b, "%s            if let error = try _gSourceError(_rv[%d]) { throw error }\n", indent, n)
 	}
 	out := func(i int) string {
 		if h := abi.Handle(results[i]); h != nil {
-			return fmt.Sprintf("GLibrary.wrap(instance, rv[%d], %q, GoalchemyGenerated.%s.init)", i, h.Name, swiftPublic(e.handleNames[h]))
+			return fmt.Sprintf("GLibrary.wrap(_instance, _rv[%d], %q, GoalchemyGenerated.%s.init)", i, h.Name, swiftPublic(e.handleNames[h]))
 		}
 		if k := ir.StreamKind(results[i]); k != "" {
-			return fmt.Sprintf("{ if case .nilValue = rv[%d] { return nil }; return GLibrary.wrap(instance, .pointer(GCell(rv[%d])), \"io.%s\", { GoalchemySourceStream($0, gStreamOps%s) }) }()", i, i, k, k)
+			return fmt.Sprintf("{ if case .nilValue = _rv[%d] { return nil }; return GLibrary.wrap(_instance, .pointer(GCell(_rv[%d])), \"io.%s\", { GoalchemySourceStream($0, _gStreamOps%s) }) }()", i, i, k, k)
 		}
-		return fmt.Sprintf("try gOutput%d(rv[%d])", results[i].U().ID, i)
+		return fmt.Sprintf("try _gOutput%d(_rv[%d])", results[i].U().ID, i)
 	}
 	if n == 0 {
 		fmt.Fprintf(b, "%s            return ()\n", indent)

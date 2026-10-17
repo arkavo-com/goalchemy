@@ -2,7 +2,7 @@
 // results arrive in t.rv as [index, value, ok], index -1 for the default.
 import { dequeue, hasLive, SelectState, tryRecv, Waiter, type Chan } from "./chan_make.ts";
 import { plainPanic } from "../types/panic.ts";
-import { sched, type Task } from "./task_spawn.ts";
+import { sched, type Queue, type Task } from "./task_spawn.ts";
 
 export interface SelectCase {
   ch: Chan | null;
@@ -42,7 +42,7 @@ export function select(t: Task, cases: SelectCase[], hasDefault: boolean): void 
     return;
   }
   const st = new SelectState();
-  const registrations: [Waiter[], Waiter][] = [];
+  const registrations: [Queue<Waiter>, Waiter][] = [];
   cases.forEach((c, i) => {
     if (c.ch === null) return;
     const w = new Waiter(t, c.send ? c.val : undefined, st, i);
@@ -53,7 +53,7 @@ export function select(t: Task, cases: SelectCase[], hasDefault: boolean): void 
   t.cleanup = () => {
     st.done = true;
     for (const [q,w] of registrations) {
-      const i=q.indexOf(w); if(i>=0)q.splice(i,1);
+      q.remove(w);
       w.clear();
     }
     registrations.length = 0;

@@ -26,7 +26,7 @@ harness:
   support: [tests/harness/Harness.cs, tests/harness/Codec.cs, tests/harness/run.sh]
   generated: tests/harness/HarnessGen.cs
   command: [sh, targets/csharp/tests/harness/run.sh]
-support_files: [types/Floats.cs, types/Bounds.cs, types/Box.cs, types/Fn.cs, types/GoMap.cs, types/GoPanic.cs, types/Ints.cs, types/KeyList.cs, types/Out.cs, types/Panics.cs, types/Program.cs, types/Ref.cs, types/Slice.cs, types/TypeDesc.cs, types/Usings.cs, types/Utf8.cs, types/Native.cs, types/Crypto.cs, types/Callback.cs, types/Log.cs, runtime/Library.cs, runtime/TaskSpawn.cs, runtime/StdContextErr.cs, runtime/StdContextWithCancel.cs, runtime/ChanMake.cs, runtime/ChanClose.cs, runtime/StdErrorsNew.cs]
+support_files: [types/Async.cs, types/Floats.cs, types/Bounds.cs, types/Box.cs, types/Fn.cs, types/GoMap.cs, types/GoPanic.cs, types/Ints.cs, types/KeyList.cs, types/Out.cs, types/Panics.cs, types/Program.cs, types/Ref.cs, types/Slice.cs, types/TypeDesc.cs, types/Usings.cs, types/Utf8.cs, types/Native.cs, types/Crypto.cs, types/Callback.cs, types/Log.cs, runtime/Library.cs, runtime/TaskSpawn.cs, runtime/StdContextErr.cs, runtime/StdContextWithCancel.cs, runtime/ChanMake.cs, runtime/ChanClose.cs, runtime/StdErrorsNew.cs]
 functions:
   - {id: core.float.convert, contract_version: 1.0.0, symbol: "R.round", implementation: runtime/FloatConvert.cs}
   - {id: core.float.add, contract_version: 1.0.0, symbol: "R.floatAdd_<k>", implementation: runtime/FloatAdd.cs, harness: "R.floatAdd_{T.kind}({0}, {1})"}
@@ -156,3 +156,5 @@ functions:
   - {id: lib.http.exchange_close, contract_version: 1.0.0, symbol: R.libHttpExchangeClose, implementation: runtime/LibHttpExchangeClose.cs, requires: [lib.http.do, std.context.err]}
 
   - {id: lib.checksum.crc32_ieee, contract_version: 1.0.0, symbol: R.libChecksumCRC32IEEE, implementation: runtime/LibChecksumCRC32IEEE.cs, harness: "R.libChecksumCRC32IEEE({0})"}
+  - {id: lib.task.start, contract_version: 1.0.0, symbol: "R.libTaskStart", implementation: runtime/LibTaskStart.cs, requires: [core.task.spawn], harness: "unsupported"}
+  - {id: lib.task.await, contract_version: 1.0.0, symbol: "R.libTaskAwait", implementation: runtime/LibTaskAwait.cs, requires: [lib.task.start], harness: "unsupported"}

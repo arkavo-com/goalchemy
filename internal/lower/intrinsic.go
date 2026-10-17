@@ -22,6 +22,9 @@ func (fl *fnLowerer) callee(e *ast.CallExpr) types.Object {
 }
 
 func (fl *fnLowerer) intrinsic(e *ast.CallExpr) ([]ir.Value, bool) {
+	if out, ok := fl.taskIntrinsic(e); ok {
+		return out, true
+	}
 	if f, ok := ast.Unparen(e.Fun).(*ast.SelectorExpr); ok && fl.f.Pkg != catalog.JSONPackage {
 		if sel := fl.info.Selections[f]; sel != nil && sel.Kind() == types.MethodVal {
 			if name, ok := catalog.JSONStream(sel.Obj()); ok {

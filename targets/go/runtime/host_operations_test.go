@@ -43,7 +43,7 @@ func TestHostCompletionBeforeSubmissionReturnsAndFIFO(t *testing.T) {
 	}
 	s.ready(b)
 	token.complete([]any{7}, nil) // synchronous/reentrant submission
-	if a.RV != nil || len(s.runq) != 1 {
+	if a.RV != nil || s.runq.len() != 1 {
 		t.Fatal("callback mutated source state")
 	}
 	token.complete([]any{99}, nil)
@@ -200,12 +200,12 @@ func TestHostShutdownAndResetRejectLateCompletion(t *testing.T) {
 	token := s.registerHost(a, func() { close(release) }, func() { released.Add(1) }, nil)
 	s.launchHost(token, func() []any { <-release; return []any{1} })
 	ResetScheduler()
-	if !s.closed || released.Load() != 1 || a.RV != nil || len(s.runq) != 0 {
+	if !s.closed || released.Load() != 1 || a.RV != nil || s.runq.len() != 0 {
 		t.Fatal("retirement drove source or leaked work")
 	}
 	token.complete([]any{2}, &HostFault{"late"})
 	s.drainHost()
-	if len(s.mail.queue) != 0 || len(sched.runq) != 0 {
+	if len(s.mail.queue) != 0 || sched.runq.len() != 0 {
 		t.Fatal("old callback revived scheduler")
 	}
 	s.shutdown()
@@ -282,11 +282,11 @@ func TestHostBoundedCompletionStress(t *testing.T) {
 	}
 	s.workers.Wait()
 	s.drainHost()
-	if len(s.operations) != 0 || len(s.runq) != n || cleaned.Load() != n {
+	if len(s.operations) != 0 || s.runq.len() != n || cleaned.Load() != n {
 		t.Fatal("stress cleanup/application count wrong")
 	}
-	for _, a := range s.runq {
-		if a.RV[0] != a.id {
+	for i := range s.runq.len() {
+		if a := s.runq.at(i); a.RV[0] != a.id {
 			t.Fatal("completion applied to wrong task")
 		}
 	}

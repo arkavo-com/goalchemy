@@ -43,6 +43,12 @@ public static class Program
         if (sourceDepth >= 4096 || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack()) throw new SourceStackFatal();
         sourceDepth++; return new SourceScope();
     }
+    /// <summary>The guard of an async function: parked bodies keep no stack,
+    /// so only the running thread's remaining stack is checked.</summary>
+    public static void checkStack()
+    {
+        if (!System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack()) throw new SourceStackFatal();
+    }
     public static void resetPanicBinding()
     {
         MAIN_STATE.curPanic = null; MAIN_STATE.deferTarget = null;

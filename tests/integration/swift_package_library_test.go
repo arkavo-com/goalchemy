@@ -3,15 +3,17 @@ package integration
 import (
 	"context"
 	"fmt"
-	"github.com/eugenioenko/goalchemy/internal/diagnostics"
-	"github.com/eugenioenko/goalchemy/internal/driver"
-	"github.com/eugenioenko/goalchemy/internal/subset"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/eugenioenko/goalchemy/internal/diagnostics"
+	"github.com/eugenioenko/goalchemy/internal/driver"
+	"github.com/eugenioenko/goalchemy/internal/subset"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestGeneratedSwiftPackageLibrary(t *testing.T) {
@@ -55,7 +57,7 @@ func CRC(ctx context.Context,data []byte)(uint32,error){return checksum.CRC32IEE
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			out, consumer := t.TempDir(), t.TempDir()
-			if ds := driver.EmitWithOptions("swift", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("swift", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			// Caller-owned sources must not enter the generated native target.
@@ -75,7 +77,7 @@ let package = Package(name:"PackageConsumer",dependencies:[.package(name:"Goalch
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release")
+			cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release -Xswiftc -Onone")
 			cmd.Dir, cmd.Env = consumer, driver.ToolEnv()
 			data, err := cmd.CombinedOutput()
 			if err != nil {

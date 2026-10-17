@@ -23,5 +23,5 @@ func TestSwiftByteValuesNativeOracle(t *testing.T) {
 }
 
 func TestSwiftBulkBytesCompactNativeOracle(t *testing.T) {
-	testutil.RunFixtureOptions(t, testutil.Fixture{Name: "bulk", Dir: "testdata/byte_bulk"}, []string{"go", "swift"}, driver.EmitOptions{CompactNames: true})
+	testutil.RunFixtureOptions(t, testutil.Fixture{Name: "bulk", Dir: "testdata/byte_bulk"}, []string{"go", "swift"}, driver.EmitOptions{Names: "compact"})
 }

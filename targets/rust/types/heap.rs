@@ -22,6 +22,15 @@ pub enum Obj {
     Context(Context),
     Iter(MapIter),
     Panic(PanicObj),
+    Future(FutureState),
+}
+
+pub struct FutureState {
+    pub done: bool,
+    pub observed: bool,
+    pub results: V,
+    pub panic: V,
+    pub waiters: Vec<Rc<Task>>,
 }
 
 pub struct Heap {
@@ -31,6 +40,7 @@ pub struct Heap {
     live: usize,
     since: usize,
     threshold: usize,
+    stress: bool,
     pub peak: usize,
     pub collections: usize,
 }
@@ -49,6 +59,7 @@ thread_local! {
         live: 0,
         since: 0,
         threshold: min_threshold(),
+        stress: min_threshold() == 1,
         peak: 0,
         collections: 0,
     });
@@ -157,6 +168,7 @@ pub struct Fr {
     p: *mut FrData,
     idx: usize,
     rooted: bool,
+    task: Option<std::rc::Weak<Task>>,
 }
 
 impl Fr {
@@ -167,12 +179,22 @@ impl Fr {
             r.push(p);
             r.len() - 1
         });
-        Fr { p, idx, rooted: true }
+        Fr { p, idx, rooted: true, task: None }
     }
 
     pub fn unrooted(n: usize) -> Fr {
         let p = Box::into_raw(Box::new(FrData { v: vec![V::Nil; n], d: Vec::new() }));
-        Fr { p, idx: 0, rooted: false }
+        Fr { p, idx: 0, rooted: false, task: None }
+    }
+
+    /// Async activations belong to their task, not the synchronous TLS stack.
+    /// Registrations are removed by identity: dropping a parked future need
+    /// not follow construction order, even within a single task.
+    pub fn task(t: &Rc<Task>, n: usize) -> Fr {
+        let mut fr = Fr::unrooted(n);
+        t.native_roots.borrow_mut().push(fr.p);
+        fr.task = Some(Rc::downgrade(t));
+        fr
     }
 
     #[inline]
@@ -222,6 +244,9 @@ impl Drop for Fr {
             let idx = self.idx;
             ROOTS.with(|r| r.borrow_mut().truncate(idx));
         }
+        if let Some(t) = self.task.as_ref().and_then(|t| t.upgrade()) {
+            t.native_roots.borrow_mut().retain(|p| *p != self.p);
+        }
         unsafe { drop(Box::from_raw(self.p)) }
     }
 }
@@ -262,7 +287,7 @@ impl Drop for TempRoots {
 pub fn safepoint() {
     let due = HEAP.with(|hp| {
         let hp = hp.borrow();
-        hp.since >= hp.threshold
+        hp.stress || hp.since >= hp.threshold
     });
     if due {
         collect();
@@ -379,6 +404,11 @@ pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) 
             out.push(it.k.clone());
             out.push(it.v.clone());
         }
+        Obj::Future(f) => {
+            out.push(f.results.clone());
+            out.push(f.panic.clone());
+            for t in &f.waiters { trace_task(t, out, frames); }
+        }
         Obj::Panic(p) => {
             out.push(p.value.clone());
             out.push(p.prev.clone());
@@ -399,6 +429,7 @@ impl Frame {
 }
 
 pub fn trace_task(t: &Rc<Task>, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) {
+    for p in t.native_roots.borrow().iter() { trace_data(*p, out); }
     if let Some(f) = t.frame.borrow().as_ref() {
         frames.push(f.clone());
     }

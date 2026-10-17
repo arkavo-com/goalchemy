@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: d432bb323379bd873c39346fa27f78ca8a93a8bc55125efd0418fa32c82e5e93
 symbol: "StdSyncMutexUnlock.stdSyncMutexUnlock"
 implementation: runtime/StdSyncMutexUnlock.java
-implementation_hash: 3cf7c77852514e17fb493f9991949be8ad125b3864057be6d6b9f65a0768295c
+implementation_hash: f8e38ebdc68d867ae61664ff4931502f1f00bf5f61b8255a36cf74114fe724e3
 summary: "sync.Mutex.Unlock: hand the lock to the first waiter or release it."
 suspension: never
 determinism: deterministic

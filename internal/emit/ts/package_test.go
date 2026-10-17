@@ -40,7 +40,7 @@ func TestPackageOutput(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			p := *res.IR
-			p.CompactNames = compact
+			p.Names = testutil.Names(compact)
 			output, err := ts.Emit(&p, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -93,7 +93,7 @@ func TestPackageOutput(t *testing.T) {
 				t.Fatalf("missing source owners: %v", packageFiles)
 			}
 			for _, f := range p.Funcs {
-				symbol := naming.Symbol(&p, f.Sym)
+				symbol := naming.New(&p, ts.NameRules(&p)).Symbol(f.Sym)
 				declarations := 0
 				for _, file := range output.Files {
 					if strings.Contains(string(file.Source), "function "+symbol+"(") {
@@ -109,7 +109,7 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, g := range p.Globals {
 				for _, file := range output.Files {
-					declaration := naming.Symbol(&p, g.Sym) + ": "
+					declaration := naming.New(&p, ts.NameRules(&p)).Symbol(g.Sym) + ": "
 					if strings.Contains(string(file.Source), declaration) && file.Owner != g.Pkg {
 						t.Fatalf("global %s wrong owner", g.Name)
 					}
@@ -119,7 +119,7 @@ func TestPackageOutput(t *testing.T) {
 				if !typ.Boxed {
 					continue
 				}
-				if count := strings.Count(combined, "$types."+naming.Type(&p, typ, "TD$")+" = "); count != 1 {
+				if count := strings.Count(combined, "$types."+naming.New(&p, ts.NameRules(&p)).Type(typ, "TD$")+" = "); count != 1 {
 					t.Fatalf("descriptor %d assignments %d", typ.ID, count)
 				}
 			}
@@ -133,7 +133,7 @@ func TestPackageOutput(t *testing.T) {
 				t.Fatal("worker lacks imported live package references")
 			}
 			out := t.TempDir()
-			if ds := driver.EmitWithOptions("typescript", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("typescript", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			data, err := os.ReadFile(filepath.Join(out, "goalchemy.manifest.json"))
@@ -292,7 +292,7 @@ func checkOwnedDeclarationMap(t *testing.T, p *ir.Program, source []byte, owner 
 		if global.Pkg != owner {
 			continue
 		}
-		declaration := naming.Symbol(p, global.Sym) + ": "
+		declaration := naming.New(p, ts.NameRules(p)).Symbol(global.Sym) + ": "
 		for index, line := range strings.Split(string(source), "\n") {
 			if !strings.Contains(line, declaration) {
 				continue

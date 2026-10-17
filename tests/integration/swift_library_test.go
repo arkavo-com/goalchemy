@@ -82,7 +82,7 @@ func PanicOutstanding(ctx context.Context)error{
 }
 func Panic()error{panic("deliberate")}
 `)
-	if ds := testutil.CompileGateOptions(source, "swift", out, "cooperative", driver.EmitOptions{CompactNames: compact}); len(ds) > 0 {
+	if ds := testutil.CompileGateOptions(source, "swift", out, "cooperative", driver.EmitOptions{Names: testutil.Names(compact)}); len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	write(consumer, "Package.swift", fmt.Sprintf(`// swift-tools-version: 6.0
@@ -209,7 +209,7 @@ print("PASS Swift library lifecycle")
 `)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release")
+	cmd := exec.CommandContext(ctx, "sh", "-c", "swift run -c release -Xswiftc -Onone")
 	cmd.Dir = consumer
 	cmd.Env = driver.ToolEnv()
 	output, err := cmd.CombinedOutput()

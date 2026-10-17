@@ -122,7 +122,9 @@ RecursionError unwinds to the owner driver, becomes the same stack fatal, awaits
 ACK, then reports exactly `runtime: goroutine stack exceeds limit` and
 `fatal error: stack overflow` with exit 2. Normal returns, deferred ordinary calls
 and exceptions balance the guard. These bounds are explicit implementation
-limits, not Go dynamic-stack growth. Arbitrary catastrophic interpreter/native
+limits, not Go dynamic-stack growth. Under `--pause-model=native` cooperative
+calls are coroutines bounded by CPython's recursion limit instead of the
+512-frame bound; its RecursionError becomes the same stack fatal. Arbitrary catastrophic interpreter/native
 extension failures cannot promise managed cleanup or crash recovery.
 
 ## Evidence and reproduction

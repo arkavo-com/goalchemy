@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.IdentityHashMap;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.locks.LockSupport;
 
 /** core.task.spawn and the cooperative scheduler. Suspending functions are
  * compiled to resumable frames: a frame holds the function's locals and the
@@ -19,15 +20,27 @@ import java.util.concurrent.CompletionStage;
  * task runs at a time and runnable tasks are dispatched in FIFO order. Pause
  * primitives either complete immediately, leaving their results in task.rv,
  * or block the task until another task or a timer readies it. Deferred
- * calls, panics, and recover are managed per task by the runtime. */
+ * calls, panics, and recover are managed per task by the runtime.
+ *
+ * Under the native pause model a task body is an ordinary method taking the
+ * task, run on its own virtual thread by a NativeFrame; exactly one thread
+ * holds the turn. A task that blocks runs the scheduler itself (pass) and
+ * hands the turn straight to the next task's thread. The driver takes the
+ * turn back when nothing is runnable, when main is done, on a scheduler
+ * failure (raised by the driver, never through a task body), and after every
+ * turn in host mode. */
 public final class TaskSpawn {
     private TaskSpawn() {}
+
+    @FunctionalInterface
+    interface FutureCompletion { void complete(Task t, Object[] results, GoPanic panic); }
 
     public abstract static class Frame {
         public int pc;
         public ArrayList<Program.Deferred> defers = new ArrayList<>();
         public Frame parent;
         public GoPanic panicking;
+        FutureCompletion completion;
 
         public abstract void step(Task t);
 
@@ -163,6 +176,8 @@ public final class TaskSpawn {
     }
 
     public static final class Scheduler {
+        final LinkedHashMap<Object,GoPanic> unawaited = new LinkedHashMap<>();
+        void checkFuturePanics() { if(!unawaited.isEmpty()) throw new FatalPanic(unawaited.values().iterator().next()); }
         final ArrayDeque<Task> runq = new ArrayDeque<>();
         public Task cur;
         Task main;
@@ -182,6 +197,11 @@ public final class TaskSpawn {
         final ArrayList<Timer> timers = new ArrayList<>();
         long seq;
         boolean harness;
+        /** The native frame that takes the turn next, set by its step. */
+        NativeFrame handoff;
+        Thread home;
+        volatile boolean homeTurn;
+        Throwable fault;
 
         Scheduler(Task main) { this(main, System::nanoTime); }
 
@@ -291,7 +311,7 @@ public final class TaskSpawn {
                 long version=mail.version();
                 libraryControl.run(); fireDue(now()); drainHost();
                 if(!runq.isEmpty()) return runq.poll();
-                if(operations.isEmpty() && timers.isEmpty()) throw new HostFatal("all goroutines are asleep - deadlock!");
+                if(operations.isEmpty() && timers.isEmpty()) { checkFuturePanics(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
                 long at=Long.MAX_VALUE;
                 for(Timer t:timers) at=Math.min(at,t.at);
                 mail.await(version,timers.isEmpty() ? -1 : Math.max(0,at-now()));
@@ -301,6 +321,7 @@ public final class TaskSpawn {
         public void shutdown() {
             assertDriver(); if(closed) return;
             closed=true; synchronized(mail) { mail.retiring=true; }
+            for(Task t:tasks) if(t.frame instanceof NativeFrame n) n.kill(mail);
             Throwable failure=null;
             for(HostOperation op:operations.values()) try { op.cancel.run(); } catch(Throwable e) { if(failure==null) failure=e; }
             for(;;) {
@@ -320,12 +341,12 @@ public final class TaskSpawn {
                 t.cleanup=null; t.frame=null; t.rv=new Object[0]; t.done=true; t.blocked=false;
                 t.curPanic=null; t.resumePanic=null; t.deferTarget=null;
             }
-            tasks.clear(); cur=null; main=null;
+            tasks.clear(); cur=null; main=null; handoff=null;
             if(failure!=null) throw new HostFault("owner cleanup: " + failure);
         }
         Task next() {
             while(runq.isEmpty()) {
-                if(timers.isEmpty()) { if(harness) throw new Blocked(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
+                if(timers.isEmpty()) { checkFuturePanics(); if(harness) throw new Blocked(); throw new HostFatal("all goroutines are asleep - deadlock!"); }
                 fireTimers();
             }
             return runq.poll();
@@ -344,16 +365,10 @@ public final class TaskSpawn {
 
         void run(Task t) {
             assertDriver();
-            cur = t;
-            t.blocked = false;
-            if (t.cleanup != null) {
-                Runnable c = t.cleanup;
-                t.cleanup = null;
-                c.run();
-            }
+            enter(t);
             while (!t.blocked && t.frame != null) {
                 GoPanic p = t.resumePanic;
-                if (p != null) {
+                if (p != null && !(t.frame instanceof NativeFrame)) {
                     t.resumePanic = null;
                     exit(t, t.frame, p);
                     continue;
@@ -364,7 +379,111 @@ public final class TaskSpawn {
                 } catch (GoPanic e) {
                     exit(t, f, e);
                 }
+                if (handoff != null) return;
             }
+        }
+
+        void enter(Task t) {
+            cur = t;
+            t.blocked = false;
+            if (t.cleanup != null) {
+                Runnable c = t.cleanup;
+                t.cleanup = null;
+                c.run();
+            }
+        }
+
+        /** Runs native bodies the turn was handed to until it comes back to
+         * the driver, and raises a failure that occurred on their side. */
+        void turnBack() {
+            home = Thread.currentThread();
+            transfer();
+            while (!homeTurn) {
+                LockSupport.park(this);
+                if (Thread.interrupted()) mail.interrupted = true;
+            }
+            homeTurn = false;
+            Throwable e = fault;
+            if (e != null) {
+                fault = null;
+                throw rethrow(e);
+            }
+        }
+
+        /** Gives the turn to the handoff frame's thread, starting its body. */
+        void transfer() {
+            NativeFrame n = handoff;
+            handoff = null;
+            if (n.thread == null) {
+                n.thread = Thread.ofVirtual().unstarted(() -> body(n.task, n));
+                driver = n.thread;
+                n.thread.start();
+                return;
+            }
+            driver = n.thread;
+            n.turn = true;
+            LockSupport.unpark(n.thread);
+        }
+
+        void toDriver() {
+            driver = home;
+            homeTurn = true;
+            LockSupport.unpark(home);
+        }
+
+        /** Runs the scheduler on a task's thread while it holds the turn: self
+         * is blocked, or null when its body finished. Frame tasks run inline
+         * and the next native body is handed the turn. Reports true when self
+         * runs next. */
+        boolean pass(Task self) {
+            try {
+                while (!main.done && !hostMode) {
+                    Task u = runq.poll();
+                    if (u == null) break;
+                    if (u == self) {
+                        enter(u);
+                        return true;
+                    }
+                    run(u);
+                    if (handoff != null) {
+                        transfer();
+                        return false;
+                    }
+                }
+            } catch (Throwable e) {
+                fault = e;
+            }
+            toDriver();
+            return false;
+        }
+
+        /** A native body's thread: delivers its results or panic like a
+         * frame return, then continues the task's frames and the scheduler. */
+        void body(Task t, NativeFrame n) {
+            Throwable failure = null;
+            try {
+                n.res = n.body.call(t);
+            } catch (Kill k) {
+                return;
+            } catch (Throwable e) {
+                failure = e;
+            }
+            try {
+                if (failure != null && !(failure instanceof GoPanic)) throw failure;
+                exit(t, n, (GoPanic) failure);
+                if (t.frame != null) {
+                    run(t);
+                    if (handoff != null) {
+                        transfer();
+                        return;
+                    }
+                }
+            } catch (Throwable e) {
+                fault = e;
+                toDriver();
+                return;
+            }
+            pass(null);
         }
 
         void exit(Task t, Frame f, GoPanic p) {
@@ -390,6 +509,7 @@ public final class TaskSpawn {
                 t.done = true;
                 t.rv=new Object[0]; t.curPanic=null; t.deferTarget=null;
                 if(t!=main) tasks.remove(t);
+                if(f.completion != null) { f.completion.complete(t,p == null ? f.results() : new Object[0],p); return; }
                 if (p != null) throw new FatalPanic(p);
                 return;
             }
@@ -584,7 +704,11 @@ public final class TaskSpawn {
         try {
             Task main=new Task(0,null); s=install(main,false); s.hostMode=host;
             main.frame=entry.get(); s.ready(main);
-            while(!main.done) s.run(host ? s.nextHost() : s.next());
+            while(!main.done) {
+                s.run(host ? s.nextHost() : s.next());
+                if(s.handoff!=null) s.turnBack();
+            }
+            s.checkFuturePanics();
         } catch(Throwable e) { failure=e; }
         if(s!=null) try { s.shutdown(); } catch(Throwable e) { if(failure==null) failure=e; }
         Program.resetPanicBinding();
@@ -613,8 +737,9 @@ public final class TaskSpawn {
             Mailbox mailbox=s.mail;
             attach.accept(mailbox::signal);
             Frame root=entry.get();main.frame=root; s.ready(main);
-            while(!main.done) { control.run(); s.run(s.nextHost()); }
+            while(!main.done) { control.run(); s.run(s.nextHost()); if(s.handoff!=null) s.turnBack(); }
             // Frame results, including structured errors, remain source-owned here.
+            s.checkFuturePanics();
             result=capture.apply(root.results());
         } catch(Throwable e) { failure=e; }
         if(s!=null) try { s.shutdown(); } catch(Throwable e) { failure=e; }
@@ -666,6 +791,123 @@ public final class TaskSpawn {
     /** Frames preserve the Task-style ABI of possibly suspending capabilities. */
     public static Frame nativeFrame(Primitive fn) { return new AwaitFrame(fn); }
 
+    static RuntimeException rethrow(Throwable e) {
+        if (e instanceof RuntimeException r) throw r;
+        if (e instanceof Error r) throw r;
+        throw new HostFault(String.valueOf(e));
+    }
+
+    public interface Body {
+        Object[] call(Task t);
+    }
+
+    /** Unwinds a parked native body at shutdown without running source code. */
+    static final class Kill extends Error {
+        Kill() {
+            super(null, null, false, false);
+        }
+    }
+
+    /** A task body of the native pause model, run on its own thread. */
+    public static final class NativeFrame extends Frame {
+        final Body body;
+        Task task;
+        Thread thread;
+        volatile boolean turn;
+        boolean killed;
+        Object[] res = new Object[0];
+
+        NativeFrame(Body body) {
+            this.body = body;
+        }
+
+        public void step(Task t) {
+            task = t;
+            t.owner.handoff = this;
+        }
+
+        public Object[] results() {
+            return res;
+        }
+
+        void kill(Mailbox mail) {
+            if (thread == null || killed) return;
+            killed = true;
+            turn = true;
+            LockSupport.unpark(thread);
+            for (;;) {
+                try {
+                    thread.join();
+                    return;
+                } catch (InterruptedException e) {
+                    mail.interrupted = true;
+                }
+            }
+        }
+    }
+
+    /** The frame of a native-pause function, for go, defer, function values
+     * and library calls. */
+    public static Frame nativeTask(Body body) { return new NativeFrame(body); }
+
+    /** Completes a pause primitive that left native task t blocked: the
+     * scheduler runs other tasks until it chooses t again. */
+    public static void await(Task t) {
+        NativeFrame n = (NativeFrame) t.frame;
+        if (!t.owner.pass(t)) {
+            while (!n.turn) LockSupport.park(n);
+            n.turn = false;
+            if (n.killed) throw new Kill();
+        }
+        GoPanic p = t.resumePanic;
+        if (p != null) {
+            t.resumePanic = null;
+            throw p;
+        }
+    }
+
+    /** Runs a function value's or method's frame on native task t and leaves
+     * its results in t.rv. */
+    public static void callFrame(Task t, Frame f) {
+        if (f instanceof NativeFrame n) {
+            t.rv = n.body.call(t);
+        } else if (f instanceof SyncFrame s) {
+            t.rv = s.fn.get();
+        } else if (f instanceof AwaitFrame a) {
+            a.fn.run(t);
+            if (t.blocked) await(t);
+        } else {
+            throw new HostFault("synchronous call paused");
+        }
+    }
+
+    /** Runs a native function's deferred calls, those that pause on task t;
+     * recover and the panic chain behave as in Program.runDefers. */
+    public static void runDefers(Task t, ArrayList<Program.Deferred> ds, GoPanic p) {
+        GoPanic panicking = p;
+        while (!ds.isEmpty()) {
+            Program.Deferred d = ds.remove(ds.size() - 1);
+            GoPanic savedPanic = t.curPanic;
+            Object savedTarget = t.deferTarget;
+            t.curPanic = panicking;
+            t.deferTarget = d.fid;
+            try {
+                if (d.f == null) throw Panics.nilDeref();
+                if (d.start) callFrame(t, (Frame) d.f.call(d.args));
+                else d.f.call(d.args);
+            } catch (GoPanic np) {
+                if (np != panicking && np.prev == null) np.prev = panicking;
+                panicking = np;
+                continue;
+            } finally {
+                t.curPanic = savedPanic;
+                t.deferTarget = savedTarget;
+            }
+            if (panicking != null && panicking.recovered) panicking = null;
+        }
+        if (panicking != null) throw panicking;
+    }
+
     /** Runs one pause primitive in an isolated scheduler for a harness case;
      * throws Blocked when no task can run, and the source panic on panic. */
     public static Object[] runIsolated(Primitive fn) {
@@ -676,7 +918,10 @@ public final class TaskSpawn {
         Scheduler s = install(main, true);
         s.ready(main);
         try {
-            while (!main.done) s.run(s.next());
+            while (!main.done) {
+                s.run(s.next());
+                if (s.handoff != null) s.turnBack();
+            }
         } catch (FatalPanic e) {
             throw e.p;
         }

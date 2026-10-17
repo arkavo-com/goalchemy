@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 4a2407e5be0b907f09e658213e096c9dc90fd154c23f08a72e51d8fc45e10a6d
 symbol: "rt.appendSlice"
 implementation: runtime/slice_append.ts
-implementation_hash: fabaf98da1558f138d995eb4cfc3bac98ff10762c1c1dbda872a3f093309475c
+implementation_hash: e1d90c29d56cb8aee8af7b3d8f4cf41d1da947178f46bf0505247e5ca9540703
 summary: "append(s, vs...)."
 suspension: never
 determinism: deterministic
