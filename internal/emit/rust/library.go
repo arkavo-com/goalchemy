@@ -2,6 +2,7 @@ package rust
 
 import (
 	"fmt"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"go/token"
 	"sort"
@@ -131,12 +132,16 @@ func (e *emitter) library() (string, error) {
 		case ir.KArray, ir.KSlice:
 			convert(u.Elem)
 		}
+		declarationStart := b.Len()
 		if u.Kind == ir.KStruct {
 			fmt.Fprintf(&b, "#[derive(Clone, Debug, Default, PartialEq)]\npub struct %s {\n", typ(u))
 			for _, f := range u.Fields {
 				fmt.Fprintf(&b, "pub %s: %s,\n", f.Name, typ(f.Type))
 			}
 			b.WriteString("}\n")
+		}
+		if u.Kind == ir.KStruct {
+			e.api = append(e.api, artifact.APIDeclaration{Type: t, Name: typ(u), Signature: b.String()[declarationStart:]})
 		}
 		fmt.Fprintf(&b, "fn %s(v: %s) -> V {\n", e.names.Type(u, "input_"), typ(u))
 		switch u.Kind {
@@ -333,6 +338,10 @@ func (e *emitter) library() (string, error) {
 		}
 	}
 	for _, h := range abi.Handles {
+		e.api = append(e.api, artifact.APIDeclaration{Type: h.Elem, Name: h.Name, Signature: "pub struct " + h.Name})
+		if h.Close != nil {
+			e.api = append(e.api, artifact.APIDeclaration{Function: h.Close, Name: "close", Signature: "pub fn close(&self) -> Operation<()>"})
+		}
 		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close when done;\n/// dropping the last clone releases it without running Close.\n#[derive(Clone)]\npub struct %s(std::sync::Arc<rt::Handle>);\nimpl PartialEq for %s { fn eq(&self, other: &Self) -> bool { rt::Handle::same(&self.0, &other.0) } }\nimpl Eq for %s {}\nimpl std::fmt::Debug for %s { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(%q) } }\n#[allow(non_snake_case)]\nimpl %s {\n", h.Name, h.Name, h.Name, h.Name, h.Name, h.Name, h.Name)
 		b.WriteString("/// Runs the source Close, if any, and releases the handle. Queued calls fail\n/// and an active call is canceled first.\npub fn close(&self) -> Operation<()> {\n")
 		if h.Close != nil {
@@ -446,6 +455,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	}
 	output += "Ok(" + out + ")"
 	pre = append(pre, fmt.Sprintf("let ids = std::sync::Arc::new(std::sync::Mutex::new(vec![0i64; %d]));", len(streams)))
+	e.api = append(e.api, artifact.APIDeclaration{Function: f, Name: name, Signature: fmt.Sprintf("pub fn %s(%s) -> Operation<%s>", name, strings.Join(ps, ","), result)})
 	fmt.Fprintf(b, "pub fn %s(%s) -> Operation<%s> {\n%s\nOperation::submit_handles(options, vec![%s], None, vec![%s], ids.clone(), move |options, inst, fresh| %s)\n}\n",
 		name, strings.Join(ps, ","), result, strings.Join(pre, "\n"), strings.Join(hs, ","), strings.Join(streams, ","), owner(f, args, output))
 }

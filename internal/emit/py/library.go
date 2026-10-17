@@ -2,6 +2,7 @@ package py
 
 import (
 	"fmt"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"go/token"
 	"strings"
@@ -100,6 +101,9 @@ func (e *emitter) library() (string, error) {
 			} else {
 				fmt.Fprintf(&b, "    return rt.Slice(_a, 0, 0 if _a is None else len(_a), 0 if _a is None else len(_a), %s)\n", pyBool(byteElem(u.Elem)))
 			}
+		}
+		if u.Kind == ir.KStruct {
+			e.api = append(e.api, artifact.APIDeclaration{Type: t, Name: "dict", Signature: "dict"})
 		}
 		fmt.Fprintf(&b, "\ndef %s(_v):\n", e.names.Type(u, "output_"))
 		switch u.Kind {
@@ -273,6 +277,10 @@ func (e *emitter) library() (string, error) {
 			return "", &LibraryBoundaryError{"duplicate Python public name " + h.Name}
 		}
 		used[h.Name] = true
+		e.api = append(e.api, artifact.APIDeclaration{Type: h.Elem, Name: h.Name, Signature: "class " + h.Name})
+		if h.Close != nil {
+			e.api = append(e.api, artifact.APIDeclaration{Function: h.Close, Name: "close", Signature: "def close(self)"})
+		}
 		fmt.Fprintf(&b, "class %s:\n    \"\"\"Handle to a source *%s owned by a library instance. Call close() or use\n    it as a context manager; a collected handle is released without running Close.\"\"\"\n    __slots__ = ('_h', '__weakref__')\n    def __init__(self, _h): self._h = _h\n", h.Name, h.Name)
 		b.WriteString("    def close(self):\n        \"\"\"Runs the source Close, if any, and releases the handle. Queued calls\n        fail and an active call is canceled first.\"\"\"\n        _h0 = self._h\n")
 		if h.Close != nil {
@@ -348,6 +356,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		as = append(as, fmt.Sprintf("%s(_owned[%d])", e.names.Type(t.U(), "input_"), len(owned)-1))
 	}
 	ps = append(ps, "options=None")
+	e.api = append(e.api, artifact.APIDeclaration{Function: f, Name: name, Signature: fmt.Sprintf("def %s(%s)", name, strings.Join(ps, ", "))})
 	fmt.Fprintf(b, "%sdef %s(%s):\n", indent, name, strings.Join(ps, ", "))
 	in := indent + "    "
 	if len(conv) > 0 {

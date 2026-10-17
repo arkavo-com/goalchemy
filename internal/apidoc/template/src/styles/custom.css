@@ -1,0 +1,3 @@
+:root { --sl-color-accent-low: #28204d; --sl-color-accent: #a78bfa; --sl-color-accent-high: #e0d7ff; }
+:root[data-theme='light'] { --sl-color-accent-low: #eee9ff; --sl-color-accent: #6840c6; --sl-color-accent-high: #37216d; }
+.sl-markdown-content a { text-underline-offset: 0.2em; }

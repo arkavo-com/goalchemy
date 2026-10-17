@@ -66,6 +66,9 @@ func emitSwift(res *Result, out string) []diagnostics.Diagnostic {
 		}
 		return emitErr("GCE004", err.Error())
 	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
+	}
 	refs, files, ds := link.Plan(res.Catalog, "swift", o.Contracts)
 	if len(ds) > 0 {
 		return ds

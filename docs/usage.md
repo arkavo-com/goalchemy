@@ -17,11 +17,16 @@ The repository's `go.mod` selects the Go 1.27.1 reference toolchain. Source prog
 | `goalchemy check [-gate g] [-tags t] [-json] [packages]` | Load, type-check, and validate against the language gate. |
 | `goalchemy compile -target <go\|typescript\|python\|java\|csharp\|rust\|c\|swift\|ir> -out <dir> [packages]` | Write a complete, runnable target directory. |
 | `goalchemy build [-config goalchemy.yaml]` | Compile every target listed in a project configuration. |
+| `goalchemy docs -format json\|markdown\|site -out <dir> [packages]` | Generate consumer API documentation from library packages. |
 | `goalchemy run -target <name> [packages]` | Compile to a temporary directory and run the program. |
 | `goalchemy features` | Print supported features and targets. |
 | `goalchemy spec validate` / `spec generate [-check]` / `test` | Maintain and verify the runtime contract catalog. |
 
 ## Project configuration
+
+For a JSON API catalog, embeddable Markdown, or a new Astro/Starlight site, see
+[consumer API documentation](api-documentation.md). The `docs` command accepts
+the same source flags as `compile` and can read `goalchemy.yaml` with `-config`.
 
 `goalchemy build` reads `goalchemy.yaml` from the current directory:
 

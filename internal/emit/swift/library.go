@@ -2,6 +2,7 @@ package swift
 
 import (
 	"fmt"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"go/token"
 	"strings"
 
@@ -157,6 +158,7 @@ func (e *emitter) library() (string, error) {
 			for _, f := range u.Fields {
 				convert(f.Type)
 			}
+			declarationStart := b.Len()
 			fmt.Fprintf(&b, "public struct %s {\n", n)
 			var init []string
 			for _, f := range u.Fields {
@@ -168,6 +170,7 @@ func (e *emitter) library() (string, error) {
 				fmt.Fprintf(&b, "        self.%s = %s\n", swiftPublic(f.Name), swiftPublic(f.Name))
 			}
 			b.WriteString("    }\n}\n")
+			e.api = append(e.api, artifact.APIDeclaration{Type: t, Name: names[u], Signature: b.String()[declarationStart:]})
 		} else if u.Kind == ir.KArray || u.Kind == ir.KSlice {
 			convert(u.Elem)
 		}
@@ -363,6 +366,10 @@ func (e *emitter) library() (string, error) {
 		}
 	}
 	for _, h := range abi.Handles {
+		e.api = append(e.api, artifact.APIDeclaration{Type: h.Elem, Name: h.Name, Signature: "public final class " + swiftPublic(handleNames[h])})
+		if h.Close != nil {
+			e.api = append(e.api, artifact.APIDeclaration{Function: h.Close, Name: "close", Signature: "public func close() throws"})
+		}
 		fmt.Fprintf(&b, "/// Handle to a source *%s owned by a library instance. Call close() when\n/// done; deinit releases it without running Close.\npublic final class %s {\n    let handle: GHandle\n    init(_ handle: GHandle) { self.handle = handle }\n    deinit { GLibrary.finalize(handle) }\n", h.Name, swiftPublic(handleNames[h]))
 		start := "nil"
 		if h.Close != nil {
@@ -465,6 +472,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	if recv != nil {
 		indent, prefix = "    ", "public func"
 	}
+	e.api = append(e.api, artifact.APIDeclaration{Function: f, Name: name, Signature: fmt.Sprintf("%s %s(%s) -> Operation<%s>", prefix, swiftPublic(name), strings.Join(ps, ", "), result)})
 	fmt.Fprintf(b, "%s%s %s(%s) -> Operation<%s> {\n%s    do {\n%s        let _args = try GLibrary.prepare {\n%s            _ = _gTypeRegistration\n%s            return [%s]\n%s        }\n", indent, prefix, swiftPublic(name), strings.Join(ps, ", "), result, indent, indent, indent, indent, strings.Join(inputs, ", "), indent)
 	call := fmt.Sprintf("%s([%s], [])", e.names.Symbol(f.Sym), strings.Join(args, ", "))
 	if len(streams) > 0 {

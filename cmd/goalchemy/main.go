@@ -27,6 +27,7 @@ func init() {
 		{"run", "compile to a temporary directory and run: run -target <name> [packages]", runRun},
 		{"compile", "compile a program: compile -target <name> -out <dir> [packages]", runCompile},
 		{"spec", "validate or generate contract specifications (spec validate | spec generate)", runSpec},
+		{"docs", "generate SDK API documentation: docs -format json|markdown|site -out <dir> [packages]", runDocs},
 		{"features", "list supported language features and targets", runFeatures},
 		{"test", "run runtime contract cases through target harnesses", runTest},
 		{"version", "print the compiler version", func(_ context.Context, _ []string, stdout, _ io.Writer) int {

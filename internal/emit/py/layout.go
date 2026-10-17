@@ -161,7 +161,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		contracts = append(contracts, contract)
 	}
 	sort.Strings(contracts)
-	return &Output{Files: files, Packages: layout.PackageFiles(files), Contracts: contracts}, nil
+	return &Output{API: e.api, Files: files, Packages: layout.PackageFiles(files), Contracts: contracts}, nil
 }
 
 func moduleName(file string) string { return "_module_" + strings.TrimSuffix(file, ".py") }

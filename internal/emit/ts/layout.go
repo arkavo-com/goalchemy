@@ -175,7 +175,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		cs = append(cs, c)
 	}
 	sort.Strings(cs)
-	return &Output{Files: files, Packages: layout.PackageFiles(files), Contracts: cs}, nil
+	return &Output{API: e.api, Files: files, Packages: layout.PackageFiles(files), Contracts: cs}, nil
 }
 
 func moduleName(file string) string { return "$module_" + strings.TrimSuffix(file, ".ts") }

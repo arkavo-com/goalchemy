@@ -54,6 +54,9 @@ func emitGo(res *Result, out string) []diagnostics.Diagnostic {
 		}
 		return emitErr("GCE004", err.Error())
 	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
+	}
 	refs, files, ds := link.Plan(res.Catalog, "go", o.Contracts)
 	if len(ds) > 0 {
 		return ds
@@ -155,6 +158,9 @@ func emitTS(res *Result, out string) []diagnostics.Diagnostic {
 			return []diagnostics.Diagnostic{{Code: "GCE007", Severity: diagnostics.Error, Feature: "TypeScript library boundary", Message: boundary.Error(), Remedy: "Use bounded public value trees and a final error result."}}
 		}
 		return emitErr("GCE004", err.Error())
+	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
 	}
 	refs, files, ds := link.Plan(res.Catalog, "typescript", o.Contracts)
 	if len(ds) > 0 {
@@ -261,6 +267,9 @@ func emitPython(res *Result, out string) []diagnostics.Diagnostic {
 		}
 		return emitErr("GCE004", err.Error())
 	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
+	}
 	refs, files, ds := link.Plan(res.Catalog, "python", o.Contracts)
 	if len(ds) > 0 {
 		return ds
@@ -340,6 +349,9 @@ func emitJava(res *Result, out string) []diagnostics.Diagnostic {
 			return []diagnostics.Diagnostic{{Code: "GCE007", Severity: diagnostics.Error, Feature: "Java library boundary", Message: boundary.Error(), Remedy: "Use bounded public value trees and a final error result."}}
 		}
 		return emitErr("GCE004", err.Error())
+	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
 	}
 	refs, files, ds := link.Plan(res.Catalog, "java", o.Contracts)
 	if len(ds) > 0 {
@@ -491,6 +503,9 @@ func emitCSharp(res *Result, out string) []diagnostics.Diagnostic {
 		}
 		return emitErr("GCE004", err.Error())
 	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
+	}
 	refs, files, ds := link.Plan(res.Catalog, "csharp", o.Contracts)
 	if len(ds) > 0 {
 		return ds
@@ -600,6 +615,9 @@ func emitRust(res *Result, out string) []diagnostics.Diagnostic {
 			return emitErr("GCE007", err.Error())
 		}
 		return emitErr("GCE004", err.Error())
+	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
 	}
 	refs, files, ds := link.Plan(res.Catalog, "rust", o.Contracts)
 	if len(ds) > 0 {
@@ -756,6 +774,9 @@ func emitC(res *Result, out string) []diagnostics.Diagnostic {
 	o, err := cemit.Emit(res.IR, symbols(res, "c"))
 	if err != nil {
 		return emitErr("GCE004", err.Error())
+	}
+	if res.ObserveAPI != nil {
+		res.ObserveAPI(o.API)
 	}
 	refs, files, ds := link.Plan(res.Catalog, "c", o.Contracts)
 	if len(ds) > 0 {

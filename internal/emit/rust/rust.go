@@ -21,12 +21,14 @@ import (
 )
 
 type Output struct {
+	API       []artifact.APIDeclaration
 	Files     []artifact.File
 	Packages  []artifact.PackageFiles
 	Contracts []string
 }
 
 type emitter struct {
+	api       []artifact.APIDeclaration
 	p         *ir.Program
 	names     *naming.Names
 	symbols   map[string]string

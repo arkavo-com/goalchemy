@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/link"
 	"github.com/eugenioenko/goalchemy/internal/naming"
@@ -42,6 +43,8 @@ type EmitOptions struct {
 	// generated Go package; source names avoid the names they declare.
 	// Other targets ignore it.
 	Host []string
+	// ObserveAPI captures declarations formatted by the selected library emitter.
+	ObserveAPI func([]artifact.APIDeclaration)
 }
 
 // PauseModels lists the accepted pause models; the first is the default.
@@ -78,6 +81,7 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 		program := *res.IR
 		program.Names, program.NameCollisions = string(mode), policy
 		result.IR = &program
+		result.ObserveAPI = opts.ObserveAPI
 		res = &result
 		if name == "go" && len(opts.Host) > 0 {
 			hosts, err := HostNames(opts.Host)

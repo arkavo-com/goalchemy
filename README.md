@@ -110,6 +110,7 @@ Domain formats such as ZIP archives for OpenTDF are candidates for the SDK that 
 | `goalchemy compile -target <name> -out <dir> [packages]` | Write a complete, runnable target directory. `-target ir` dumps the IR. |
 | `goalchemy run -target <name> [-keep] [packages]` | Compile to a temporary directory and run the program. |
 | `goalchemy build [-config goalchemy.yaml]` | Compile every target listed in a project configuration. |
+| `goalchemy docs -format json\|markdown\|site -out <dir> [packages]` | Generate consumer API references and an optional Starlight site. |
 | `goalchemy features` | Print supported language features per gate and target. |
 | `goalchemy spec validate` / `spec generate [-check]` | Validate the contract catalog and regenerate target specs. |
 | `goalchemy test` | Run runtime contract cases through each target's harness. |
@@ -197,6 +198,7 @@ The public documentation is at [goalchemy.dev](https://goalchemy.dev). The Astro
 | Topic | Reference |
 | --- | --- |
 | Commands, configuration, output, libraries | [Usage guide](docs/usage.md) |
+| Consumer API catalog, Markdown, and Starlight template | [API documentation](docs/api-documentation.md) |
 | Runtime library: `std/` and `lib/` packages | [Library reference](docs/library.md) |
 | Protobuf messages, proto3 JSON and Connect clients | [Protobuf](docs/protobuf.md) |
 | Accepted language and semantics | [Language specification](specs/language.md) |

@@ -2,6 +2,7 @@ package golang
 
 import (
 	"fmt"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"go/token"
 	"strings"
 
@@ -138,6 +139,7 @@ func (e *emitter) library() error {
 	// allocated independently of compact internal naming, including dependencies.
 	for _, t := range e.p.Types.All {
 		if alias, ok := e.publicTypes[t]; ok {
+			e.api = append(e.api, artifact.APIDeclaration{Type: t, Name: alias, Signature: fmt.Sprintf("type %s = %s", alias, e.typeNames[t])})
 			e.p_("type %s = %s\n", alias, e.typeNames[t])
 		}
 	}
@@ -164,6 +166,10 @@ func (e *emitter) library() error {
 	e.p_("}\nvar _libraryState = &rt.LibraryState{Reset: _libraryReset, Save: _librarySave, Load: _libraryLoad}\n")
 	for _, h := range e.abi.Handles {
 		e.p_("// %s is a handle to a source *%s owned by a library instance. Call Close\n// when done; a handle reclaimed by the garbage collector is released\n// without running Close.\n", h.Name, h.Name)
+		e.api = append(e.api, artifact.APIDeclaration{Type: h.Elem, Name: h.Name, Signature: "type " + h.Name + " struct"})
+		if h.Close != nil {
+			e.api = append(e.api, artifact.APIDeclaration{Function: h.Close, Name: "Close", Signature: "func (x *" + h.Name + ") Close() error"})
+		}
 		e.p_("type %s struct{ h *rt.Handle }\n", h.Name)
 		e.p_("func %s(_inst *rt.Instance, _p %s) *%s {\nif _p == nil { return nil }\nreturn rt.Wrap(_inst, any(_p), %q, func(_h *rt.Handle) *%s { return &%s{h: _h} })\n}\n",
 			e.names.Derived("wrap", h.Name), e.typ(h.Ptr), h.Name, h.Name, h.Name, h.Name)
@@ -349,6 +355,11 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 		rs = append(rs, fmt.Sprintf("r%d %s", i, publicType(results[i])))
 	}
 	rs = append(rs, "err error")
+	signature := fmt.Sprintf("func %s(%s) (%s)", name, strings.Join(ps, ", "), strings.Join(rs, ", "))
+	if recv != nil {
+		signature = fmt.Sprintf("func (x *%s) %s(%s) (%s)", recv.Name, name, strings.Join(ps, ", "), strings.Join(rs, ", "))
+	}
+	e.api = append(e.api, artifact.APIDeclaration{Function: f, Name: name, Signature: signature})
 	if recv != nil {
 		e.p_("func (x *%s) %s(%s) (%s) {\n", recv.Name, name, strings.Join(ps, ", "), strings.Join(rs, ", "))
 		e.p_("if x == nil || x.h == nil { return %s }\n", libraryErrorReturn(n, "&LibraryError{Kind: \"invalid_handle\"}"))
