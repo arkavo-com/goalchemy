@@ -202,6 +202,7 @@ func TestLibraryDescriptorPublicNameCollision(t *testing.T) {
     }
     `)
 	var descriptorNames [2]string
+	res.IR.Names = "readable"
 	for _, typ := range res.IR.Types.All {
 		if typ.Obj == "Boxed" && typ.Boxed {
 			descriptorNames[0] = naming.New(res.IR, csharp.NameRules(res.IR)).Type(typ, "TD_")

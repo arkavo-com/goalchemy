@@ -65,9 +65,9 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		if ir.HostEntry(e.contracts) {
 			run = "runHost().GetAwaiter().GetResult();\n        System.Environment.Exit(0);"
 		}
-		fmt.Fprintf(bodies[""], "    public static System.Threading.Tasks.Task runHost() {\n        return R.runMainHost(() => %s);\n    }\n\n    public static void Main(string[] args) {\n        %s\n    }\n", start, run)
+		fmt.Fprintf(bodies[""], "    public static System.Threading.Tasks.Task runHost() {\n        return R.runMainHost(() => %s);\n    }\n\n    public static void Main(string[] _args) {\n        %s\n    }\n", start, run)
 	} else {
-		fmt.Fprintf(bodies[""], "    public static void Main(string[] args) {\n        Program.main(() => {\n            %s();\n", e.symbol(p.Init.Sym))
+		fmt.Fprintf(bodies[""], "    public static void Main(string[] _args) {\n        Program.main(() => {\n            %s();\n", e.symbol(p.Init.Sym))
 		if p.Main != nil {
 			fmt.Fprintf(bodies[""], "            %s();\n", e.symbol(p.Main.Sym))
 		}
