@@ -32,6 +32,7 @@ tags: [prod]               # optional build tags
 gate: sequential           # sequential (default) or cooperative
 compact_names: false        # readable private identifiers (default)
 pause_model: frames         # frames (default) or native (Go target only, experimental)
+line_directives: true       # map generated code back to the source (default)
 targets:
   go: {out: out/go}
   typescript: {out: out/ts}
@@ -64,6 +65,31 @@ ordinary Go functions that take the current task and block at pause points;
 a turn-passing scheduler keeps exactly one task goroutine running and grants
 the turn in the same FIFO order as frames, so output is identical. See
 issue #92.
+
+`compile`, `run`, and `build` accept `--line-directives` (default on; `build`
+overrides `line_directives`). With `--line-directives=false`, generated code
+carries no source annotations: Go output has no `/*line*/` comments,
+TypeScript output has no source map, and the other targets write no `.lines`
+tables. Runtime positions and compiler diagnostics then refer to the
+generated files instead of the Go source.
+
+```sh
+goalchemy compile -target go -out out/go --line-directives=false .
+```
+
+## Generated control flow
+
+Every target prints structured control flow rebuilt from the IR's basic
+blocks: `if`/`else`, loops with `while` conditions, labelled `break` and
+`continue`, and short-circuit conditions. Targets without labelled blocks use
+`goto` (Go, C, C#) or a small exit variable (Python). Single-use temporaries
+are folded into the expression that uses them when that keeps Go's evaluation
+order. Two cases keep a dispatch over block numbers: a resumable frame
+(`--pause-model=frames`) switches on the block its task resumes at, so a loop
+that pauses runs as a dispatch, and an irreducible block graph (not produced
+from Go source) is dispatched rather than structured. Swift functions that
+cannot pause, defer or recover are plain Swift functions; the others are
+frames.
 
 ## Generated names
 

@@ -22,6 +22,7 @@ func runBuild(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	asJSON := fs.Bool("json", false, "write diagnostics as JSON")
 	compactNames := fs.Bool("compact-names", false, "override compact_names in the project configuration")
 	pauseModel := fs.String("pause-model", "frames", "override pause_model in the project configuration: frames or native")
+	lineDirectives := fs.Bool("line-directives", true, "override line_directives in the project configuration")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -37,6 +38,9 @@ func runBuild(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		if f.Name == "pause-model" {
 			cfg.PauseModel = *pauseModel
 		}
+		if f.Name == "line-directives" {
+			cfg.LineDirectives = lineDirectives
+		}
 	})
 	res, ds := driver.Build(ctx, driver.Options{Dir: cfg.Dir, Patterns: cfg.Packages, Tags: cfg.Tags, Gate: subset.Gate(cfg.Gate)})
 	if diagnostics.HasErrors(ds) {
@@ -50,7 +54,7 @@ func runBuild(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		if eds := driver.EmitWithOptions(t, res, out, driver.EmitOptions{CompactNames: cfg.CompactNames, PauseModel: cfg.PauseModel}); len(eds) > 0 {
+		if eds := driver.EmitWithOptions(t, res, out, driver.EmitOptions{CompactNames: cfg.CompactNames, PauseModel: cfg.PauseModel, NoLineDirectives: cfg.LineDirectives != nil && !*cfg.LineDirectives}); len(eds) > 0 {
 			_ = diagnostics.Write(stderr, eds, *asJSON)
 			return 1
 		}
@@ -69,6 +73,7 @@ func runRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	keep := fs.Bool("keep", false, "keep the generated directory and print its path")
 	compactNames := fs.Bool("compact-names", false, "use short private generated identifiers")
 	pauseModel := fs.String("pause-model", "frames", "suspending function form: frames or native")
+	lineDirectives := fs.Bool("line-directives", true, "annotate generated code with source positions")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -88,7 +93,7 @@ func runRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	} else {
 		defer os.RemoveAll(out)
 	}
-	if eds := driver.EmitWithOptions(*target, res, out, driver.EmitOptions{CompactNames: *compactNames, PauseModel: *pauseModel}); len(eds) > 0 {
+	if eds := driver.EmitWithOptions(*target, res, out, driver.EmitOptions{CompactNames: *compactNames, PauseModel: *pauseModel, NoLineDirectives: !*lineDirectives}); len(eds) > 0 {
 		_ = diagnostics.Write(stderr, eds, sf.json)
 		return 1
 	}

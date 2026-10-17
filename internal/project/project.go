@@ -20,13 +20,15 @@ type Target struct {
 }
 
 type Config struct {
-	SchemaVersion int               `json:"schema_version"`
-	Packages      []string          `json:"packages"`
-	Tags          []string          `json:"tags,omitempty"`
-	Gate          string            `json:"gate,omitempty"`
-	CompactNames  bool              `json:"compact_names,omitempty"`
-	PauseModel    string            `json:"pause_model,omitempty"`
-	Targets       map[string]Target `json:"targets"`
+	SchemaVersion int      `json:"schema_version"`
+	Packages      []string `json:"packages"`
+	Tags          []string `json:"tags,omitempty"`
+	Gate          string   `json:"gate,omitempty"`
+	CompactNames  bool     `json:"compact_names,omitempty"`
+	PauseModel    string   `json:"pause_model,omitempty"`
+	// LineDirectives, when false, omits source annotations; nil means on.
+	LineDirectives *bool             `json:"line_directives,omitempty"`
+	Targets        map[string]Target `json:"targets"`
 
 	// Dir is the directory containing the configuration file.
 	Dir string `json:"-"`

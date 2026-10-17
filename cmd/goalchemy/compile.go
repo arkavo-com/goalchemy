@@ -22,6 +22,7 @@ func runCompile(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	out := fs.String("out", "", "output directory")
 	compactNames := fs.Bool("compact-names", false, "use short private generated identifiers")
 	pauseModel := fs.String("pause-model", "frames", "suspending function form: frames or native")
+	lineDirectives := fs.Bool("line-directives", true, "annotate generated code with source positions")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -43,7 +44,7 @@ func runCompile(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	eds := driver.EmitWithOptions(*target, res, *out, driver.EmitOptions{CompactNames: *compactNames, PauseModel: *pauseModel})
+	eds := driver.EmitWithOptions(*target, res, *out, driver.EmitOptions{CompactNames: *compactNames, PauseModel: *pauseModel, NoLineDirectives: !*lineDirectives})
 	if len(eds) > 0 {
 		_ = diagnostics.Write(stderr, eds, sf.json)
 		return 1

@@ -31,6 +31,8 @@ func Targets() []string {
 type EmitOptions struct {
 	CompactNames bool
 	PauseModel   string
+	// NoLineDirectives omits line directives, source maps and line tables.
+	NoLineDirectives bool
 }
 
 // PauseModels lists the accepted pause models; the first is the default.
@@ -84,6 +86,7 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 	}
 	if res != nil && res.IR != nil {
 		res.IR.PauseModel = opts.PauseModel
+		res.IR.NoLineDirectives = opts.NoLineDirectives
 	}
 	if res.IR != nil && res.IR.Library && name != "c" && name != "go" && name != "typescript" && name != "java" && name != "csharp" && name != "python" && name != "rust" && name != "swift" && name != "ir" {
 		return []diagnostics.Diagnostic{{Code: "GCE006", Severity: diagnostics.Error, Feature: "library build",
