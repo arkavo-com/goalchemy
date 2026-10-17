@@ -60,7 +60,7 @@ def toolchain_env():
     return env
 
 
-NATIVE_PAUSE = ('go', 'typescript', 'swift', 'csharp')
+NATIVE_PAUSE = ('go', 'typescript', 'swift', 'csharp', 'python')
 
 
 def csharp_build(out, env):

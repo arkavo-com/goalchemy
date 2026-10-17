@@ -31,7 +31,7 @@ every build prints the same output:
 
 `--targets` selects targets (`go`, `typescript`, `python`, `swift`, `csharp`;
 default `go,typescript`), and `--pause-model native` selects the pause model of
-the targets that implement both (Go, TypeScript, Swift, C#). Swift programs are
+the targets that implement both (Go, TypeScript, Swift, C#, Python). Swift programs are
 built in release mode (`-O -wmo`) before timing; C# programs are compiled with
 their `run.sh` compiler line and timed as `dotnet bin/main.dll`. A compiler named `NAME@MODEL`
 uses that pause model, so one run can compare models:
