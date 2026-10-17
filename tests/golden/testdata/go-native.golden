@@ -5,20 +5,20 @@ package main
 
 import "goalchemyout/rt"
 
-type Task struct {
+type task struct {
 	ID    int
 	Title string
 	Done  bool
 }
 
-func produce(_t *rt.Task, out rt.Chan[Task], n int) {
+func produce(_t *rt.Task, out rt.Chan[task], n int) {
 	var i int
 	_ = i
-	var _4 Task
+	var _4 task
 	_ = _4
 	i = int(1)
 	for i <= n {
-		_4 = *new(Task)
+		_4 = *new(task)
 		_4.ID = i
 		_4.Title = "task"
 		_4.Done = (i % int(3)) == int(0)
@@ -30,43 +30,43 @@ func produce(_t *rt.Task, out rt.Chan[Task], n int) {
 	return
 }
 
-func fetchTasks(_t *rt.Task, n int) ([]Task, error) {
-	var _1 []Task
+func fetchTasks(_t *rt.Task, n int) ([]task, error) {
+	var _1 []task
 	_ = _1
 	var _2 error
 	_ = _2
 	var _4 error
 	_ = _4
-	var ch rt.Chan[Task]
+	var ch rt.Chan[task]
 	_ = ch
-	var tasks []Task
+	var tasks []task
 	_ = tasks
-	var _9 Task
+	var _9 task
 	_ = _9
 	var _10 bool
 	_ = _10
-	var _11 rt.Chan[Task]
+	var _11 rt.Chan[task]
 	_ = _11
-	var t Task
+	var t task
 	_ = t
-	_1 = *new([]Task)
+	_1 = *new([]task)
 	_2 = *new(error)
 	if n < int(0) {
 		_4 = rt.StdErrorsNew("negative count")
-		_1 = ([]Task)(nil)
+		_1 = ([]task)(nil)
 		_2 = _4
 		return _1, _2
 	}
-	ch = rt.MakeChan[Task](int(0))
-	func(_g0 rt.Chan[Task], _g1 int) {
+	ch = rt.MakeChan[task](int(0))
+	func(_g0 rt.Chan[task], _g1 int) {
 		rt.Spawn(rt.NativeTask(func(_t *rt.Task) []any { produce(_t, _g0, _g1); return nil }))
-	}(rt.Chan[Task](ch), n)
-	tasks = *new([]Task)
+	}(rt.Chan[task](ch), n)
+	tasks = *new([]task)
 	_11 = ch
 	for {
 		_11.Recv(_t)
 		rt.Wait(_t)
-		_9 = rt.As[Task](_t.RV[0])
+		_9 = rt.As[task](_t.RV[0])
 		_10 = _t.RV[1].(bool)
 		if !_10 {
 			_1 = tasks
@@ -81,11 +81,11 @@ func fetchTasks(_t *rt.Task, n int) ([]Task, error) {
 }
 
 func main_2(_t *rt.Task) {
-	var tasks []Task
+	var tasks []task
 	_ = tasks
 	var err error
 	_ = err
-	var _2 []Task
+	var _2 []task
 	_ = _2
 	var _3 error
 	_ = _3
@@ -93,11 +93,11 @@ func main_2(_t *rt.Task) {
 	_ = _7
 	var _8 int
 	_ = _8
-	var _9 []Task
+	var _9 []task
 	_ = _9
-	var t Task
+	var t task
 	_ = t
-	var _16 []Task
+	var _16 []task
 	_ = _16
 	var _17 error
 	_ = _17
