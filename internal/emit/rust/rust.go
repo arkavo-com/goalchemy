@@ -124,31 +124,30 @@ func (e *emitter) flushHelpers() {
 }
 
 func (e *emitter) structHelpers(t *ir.Type) {
-	id := e.names.Type(t, "")
 	var b strings.Builder
 	var zs, cs []string
 	for k, f := range t.Fields {
 		zs = append(zs, e.zero(f.Type))
-		cs = append(cs, e.cloneExpr(f.Type, fmt.Sprintf("v[%d]", k), true))
+		cs = append(cs, e.cloneExpr(f.Type, fmt.Sprintf("_v[%d]", k), true))
 	}
-	fmt.Fprintf(&b, "pub(super) fn z_%s() -> V {\n    vals(vec![%s])\n}\n\n", id, strings.Join(zs, ", "))
-	fmt.Fprintf(&b, "pub(super) fn c_%s(x: &V) -> V {\n    let v = vals_copy(x.h());\n    vals(vec![%s])\n}\n\n", id, strings.Join(cs, ", "))
-	fmt.Fprintf(&b, "pub(super) fn set_%s(d: &V, s: &V) {\n", id)
+	fmt.Fprintf(&b, "pub(super) fn %s() -> V {\n    vals(vec![%s])\n}\n\n", e.names.Type(t, "z_"), strings.Join(zs, ", "))
+	fmt.Fprintf(&b, "pub(super) fn %s(_x: &V) -> V {\n    let _v = vals_copy(_x.h());\n    vals(vec![%s])\n}\n\n", e.names.Type(t, "c_"), strings.Join(cs, ", "))
+	fmt.Fprintf(&b, "pub(super) fn %s(_d: &V, _s: &V) {\n", e.names.Type(t, "set_"))
 	for k, f := range t.Fields {
-		src := fmt.Sprintf("fld(s, %d)", k)
+		src := fmt.Sprintf("fld(_s, %d)", k)
 		if f.Type.IsAggregate() {
-			fmt.Fprintf(&b, "    %s;\n", e.setStmt(f.Type, fmt.Sprintf("fld(d, %d)", k), src))
+			fmt.Fprintf(&b, "    %s;\n", e.setStmt(f.Type, fmt.Sprintf("fld(_d, %d)", k), src))
 		} else {
-			fmt.Fprintf(&b, "    fset(d, %d, %s);\n", k, src)
+			fmt.Fprintf(&b, "    fset(_d, %d, %s);\n", k, src)
 		}
 	}
 	b.WriteString("}\n\n")
-	fmt.Fprintf(&b, "pub(super) fn eq_%s(a: &V, b: &V) -> bool {\n    true", id)
+	fmt.Fprintf(&b, "pub(super) fn %s(_a: &V, _b: &V) -> bool {\n    true", e.names.Type(t, "eq_"))
 	for k, f := range t.Fields {
 		if f.Name == "_" {
 			continue
 		}
-		fmt.Fprintf(&b, " && %s", e.eqExpr(f.Type, fmt.Sprintf("fld(a, %d)", k), fmt.Sprintf("fld(b, %d)", k)))
+		fmt.Fprintf(&b, " && %s", e.eqExpr(f.Type, fmt.Sprintf("fld(_a, %d)", k), fmt.Sprintf("fld(_b, %d)", k)))
 	}
 	b.WriteString("\n}\n\n")
 	var ks []string
@@ -156,9 +155,9 @@ func (e *emitter) structHelpers(t *ir.Type) {
 		if f.Name == "_" {
 			continue
 		}
-		ks = append(ks, e.keyExpr(f.Type, fmt.Sprintf("fld(a, %d)", k)))
+		ks = append(ks, e.keyExpr(f.Type, fmt.Sprintf("fld(_a, %d)", k)))
 	}
-	fmt.Fprintf(&b, "pub(super) fn k_%s(a: &V) -> Key {\n    key_list(vec![%s])\n}\n\n", id, strings.Join(ks, ", "))
+	fmt.Fprintf(&b, "pub(super) fn %s(_a: &V) -> Key {\n    key_list(vec![%s])\n}\n\n", e.names.Type(t, "k_"), strings.Join(ks, ", "))
 	e.helperOut.WriteString(b.String())
 }
 
@@ -168,26 +167,27 @@ func byteElem(t *ir.Type) bool {
 }
 
 func (e *emitter) arrayHelpers(t *ir.Type) {
-	id, el, n := e.names.Type(t, ""), t.Elem, t.Len
+	el, n := t.Elem, t.Len
+	z, c, set, eq, k := e.names.Type(t, "z_"), e.names.Type(t, "c_"), e.names.Type(t, "set_"), e.names.Type(t, "eq_"), e.names.Type(t, "k_")
 	var b strings.Builder
 	if byteElem(el) {
-		fmt.Fprintf(&b, "pub(super) fn z_%s() -> V { byte_array(vec![0; %d]) }\n", id, n)
-		fmt.Fprintf(&b, "pub(super) fn c_%s(x: &V) -> V { byte_array_clone(x) }\n", id)
-		fmt.Fprintf(&b, "pub(super) fn set_%s(d: &V, s: &V) { byte_array_set(d, s) }\n", id)
-		fmt.Fprintf(&b, "pub(super) fn eq_%s(a: &V, b: &V) -> bool { byte_array_eq(a, b) }\n", id)
-		fmt.Fprintf(&b, "pub(super) fn k_%s(a: &V) -> Key { byte_array_key(a) }\n\n", id)
+		fmt.Fprintf(&b, "pub(super) fn %s() -> V { byte_array(vec![0; %d]) }\n", z, n)
+		fmt.Fprintf(&b, "pub(super) fn %s(_x: &V) -> V { byte_array_clone(_x) }\n", c)
+		fmt.Fprintf(&b, "pub(super) fn %s(_d: &V, _s: &V) { byte_array_set(_d, _s) }\n", set)
+		fmt.Fprintf(&b, "pub(super) fn %s(_a: &V, _b: &V) -> bool { byte_array_eq(_a, _b) }\n", eq)
+		fmt.Fprintf(&b, "pub(super) fn %s(_a: &V) -> Key { byte_array_key(_a) }\n\n", k)
 		e.helperOut.WriteString(b.String())
 		return
 	}
-	fmt.Fprintf(&b, "pub(super) fn z_%s() -> V {\n    vals((0..%d).map(|_| %s).collect())\n}\n\n", id, n, e.zero(el))
-	fmt.Fprintf(&b, "pub(super) fn c_%s(x: &V) -> V {\n    let v = vals_copy(x.h());\n    vals(v.iter().map(|x| %s).collect())\n}\n\n", id, e.cloneExpr(el, "x", true))
+	fmt.Fprintf(&b, "pub(super) fn %s() -> V {\n    vals((0..%d).map(|_| %s).collect())\n}\n\n", z, n, e.zero(el))
+	fmt.Fprintf(&b, "pub(super) fn %s(_x: &V) -> V {\n    let _v = vals_copy(_x.h());\n    vals(_v.iter().map(|_x| %s).collect())\n}\n\n", c, e.cloneExpr(el, "_x", true))
 	if el.IsAggregate() {
-		fmt.Fprintf(&b, "pub(super) fn set_%s(d: &V, s: &V) {\n    for i in 0..%d {\n        %s;\n    }\n}\n\n", id, n, e.setStmt(el, "slot(d.h(), i)", "slot(s.h(), i)"))
+		fmt.Fprintf(&b, "pub(super) fn %s(_d: &V, _s: &V) {\n    for _i in 0..%d {\n        %s;\n    }\n}\n\n", set, n, e.setStmt(el, "slot(_d.h(), _i)", "slot(_s.h(), _i)"))
 	} else {
-		fmt.Fprintf(&b, "pub(super) fn set_%s(d: &V, s: &V) {\n    for i in 0..%d {\n        set_slot(d.h(), i, slot(s.h(), i));\n    }\n}\n\n", id, n)
+		fmt.Fprintf(&b, "pub(super) fn %s(_d: &V, _s: &V) {\n    for _i in 0..%d {\n        set_slot(_d.h(), _i, slot(_s.h(), _i));\n    }\n}\n\n", set, n)
 	}
-	fmt.Fprintf(&b, "pub(super) fn eq_%s(a: &V, b: &V) -> bool {\n    (0..%d).all(|i| %s)\n}\n\n", id, n, e.eqExpr(el, "slot(a.h(), i)", "slot(b.h(), i)"))
-	fmt.Fprintf(&b, "pub(super) fn k_%s(a: &V) -> Key {\n    key_list((0..%d).map(|i| %s).collect())\n}\n\n", id, n, e.keyExpr(el, "slot(a.h(), i)"))
+	fmt.Fprintf(&b, "pub(super) fn %s(_a: &V, _b: &V) -> bool {\n    (0..%d).all(|_i| %s)\n}\n\n", eq, n, e.eqExpr(el, "slot(_a.h(), _i)", "slot(_b.h(), _i)"))
+	fmt.Fprintf(&b, "pub(super) fn %s(_a: &V) -> Key {\n    key_list((0..%d).map(|_i| %s).collect())\n}\n\n", k, n, e.keyExpr(el, "slot(_a.h(), _i)"))
 	e.helperOut.WriteString(b.String())
 }
 
@@ -364,7 +364,7 @@ func (e *emitter) typeDescs(b *bytes.Buffer) {
 		if t.Kind == ir.KString {
 			continue
 		}
-		id := e.names.Type(t, "")
+		tdeq, tdkey := e.names.Type(t, "tdeq_"), e.names.Type(t, "tdkey_")
 		name := ir.TypeString(t)
 		u := t.U()
 		basic := ""
@@ -381,21 +381,21 @@ func (e *emitter) typeDescs(b *bytes.Buffer) {
 		case ir.KFloat:
 			basic = u.Basic
 		}
-		eq := e.eqExpr(t, "(*a)", "(*b)")
-		key := e.keyExpr(t, "(*a)")
+		eq := e.eqExpr(t, "(*_a)", "(*_b)")
+		key := e.keyExpr(t, "(*_a)")
 		if !t.Comparable() {
 			eq = fmt.Sprintf("eq_uncomparable(%q)", name)
 			key = fmt.Sprintf("key_unhashable(%q)", name)
 		}
-		fmt.Fprintf(b, "fn tdeq_%s(a: &V, b: &V) -> bool {\n    %s\n}\n\nfn tdkey_%s(a: &V) -> Key {\n    %s\n}\n\n", id, eq, id, key)
+		fmt.Fprintf(b, "fn %s(_a: &V, _b: &V) -> bool {\n    %s\n}\n\nfn %s(_a: &V) -> Key {\n    %s\n}\n\n", tdeq, eq, tdkey, key)
 		var ms []string
 		for k, m := range t.MethodSet {
-			wn := fmt.Sprintf("mw_%s_%d", id, k)
+			wn := fmt.Sprintf("%s_%d", e.names.Type(t, "mw_"), k)
 			var as []string
 			for j := range m.Func.Params {
-				a := fmt.Sprintf("a[%d].clone()", j)
+				a := fmt.Sprintf("_a[%d].clone()", j)
 				if j == 0 && t.IsAggregate() {
-					a = e.cloneExpr(t, fmt.Sprintf("a[%d]", j), true)
+					a = e.cloneExpr(t, fmt.Sprintf("_a[%d]", j), true)
 				}
 				as = append(as, a)
 			}
@@ -404,11 +404,11 @@ func (e *emitter) typeDescs(b *bytes.Buffer) {
 				e.use("core.task.spawn")
 				body = fmt.Sprintf("sync_frame(func(%d, %s, Vec::new()), vec![%s], %d)", m.Func.ID, e.symbol(m.Func.Sym, "w_"), strings.Join(as, ", "), len(m.Func.Results))
 			}
-			fmt.Fprintf(b, "fn %s(_e: &[V], a: Vec<V>) -> V {\n    %s\n}\n\n", wn, body)
+			fmt.Fprintf(b, "fn %s(_e: &[V], _a: Vec<V>) -> V {\n    %s\n}\n\n", wn, body)
 			ms = append(ms, fmt.Sprintf("(%q, %d, %s)", m.ID, m.Func.ID, wn))
 		}
-		fmt.Fprintf(b, "pub(super) static td_%s: TypeDesc = TypeDesc {\n    id: %d,\n    name: %q,\n    kind: %q,\n    eq: tdeq_%s,\n    key: tdkey_%s,\n    methods: &[%s],\n    basic: %q,\n    comparable: %v,\n};\n\n",
-			id, t.ID, name, u.Kind.String(), id, id, strings.Join(ms, ", "), basic, t.Comparable())
+		fmt.Fprintf(b, "pub(super) static %s: TypeDesc = TypeDesc {\n    id: %d,\n    name: %q,\n    kind: %q,\n    eq: %s,\n    key: %s,\n    methods: &[%s],\n    basic: %q,\n    comparable: %v,\n};\n\n",
+			e.names.Type(t, "td_"), t.ID, name, u.Kind.String(), tdeq, tdkey, strings.Join(ms, ", "), basic, t.Comparable())
 	}
 	e.flushHelpers()
 }
@@ -417,12 +417,12 @@ func (e *emitter) typeDescs(b *bytes.Buffer) {
 func (e *emitter) wrapper(f *ir.Func) string {
 	var as []string
 	for j := range f.Env {
-		as = append(as, fmt.Sprintf("e[%d].clone()", j))
+		as = append(as, fmt.Sprintf("_e[%d].clone()", j))
 	}
 	for j := range f.Params {
-		as = append(as, fmt.Sprintf("a[%d].clone()", j))
+		as = append(as, fmt.Sprintf("_a[%d].clone()", j))
 	}
-	return fmt.Sprintf("%sfn w_%s(e: &[V], a: Vec<V>) -> V {\n    f_%s(%s)\n}\n\n", e.visibility(), e.names.Symbol(f.Sym), e.names.Symbol(f.Sym), strings.Join(as, ", "))
+	return fmt.Sprintf("%sfn %s(_e: &[V], _a: Vec<V>) -> V {\n    %s(%s)\n}\n\n", e.visibility(), e.fnName(f.Sym, "w_"), e.fnName(f.Sym, "f_"), strings.Join(as, ", "))
 }
 
 func (e *emitter) externSym(contract string) string {
@@ -436,7 +436,7 @@ func (e *emitter) externSym(contract string) string {
 // externFn renders a function value calling a capability.
 func (e *emitter) externFn(x *ir.Extern) string {
 	e.externs[x.Contract] = x
-	return fmt.Sprintf("func(-1, %s, Vec::new())", e.reference("", "x_"+strings.ReplaceAll(x.Contract, ".", "_")))
+	return fmt.Sprintf("func(-1, %s, Vec::new())", e.reference("", "_x_"+strings.ReplaceAll(x.Contract, ".", "_")))
 }
 
 func (e *emitter) externWrappers(b *bytes.Buffer) {
@@ -453,27 +453,27 @@ func (e *emitter) externWrappers(b *bytes.Buffer) {
 			n := len(x.Sig.Params)
 			var args, stores []string
 			for j := range x.Sig.Params {
-				args = append(args, fmt.Sprintf("f.l.g(%d)", j))
-				stores = append(stores, fmt.Sprintf("f.l.s(%d,a[%d].clone());", j, j))
+				args = append(args, fmt.Sprintf("_f.l.g(%d)", j))
+				stores = append(stores, fmt.Sprintf("_f.l.s(%d,_a[%d].clone());", j, j))
 			}
-			fmt.Fprintf(b, "fn xstep_%s(t:&Rc<Task>, f:&Rc<Frame>) {if f.pc.get()==0 {f.pc.set(1);%s(t%s);return} let rv=t.rv.borrow().clone();f.l.s(%d,tuple(rv));ret(t,f); }\n", name, e.externSym(id), func() string {
+			fmt.Fprintf(b, "fn _xstep_%s(_t:&Rc<Task>, _f:&Rc<Frame>) {if _f.pc.get()==0 {_f.pc.set(1);%s(_t%s);return} let _rv=_t.rv.borrow().clone();_f.l.s(%d,tuple(_rv));ret(_t,_f); }\n", name, e.externSym(id), func() string {
 				if len(args) > 0 {
 					return "," + strings.Join(args, ",")
 				}
 				return ""
 			}(), n)
-			fmt.Fprintf(b, "fn xr_%s(f:&Frame)->Vec<V>{match f.l.g(%d){V::Tuple(v)=>v.to_vec(),_=>vec![]}}\nfn x_%s(_e:&[V],a:Vec<V>)->V{let f=Frame::new(%d,xstep_%s,Some(xr_%s));%s V::Frame(f)}\n", name, n, name, n+1, name, name, strings.Join(stores, ""))
+			fmt.Fprintf(b, "fn _xr_%s(_f:&Frame)->Vec<V>{match _f.l.g(%d){V::Tuple(_v)=>_v.to_vec(),_=>vec![]}}\nfn _x_%s(_e:&[V],_a:Vec<V>)->V{let _f=Frame::new(%d,_xstep_%s,Some(_xr_%s));%s V::Frame(_f)}\n", name, n, name, n+1, name, name, strings.Join(stores, ""))
 			continue
 		}
 		var as []string
 		for j := range x.Sig.Params {
-			as = append(as, fmt.Sprintf("a[%d].clone()", j))
+			as = append(as, fmt.Sprintf("_a[%d].clone()", j))
 		}
 		call := e.externSym(id) + "(" + strings.Join(as, ", ") + ")"
 		if len(x.Sig.Results) == 0 {
 			call = "{\n        " + call + ";\n        V::Nil\n    }"
 		}
-		fmt.Fprintf(b, "fn x_%s(_e: &[V], a: Vec<V>) -> V {\n    %s\n}\n\n", strings.ReplaceAll(id, ".", "_"), call)
+		fmt.Fprintf(b, "fn _x_%s(_e: &[V], _a: Vec<V>) -> V {\n    %s\n}\n\n", strings.ReplaceAll(id, ".", "_"), call)
 	}
 }
 
@@ -502,7 +502,7 @@ func cell(l *ir.Local) bool { return l.Boxed && !l.Type.IsAggregate() }
 
 // raw reads a local's storage: the cell itself for boxed scalars.
 func (fe *fnEmitter) raw(l *ir.Local) string {
-	return fmt.Sprintf("l.g(%s)", fe.slot(l))
+	return fmt.Sprintf("_l.g(%s)", fe.slot(l))
 }
 
 func (fe *fnEmitter) val(v ir.Value) string {
@@ -532,7 +532,7 @@ func (fe *fnEmitter) set(l *ir.Local, x string) string {
 	if cell(l) {
 		return fmt.Sprintf("pset(&%s, %s)", fe.raw(l), x)
 	}
-	return fmt.Sprintf("l.s(%s, %s)", fe.slot(l), x)
+	return fmt.Sprintf("_l.s(%s, %s)", fe.slot(l), x)
 }
 
 func (e *emitter) constant(c *ir.Const) string {
@@ -769,27 +769,27 @@ func (e *emitter) function(f *ir.Func) string {
 	fe.analyze()
 	var params []string
 	for _, l := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
-		params = append(params, "arg_"+fe.slot(l)+": V")
+		params = append(params, "_arg_"+fe.slot(l)+": V")
 	}
-	fe.w("%s%sfn f_%s(%s) -> V {", position(f.Pos), e.visibility(), e.names.Symbol(f.Sym), strings.Join(params, ", "))
+	fe.w("%s%sfn %s(%s) -> V {", position(f.Pos), e.visibility(), e.fnName(f.Sym, "f_"), strings.Join(params, ", "))
 	fe.indent = "    "
 	fe.w("let _source_depth = source_guard();")
 	fe.slotDecls()
-	fe.w("let l = Fr::new(%d);", len(f.Locals))
+	fe.w("let _l = Fr::new(%d);", len(f.Locals))
 	for _, p := range append(append([]*ir.Local(nil), f.Env...), f.Params...) {
-		fe.w("l.s(%s, arg_%s);", fe.slot(p), fe.slot(p))
+		fe.w("_l.s(%s, _arg_%s);", fe.slot(p), fe.slot(p))
 	}
 	fe.w("safepoint();")
 	if fe.defers {
-		fe.w("let p = match catch(|| -> () {")
+		fe.w("let _p = match catch(|| -> () {")
 		fe.indent = "        "
 		fe.body()
 		fe.indent = "    "
 		fe.w("}) {")
 		fe.w("    Ok(()) => V::Nil,")
-		fe.w("    Err(p) => p,")
+		fe.w("    Err(_p) => _p,")
 		fe.w("};")
-		fe.w("run_defers(&l, p);")
+		fe.w("run_defers(&_l, _p);")
 		fe.w("%s", fe.results())
 	} else {
 		fe.body()
@@ -804,10 +804,10 @@ func (fe *fnEmitter) body() {
 	syn := rustSyntax
 	syn.DispatchOpen = []string{"%sloop {", "\tsafepoint();", "\tmatch " + fe.pc() + " {"}
 	if !fe.frame {
-		syn.DispatchOpen = append([]string{"let mut pc: u32 = 0;"}, syn.DispatchOpen...)
-		syn.SetPC = "pc = %d;"
+		syn.DispatchOpen = append([]string{"let mut _pc: u32 = 0;"}, syn.DispatchOpen...)
+		syn.SetPC = "_pc = %d;"
 	} else {
-		syn.SetPC = "fr.pc.set(%d);"
+		syn.SetPC = "_fr.pc.set(%d);"
 	}
 	depth := len(fe.indent) / 4
 	indent := fe.indent
@@ -884,9 +884,9 @@ func (r rustProbe) Assign(l *ir.Local) (string, string) {
 
 func (fe *fnEmitter) pc() string {
 	if fe.frame {
-		return "fr.pc.get()"
+		return "_fr.pc.get()"
 	}
-	return "pc"
+	return "_pc"
 }
 
 func (fe *fnEmitter) results() string {
@@ -922,7 +922,7 @@ func (fe *fnEmitter) term(t ir.Terminator) {
 	case *ir.Return:
 		switch {
 		case fe.frame:
-			fe.w("%sret(t, fr);", m)
+			fe.w("%sret(_t, _fr);", m)
 			fe.w("return;")
 		case fe.defers:
 			fe.w("%sreturn;", m)
@@ -949,10 +949,10 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 		fe.order[b] = i
 	}
 	fe.analyze()
-	fe.w("%sfn st_%s(t: &Rc<Task>, fr: &Rc<Frame>) {", position(f.Pos), e.names.Symbol(f.Sym))
+	fe.w("%sfn %s(_t: &Rc<Task>, _fr: &Rc<Frame>) {", position(f.Pos), e.fnName(f.Sym, "st_"))
 	fe.indent = "    "
 	fe.slotDecls()
-	fe.w("let l = &fr.l;")
+	fe.w("let _l = &_fr.l;")
 	fe.body()
 	fe.indent = ""
 	fe.w("}\n")
@@ -964,21 +964,21 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 		}
 		rs = append(rs, v)
 	}
-	fe.w("fn rs_%s(fr: &Frame) -> Vec<V> {", e.names.Symbol(f.Sym))
+	fe.w("fn %s(_fr: &Frame) -> Vec<V> {", e.fnName(f.Sym, "rs_"))
 	fe.slotDecls()
-	fe.w("    let l = &fr.l;\n    vec![%s]\n}\n", strings.Join(rs, ", "))
+	fe.w("    let _l = &_fr.l;\n    vec![%s]\n}\n", strings.Join(rs, ", "))
 	var params []string
 	ps := append(append([]*ir.Local(nil), f.Env...), f.Params...)
 	for _, l := range ps {
-		params = append(params, "arg_"+fe.slot(l)+": V")
+		params = append(params, "_arg_"+fe.slot(l)+": V")
 	}
-	fe.w("%s%sfn f_%s(%s) -> V {", position(f.Pos), e.visibility(), e.names.Symbol(f.Sym), strings.Join(params, ", "))
+	fe.w("%s%sfn %s(%s) -> V {", position(f.Pos), e.visibility(), e.fnName(f.Sym, "f_"), strings.Join(params, ", "))
 	fe.slotDecls()
-	fe.w("    let fr = Frame::new(%d, st_%s, Some(rs_%s));", len(f.Locals), e.names.Symbol(f.Sym), e.names.Symbol(f.Sym))
+	fe.w("    let _fr = Frame::new(%d, %s, Some(%s));", len(f.Locals), e.fnName(f.Sym, "st_"), e.fnName(f.Sym, "rs_"))
 	for _, p := range ps {
-		fe.w("    fr.l.s(%s, arg_%s);", fe.slot(p), fe.slot(p))
+		fe.w("    _fr.l.s(%s, _arg_%s);", fe.slot(p), fe.slot(p))
 	}
-	fe.w("    V::Frame(fr)\n}\n")
+	fe.w("    V::Frame(_fr)\n}\n")
 	return structure.Resolve(fe.b.String())
 }
 
@@ -987,28 +987,28 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 	case *ir.Call:
 		for k, d := range i.Dsts {
 			if d != nil {
-				fe.w("%s;", fe.set(d, fmt.Sprintf("t.rv(%d)", k)))
+				fe.w("%s;", fe.set(d, fmt.Sprintf("_t.rv(%d)", k)))
 			}
 		}
 	case *ir.Recv:
 		if i.Dst != nil {
-			fe.w("%s;", fe.set(i.Dst, "t.rv(0)"))
+			fe.w("%s;", fe.set(i.Dst, "_t.rv(0)"))
 		}
 		if i.Ok != nil {
-			fe.w("%s;", fe.set(i.Ok, "t.rv(1)"))
+			fe.w("%s;", fe.set(i.Ok, "_t.rv(1)"))
 		}
 	case *ir.Select:
-		fe.w("%s;", fe.set(i.Index, "t.rv(0)"))
+		fe.w("%s;", fe.set(i.Index, "_t.rv(0)"))
 		for k, c := range i.Cases {
 			if c.Send || c.Dst == nil && c.Ok == nil {
 				continue
 			}
-			fe.w("if t.rv(0).i() == %d {", k)
+			fe.w("if _t.rv(0).i() == %d {", k)
 			if c.Dst != nil {
-				fe.w("    %s;", fe.set(c.Dst, "t.rv(1)"))
+				fe.w("    %s;", fe.set(c.Dst, "_t.rv(1)"))
 			}
 			if c.Ok != nil {
-				fe.w("    %s;", fe.set(c.Ok, "t.rv(2)"))
+				fe.w("    %s;", fe.set(c.Ok, "_t.rv(2)"))
 			}
 			fe.w("}")
 		}
@@ -1017,21 +1017,21 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 
 func (fe *fnEmitter) pause(p *ir.Pause) {
 	e := fe.e
-	fe.w("%sfr.pc.set(%d);", fe.mark(p.Position()), fe.order[p.Next])
+	fe.w("%s_fr.pc.set(%d);", fe.mark(p.Position()), fe.order[p.Next])
 	switch i := p.Op.(type) {
 	case *ir.Call:
 		if i.Kind == ir.CallExtern {
-			args := append([]string{"t"}, fe.externArgs(i)...)
+			args := append([]string{"_t"}, fe.externArgs(i)...)
 			fe.w("%s(%s);", e.externSym(i.Extern.Contract), strings.Join(args, ", "))
 		} else {
-			fe.w("call(t, %s);", fe.callExpr(i))
+			fe.w("call(_t, %s);", fe.callExpr(i))
 		}
 	case *ir.Send:
 		e.use("core.chan.send")
-		fe.w("chan_send(t, %s, %s);", fe.val(i.Ch), fe.val(i.V))
+		fe.w("chan_send(_t, %s, %s);", fe.val(i.Ch), fe.val(i.V))
 	case *ir.Recv:
 		e.use("core.chan.recv")
-		fe.w("chan_recv(t, %s);", fe.val(i.Ch))
+		fe.w("chan_recv(_t, %s);", fe.val(i.Ch))
 	case *ir.Select:
 		e.use("core.select")
 		var cs []string
@@ -1042,7 +1042,7 @@ func (fe *fnEmitter) pause(p *ir.Pause) {
 				cs = append(cs, fmt.Sprintf("scase(%s, false, V::Nil)", fe.val(c.Ch)))
 			}
 		}
-		fe.w("select(t, %v, vec![%s]);", i.Default, strings.Join(cs, ", "))
+		fe.w("select(_t, %v, vec![%s]);", i.Default, strings.Join(cs, ", "))
 	default:
 		panic(fmt.Sprintf("rust: pause on %T", p.Op))
 	}
@@ -1124,9 +1124,9 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			init = fe.val(i.Init)
 		}
 		if cell(i.L) {
-			w("l.s(%s, cellv(%s));", fe.slot(i.L), init)
+			w("_l.s(%s, cellv(%s));", fe.slot(i.L), init)
 		} else {
-			w("l.s(%s, %s);", fe.slot(i.L), init)
+			w("_l.s(%s, %s);", fe.slot(i.L), init)
 		}
 	case *ir.Assign:
 		w("%s;", fe.set(i.Dst, fe.val(i.Src)))
@@ -1186,12 +1186,12 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			}
 			w("%s;", fe.set(i.Dsts[0], v))
 		default:
-			w("let r = %s;", call)
+			w("let _r = %s;", call)
 			for k, d := range i.Dsts {
 				if d == nil {
 					continue
 				}
-				v := fmt.Sprintf("r.at(%d)", k)
+				v := fmt.Sprintf("_r.at(%d)", k)
 				if i.Kind == ir.CallExtern && d.Type.U().Kind == ir.KFunc && e.susp(d.Type) {
 					v = e.adapt(v, len(d.Type.U().Results))
 				}
@@ -1279,10 +1279,10 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.MapLookup:
 		e.use("core.map.lookup")
 		mt := i.M.IRType().U()
-		w("let r = map_get(%s, %s, %s, %s);", fe.val(i.M), fe.val(i.K), e.keyFn(mt.Key), e.zeroFn(mt.Elem))
-		w("%s;", fe.set(i.Dst, e.cloneExpr(mt.Elem, "r.at(0)", false)))
+		w("let _r = map_get(%s, %s, %s, %s);", fe.val(i.M), fe.val(i.K), e.keyFn(mt.Key), e.zeroFn(mt.Elem))
+		w("%s;", fe.set(i.Dst, e.cloneExpr(mt.Elem, "_r.at(0)", false)))
 		if i.Ok != nil {
-			w("%s;", fe.set(i.Ok, "r.at(1)"))
+			w("%s;", fe.set(i.Ok, "_r.at(1)"))
 		}
 	case *ir.MapStore:
 		e.use("core.map.store")
@@ -1300,9 +1300,9 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		}
 	case *ir.DecodeRune:
 		e.use("core.string.decode_rune")
-		w("let r = decode_rune(%s, %s);", fe.val(i.S), fe.val(i.I))
-		w("%s;", fe.set(i.Rune, "r.at(0)"))
-		w("%s;", fe.set(i.Width, "r.at(1)"))
+		w("let _r = decode_rune(%s, %s);", fe.val(i.S), fe.val(i.I))
+		w("%s;", fe.set(i.Rune, "_r.at(0)"))
+		w("%s;", fe.set(i.Width, "_r.at(1)"))
 	case *ir.MapIterInit:
 		e.use("core.map.iterate")
 		w("%s;", fe.set(i.Iter, fmt.Sprintf("map_iter(%s)", fe.val(i.M))))
@@ -1342,19 +1342,19 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		if i.Call.Kind == ir.CallExtern {
 			args = fe.externArgs(i.Call)
 		}
-		w("l.defer(Deferred { f: %s, args: vec![%s], fid: %s, start: %v });", fn, strings.Join(args, ", "), fid, i.Call.Suspends && (fe.frame || fe.native))
+		w("_l.defer(Deferred { f: %s, args: vec![%s], fid: %s, start: %v });", fn, strings.Join(args, ", "), fid, i.Call.Suspends && (fe.frame || fe.native))
 	case *ir.Recover:
 		w("%s;", fe.set(i.Dst, fmt.Sprintf("recover(%d)", fe.f.ID)))
 	case *ir.Rebind:
 		switch {
 		case cell(i.L):
-			w("l.s(%s, cellv(pget(&%s)));", fe.slot(i.L), fe.raw(i.L))
+			w("_l.s(%s, cellv(pget(&%s)));", fe.slot(i.L), fe.raw(i.L))
 		case i.L.Type.IsAggregate():
-			w("l.s(%s, %s);", fe.slot(i.L), e.cloneExpr(i.L.Type, fe.raw(i.L), false))
+			w("_l.s(%s, %s);", fe.slot(i.L), e.cloneExpr(i.L.Type, fe.raw(i.L), false))
 		}
 	case *ir.BoxParam:
 		if cell(i.L) {
-			w("l.s(%s, cellv(%s));", fe.slot(i.L), fe.raw(i.L))
+			w("_l.s(%s, cellv(%s));", fe.slot(i.L), fe.raw(i.L))
 		}
 	case *ir.MakeChan:
 		e.use("core.chan.make")
@@ -1455,7 +1455,7 @@ func (fe *fnEmitter) binop(i *ir.BinOp) string {
 		if i.Op == ir.Max {
 			op = ">"
 		}
-		return fmt.Sprintf("{ let (x, y) = (%s, %s); if %s { y } else { x } }", x, y, cmpExpr(u, unsigned64(t), "y", op, "x"))
+		return fmt.Sprintf("{ let (_x, _y) = (%s, %s); if %s { _y } else { _x } }", x, y, cmpExpr(u, unsigned64(t), "_y", op, "_x"))
 	}
 	if u.Kind == ir.KString {
 		e.use("core.string.concat")
@@ -1564,32 +1564,32 @@ func (fe *fnEmitter) typeAssert(i *ir.TypeAssert, w func(string, ...any)) {
 			ids = append(ids, strconv.Quote(m.ID))
 			names = append(names, strconv.Quote(m.Name))
 		}
-		w("let x = %s;", x)
-		test := fmt.Sprintf("implements(&x, &[%s])", strings.Join(ids, ", "))
+		w("let _x = %s;", x)
+		test := fmt.Sprintf("implements(&_x, &[%s])", strings.Join(ids, ", "))
 		if i.Ok != nil {
-			w("let ok = %s;", test)
-			w("%s;", fe.set(i.Ok, "V::Bool(ok)"))
-			w("%s;", fe.set(i.Dst, "if ok { x } else { V::Nil }"))
+			w("let _ok = %s;", test)
+			w("%s;", fe.set(i.Ok, "V::Bool(_ok)"))
+			w("%s;", fe.set(i.Dst, "if _ok { _x } else { V::Nil }"))
 			return
 		}
 		w("if !%s {", test)
-		w("    assert_panic(&x, %q, %q, missing_method(&x, &[%s], &[%s]));", ir.TypeString(i.X.IRType()), ir.TypeString(i.T), strings.Join(ids, ", "), strings.Join(names, ", "))
+		w("    assert_panic(&_x, %q, %q, missing_method(&_x, &[%s], &[%s]));", ir.TypeString(i.X.IRType()), ir.TypeString(i.T), strings.Join(ids, ", "), strings.Join(names, ", "))
 		w("}")
-		w("%s;", fe.set(i.Dst, "x"))
+		w("%s;", fe.set(i.Dst, "_x"))
 		return
 	}
 	td := e.td(i.T)
-	w("let x = %s;", x)
-	test := fmt.Sprintf("is_type(&x, %s)", td)
-	val := e.cloneExpr(i.T, "unboxed(&x)", false)
+	w("let _x = %s;", x)
+	test := fmt.Sprintf("is_type(&_x, %s)", td)
+	val := e.cloneExpr(i.T, "unboxed(&_x)", false)
 	if i.Ok != nil {
-		w("let ok = %s;", test)
-		w("%s;", fe.set(i.Ok, "V::Bool(ok)"))
-		w("%s;", fe.set(i.Dst, fmt.Sprintf("if ok { %s } else { %s }", val, e.zero(i.T))))
+		w("let _ok = %s;", test)
+		w("%s;", fe.set(i.Ok, "V::Bool(_ok)"))
+		w("%s;", fe.set(i.Dst, fmt.Sprintf("if _ok { %s } else { %s }", val, e.zero(i.T))))
 		return
 	}
 	w("if !%s {", test)
-	w("    assert_panic(&x, %q, %q, None);", ir.TypeString(i.X.IRType()), ir.TypeString(i.T))
+	w("    assert_panic(&_x, %q, %q, None);", ir.TypeString(i.X.IRType()), ir.TypeString(i.T))
 	w("}")
 	w("%s;", fe.set(i.Dst, val))
 }

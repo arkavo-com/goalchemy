@@ -26,51 +26,51 @@ func (e *emitter) nativeFunction(f *ir.Func) string {
 	var params, args, roots []string
 	ps := append(append([]*ir.Local(nil), f.Env...), f.Params...)
 	for _, p := range ps {
-		name := "arg_" + fe.slot(p)
+		name := "_arg_" + fe.slot(p)
 		params = append(params, name+": V")
 		args = append(args, name)
 		roots = append(roots, name+".clone()")
 	}
-	signature := append([]string{"t: &Rc<Task>"}, params...)
-	fe.w("%s%sasync fn a_%s(%s) -> V {", position(f.Pos), e.visibility(), e.names.Symbol(f.Sym), strings.Join(signature, ", "))
+	signature := append([]string{"_t: &Rc<Task>"}, params...)
+	fe.w("%s%sasync fn %s(%s) -> V {", position(f.Pos), e.visibility(), e.fnName(f.Sym, "a_"), strings.Join(signature, ", "))
 	fe.indent = "    "
-	fe.w("let _depth = native_guard(t);")
+	fe.w("let _depth = native_guard(_t);")
 	fe.slotDecls()
-	fe.w("let l = Fr::task(t, %d);", len(f.Locals))
+	fe.w("let _l = Fr::task(_t, %d);", len(f.Locals))
 	for _, p := range ps {
-		fe.w("l.s(%s, arg_%s);", fe.slot(p), fe.slot(p))
+		fe.w("_l.s(%s, _arg_%s);", fe.slot(p), fe.slot(p))
 	}
 	fe.w("safepoint();")
 	if fe.defers {
-		fe.w("let p = match catch_async(async {")
+		fe.w("let _p = match catch_async(async {")
 		fe.indent = "        "
 		fe.body()
 		fe.indent = "    "
-		fe.w("}).await { Ok(()) => V::Nil, Err(p) => p };")
-		fe.w("run_defers_async(t, &l, p).await;")
+		fe.w("}).await { Ok(()) => V::Nil, Err(_p) => _p };")
+		fe.w("run_defers_async(_t, &_l, _p).await;")
 		fe.w("%s", fe.results())
 	} else {
 		fe.body()
 	}
 	fe.indent = ""
 	fe.w("}\n")
-	fe.w("%sfn f_%s(%s) -> V {", e.visibility(), e.names.Symbol(f.Sym), strings.Join(params, ", "))
-	fe.w("    native_task(vec![%s], %d, move |t| Box::pin(async move { a_%s(%s).await }))", strings.Join(roots, ", "), len(f.Results), e.names.Symbol(f.Sym), strings.Join(append([]string{"&t"}, args...), ", "))
+	fe.w("%sfn %s(%s) -> V {", e.visibility(), e.fnName(f.Sym, "f_"), strings.Join(params, ", "))
+	fe.w("    native_task(vec![%s], %d, move |_t| Box::pin(async move { %s(%s).await }))", strings.Join(roots, ", "), len(f.Results), e.fnName(f.Sym, "a_"), strings.Join(append([]string{"&_t"}, args...), ", "))
 	fe.w("}\n")
 	return structure.Resolve(fe.b.String())
 }
 
 func (fe *fnEmitter) nativePause(p *ir.Pause) {
 	e := fe.e
-	const wait = "if t.blocked.get() { wait(t).await; }"
+	const wait = "if _t.blocked.get() { wait(_t).await; }"
 	switch i := p.Op.(type) {
 	case *ir.Call:
 		switch i.Kind {
 		case ir.CallExtern:
-			fe.w("%s(%s);", e.externSym(i.Extern.Contract), strings.Join(append([]string{"t"}, fe.externArgs(i)...), ", "))
+			fe.w("%s(%s);", e.externSym(i.Extern.Contract), strings.Join(append([]string{"_t"}, fe.externArgs(i)...), ", "))
 			fe.w(wait)
 		case ir.CallStatic:
-			expr := "Box::pin(" + e.symbol(i.Func.Sym, "a_") + "(" + strings.Join(append([]string{"t"}, fe.args(i)...), ", ") + ")).await"
+			expr := "Box::pin(" + e.symbol(i.Func.Sym, "a_") + "(" + strings.Join(append([]string{"_t"}, fe.args(i)...), ", ") + ")).await"
 			switch len(i.Dsts) {
 			case 0:
 				fe.w("%s;", expr)
@@ -81,25 +81,25 @@ func (fe *fnEmitter) nativePause(p *ir.Pause) {
 					fe.w("%s;", fe.set(i.Dsts[0], expr))
 				}
 			default:
-				fe.w("{ let r = %s;", expr)
+				fe.w("{ let _r = %s;", expr)
 				for k, d := range i.Dsts {
 					if d != nil {
-						fe.w("    %s;", fe.set(d, fmt.Sprintf("r.at(%d)", k)))
+						fe.w("    %s;", fe.set(d, fmt.Sprintf("_r.at(%d)", k)))
 					}
 				}
 				fe.w("}")
 			}
 			return
 		default:
-			fe.w("await_frame(t, %s).await;", fe.callExpr(i))
+			fe.w("await_frame(_t, %s).await;", fe.callExpr(i))
 		}
 	case *ir.Send:
 		e.use("core.chan.send")
-		fe.w("chan_send(t, %s, %s);", fe.val(i.Ch), fe.val(i.V))
+		fe.w("chan_send(_t, %s, %s);", fe.val(i.Ch), fe.val(i.V))
 		fe.w(wait)
 	case *ir.Recv:
 		e.use("core.chan.recv")
-		fe.w("chan_recv(t, %s);", fe.val(i.Ch))
+		fe.w("chan_recv(_t, %s);", fe.val(i.Ch))
 		fe.w(wait)
 	case *ir.Select:
 		e.use("core.select")
@@ -111,7 +111,7 @@ func (fe *fnEmitter) nativePause(p *ir.Pause) {
 				cs = append(cs, fmt.Sprintf("scase(%s, false, V::Nil)", fe.val(c.Ch)))
 			}
 		}
-		fe.w("select(t, %v, vec![%s]);", i.Default, strings.Join(cs, ", "))
+		fe.w("select(_t, %v, vec![%s]);", i.Default, strings.Join(cs, ", "))
 		fe.w(wait)
 	default:
 		panic(fmt.Sprintf("rust: native pause on %T", p.Op))

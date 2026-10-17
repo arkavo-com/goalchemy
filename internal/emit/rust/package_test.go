@@ -87,7 +87,8 @@ func TestPackageOutput(t *testing.T) {
 			}
 			for _, f := range p.Funcs {
 				count := 0
-				declaration := regexp.MustCompile(`(?m)^(?:pub\(super\) )?fn f_` + regexp.QuoteMeta(naming.New(&p, rust.NameRules(&p)).Symbol(f.Sym)) + `\(`)
+				names := naming.New(&p, rust.NameRules(&p))
+				declaration := regexp.MustCompile(`(?m)^(?:pub\(super\) )?fn ` + regexp.QuoteMeta(names.Derived("f", names.Symbol(f.Sym))) + `\(`)
 				for _, file := range output.Files {
 					if declaration.Match(file.Source) {
 						count++
