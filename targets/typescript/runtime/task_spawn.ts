@@ -6,6 +6,8 @@
 // Pause primitives either complete immediately, leaving their results in
 // task.rv, or block the task until another task or a timer readies it.
 // Deferred calls, panics, and recover are managed per task by the runtime.
+// Under the native pause model a task is an async function instead (see
+// NativeTask); the same scheduler decides which task runs next.
 import { installRuntimeHost, runtimeHost, type RuntimeHost } from "../types/host.ts";
 import { Fault, GoPanic, nilDeref } from "../types/panic.ts";
 import { catchPanic, formatChain, panicState, resetPanicBinding, type Deferred, type PanicState } from "../types/program.ts";
@@ -141,6 +143,10 @@ export class HostToken {
     this.mail.notify();
   }
 }
+/** Why a native task passed the turn back to the driver. */
+interface Handoff { idle: boolean; failed: boolean; fault: unknown; }
+const RETURN: Handoff = { idle: false, failed: false, fault: undefined };
+const IDLE: Handoff = { idle: true, failed: false, fault: undefined };
 interface HostOperation {
   task: Task;
   cancel: () => void;
@@ -176,6 +182,10 @@ export class Scheduler {
   /** Identity shared by the schedulers of one library instance; native
    * objects created by any of its calls remain usable by later calls. */
   domain: object = this;
+  /** Set when a native task took the turn from the loop that dispatched it. */
+  away = false;
+  /** Resolves the driver's wait for the turn to come back from native tasks. */
+  back: ((h: Handoff) => void) | null = null;
   host: RuntimeHost;
   epoch: number;
   constructor(main: Task, host: RuntimeHost = runtimeHost) {
@@ -328,14 +338,93 @@ export class Scheduler {
   }
 
   next(): Task {
-    while (this.runq.length === 0) {
-      if (this.timers.length === 0) {
-        if (this.harness) throw new Blocked();
-        fatal("all goroutines are asleep - deadlock!");
-      }
-      this.fireTimers();
+    for (;;) {
+      const u = this.poll();
+      if (u !== null) return u;
+      this.idle();
     }
-    return this.runq.shift()!;
+  }
+  poll(): Task | null {
+    return this.runq.length === 0 ? null : this.runq.shift()!;
+  }
+  /** Makes progress when no task is runnable: fires the next timers, or
+   * reports a deadlock. */
+  idle(): void {
+    if (this.timers.length === 0) {
+      if (this.harness) throw new Blocked();
+      fatal("all goroutines are asleep - deadlock!");
+    }
+    this.fireTimers();
+  }
+  /** Runs the main task to completion; asynchronous once a native task holds
+   * the turn. */
+  drive(): void | Promise<void> {
+    return this.dispatch() ? this.driveNative() : undefined;
+  }
+  /** Runs tasks until main is done, or reports true when the turn left. */
+  private dispatch(): boolean {
+    while (!this.main.done) {
+      this.run(this.next());
+      if (this.away) { this.away = false; return true; }
+    }
+    return false;
+  }
+  private async driveNative(): Promise<void> {
+    do {
+      const h = await this.turnBack();
+      if (h.idle && !this.main.done) this.idle();
+    } while (this.dispatch());
+  }
+  /** Waits for a native task to pass the turn back, raising scheduler
+   * failures that happened on the task's side. */
+  async turnBack(): Promise<Handoff> {
+    this.away = false;
+    const h = await new Promise<Handoff>(resolve => { this.back = resolve; });
+    if (h.failed) throw h.fault;
+    return h;
+  }
+  /** Passes the turn back to the driver. */
+  toDriver(h: Handoff): void {
+    const back = this.back;
+    this.back = null;
+    back?.(h);
+  }
+  /** Runs the scheduler for a native task that blocked or finished (self
+   * null) while holding the turn: the next task is dispatched directly.
+   * Reports true when self is next. Host drivers take every turn back, so
+   * each turn is followed by a host turn as for frames. Scheduler failures
+   * never unwind the task: the driver raises them. */
+  turn(self: Task | null): boolean {
+    if (this.hostMode) { this.toDriver(RETURN); return false; }
+    try {
+      for (;;) {
+        if (this.main.done) { this.toDriver(RETURN); return false; }
+        const u = this.poll();
+        if (u === null) { this.toDriver(IDLE); return false; }
+        if (u === self) { this.enter(u); return true; }
+        this.run(u);
+        if (this.away) { this.away = false; return false; }
+      }
+    } catch (e) {
+      this.toDriver({ idle: false, failed: true, fault: e });
+      return false;
+    }
+  }
+  /** Delivers a finished native frame like a frame return, then continues
+   * the task's remaining frames and the scheduler. */
+  nativeDone(t: Task, n: NativeTask, failed: boolean, failure: unknown): void {
+    try {
+      if (!failed) ret(t, n);
+      else this.exit(t, n, catchPanic(failure));
+      if (t.frame !== null) {
+        this.run(t);
+        if (this.away) { this.away = false; return; }
+      }
+    } catch (e) {
+      this.toDriver({ idle: false, failed: true, fault: e });
+      return;
+    }
+    this.turn(null);
   }
   fireTimers(): void {
     let at = this.timers[0].at;
@@ -353,16 +442,10 @@ export class Scheduler {
   }
   /** Drives a task's frames until it blocks or finishes. */
   run(t: Task): void {
-    this.cur = t;
-    t.blocked = false;
-    if (t.cleanup !== null) {
-      const c = t.cleanup;
-      t.cleanup = null;
-      c();
-    }
+    this.enter(t);
     while (!t.blocked && t.frame !== null) {
       const p = t.resumePanic;
-      if (p !== null) {
+      if (p !== null && !(t.frame instanceof NativeTask)) {
         t.resumePanic = null;
         this.exit(t, t.frame, p);
         continue;
@@ -373,6 +456,16 @@ export class Scheduler {
       } catch (e) {
         this.exit(t, f, catchPanic(e));
       }
+      if (this.away) return;
+    }
+  }
+  enter(t: Task): void {
+    this.cur = t;
+    t.blocked = false;
+    if (t.cleanup !== null) {
+      const c = t.cleanup;
+      t.cleanup = null;
+      c();
     }
   }
   /** Leaves frame f (panicking when p is set); deferred calls run first. */
@@ -563,21 +656,23 @@ function install(main: Task, harness: boolean): Scheduler {
 }
 
 /** Runs the program entry as the first task until it returns. */
-export function runMain(entry: Frame): void {
+export function runMain(entry: Frame): void | Promise<void> {
   const main = new Task(0, entry);
   const s = install(main, false);
   s.ready(main);
-  while (!main.done) {
-    try {
-      s.run(s.next());
-    } catch (e) {
-      if (e instanceof RangeError && /call stack/.test(e.message)) {
-        writeStderr("runtime: goroutine stack exceeds limit\nfatal error: stack overflow\n");
-        runtimeHost.fail(2);
-      }
-      throw e;
-    }
+  try {
+    return s.drive()?.catch(overflow);
+  } catch (e) {
+    overflow(e);
   }
+}
+
+function overflow(e: unknown): never {
+  if (e instanceof RangeError && /call stack/.test(e.message)) {
+    writeStderr("runtime: goroutine stack exceeds limit\nfatal error: stack overflow\n");
+    runtimeHost.fail(2);
+  }
+  throw e;
 }
 
 /** Explicit asynchronous executable entry. Source globals are still executable
@@ -598,6 +693,7 @@ export async function runMainHost(entry: Frame, host: RuntimeHost = runtimeHost)
     s.ready(main);
     while (!main.done) {
       s.run(await s.nextHost());
+      if (s.away) await s.turnBack();
       // A real host turn lets Promise settlements, timers and I/O progress even
       // with an always-runnable cooperative source task.
       if (!main.done) await new Promise<void>(resolve => s.host.alarm(0, resolve));
@@ -649,6 +745,108 @@ class AwaitFrame extends Frame {
 /** Adapts Task-style native pauses for deferred calls and go statements. */
 export function nativeFrame(fn:(t:Task)=>void):Frame{return new AwaitFrame(fn);}
 
+/** A task of the native pause model: an async function whose pause points
+ * await a promise that only the scheduler settles, when it chooses the task
+ * to run next. It is the task's only frame, or a frame pushed by a runtime
+ * frame such as a library sequence. */
+export class NativeTask extends Frame {
+  body: (t: Task) => unknown;
+  n: number;
+  res: unknown[] = [];
+  started = false;
+  wake: (() => void) | null = null;
+  fail: ((p: GoPanic) => void) | null = null;
+  constructor(body: (t: Task) => unknown, n: number) {
+    super();
+    this.body = body;
+    this.n = n;
+  }
+  /** Gives t the turn: starts the body, on a fresh stack, or resumes it. */
+  step(t: Task): void {
+    const s = sched;
+    s.away = true;
+    if (!this.started) {
+      this.started = true;
+      queueMicrotask(() => { void this.start(t, s); });
+      return;
+    }
+    const wake = this.wake!, fail = this.fail!;
+    this.wake = this.fail = null;
+    const p = t.resumePanic;
+    if (p === null) wake();
+    else { t.resumePanic = null; fail(p); }
+  }
+  private async start(t: Task, s: Scheduler): Promise<void> {
+    let failed = false, failure: unknown;
+    try {
+      const r = await this.body(t);
+      this.res = this.n === 0 ? [] : this.n === 1 ? [r] : r as unknown[];
+    } catch (e) {
+      failed = true;
+      failure = e;
+    }
+    s.nativeDone(t, this, failed, failure);
+  }
+  results(): unknown[] {
+    return this.res;
+  }
+}
+
+/** Starts a native-pause task body with n results. */
+export function nativeTask(body: (t: Task) => unknown, n: number): Frame {
+  return new NativeTask(body, n);
+}
+
+/** Completes a pause primitive that left native task t blocked: the
+ * scheduler runs other tasks until it chooses t again. */
+export function wait(t: Task): Promise<void> | undefined {
+  const n = t.frame as NativeTask;
+  if (sched.turn(t)) {
+    const p = t.resumePanic;
+    if (p !== null) { t.resumePanic = null; throw p; }
+    return undefined;
+  }
+  return new Promise<void>((resolve, reject) => { n.wake = resolve; n.fail = reject; });
+}
+
+/** Adapts pause primitive fn(t, ...args) to a native-pause function value,
+ * called with the task last. */
+export function awaitOp(fn: (t: Task, ...a: any[]) => void): (...a: any[]) => Promise<void> | undefined {
+  return (...a: any[]) => {
+    const t = a.pop() as Task;
+    fn(t, ...a);
+    return t.blocked ? wait(t) : undefined;
+  };
+}
+
+/** Runs deferred calls of a native-pause function, awaiting those that
+ * pause; recover and the panic chain behave as in runDefers. */
+export async function runDefersAsync(t: Task, ds: Deferred[], p: GoPanic | null): Promise<void> {
+  let panicking = p;
+  while (ds.length > 0) {
+    const d = ds.pop()!;
+    const savedPanic = t.curPanic;
+    const savedTarget = t.deferTarget;
+    t.curPanic = panicking;
+    t.deferTarget = d.fid;
+    try {
+      if (d.f === null) throw nilDeref();
+      if (d.start) await d.f(...d.args, t);
+      else d.f(...d.args);
+    } catch (e) {
+      const np = catchPanic(e);
+      if (np !== panicking && np.prev === null) np.prev = panicking;
+      panicking = np;
+      continue;
+    } finally {
+      t.curPanic = savedPanic;
+      t.deferTarget = savedTarget;
+    }
+    if (panicking !== null && panicking.recovered) panicking = null;
+  }
+  if (panicking !== null) throw panicking;
+}
+
 /** Runs one pause primitive in an isolated scheduler for a harness case;
  * throws Blocked when no task can run, and the source panic on panic. */
 export function runIsolated(fn: (t: Task) => void): unknown[] {
@@ -695,6 +893,7 @@ export async function driveLibrary(entry: () => Frame, capture: (rv: unknown[]) 
       const t = await s.nextHost();
       if (aborted) onAbort();
       s.run(t);
+      if (s.away) await s.turnBack();
       if (!main.done) await new Promise<void>(resolve => s.host.alarm(0, resolve));
     }
     owned = capture(main.rv);
