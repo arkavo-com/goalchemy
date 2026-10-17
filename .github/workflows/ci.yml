@@ -39,6 +39,7 @@ jobs:
           - {name: Float differential all targets, suite: floats}
           - {name: Naming modes all targets, suite: naming}
           - {name: Runtime conformance all targets, suite: runtime}
+          - {name: Go native pause model, suite: pause}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
