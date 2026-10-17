@@ -65,8 +65,16 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - uses: dtolnay/rust-toolchain@stable
+        id: rust
       - name: Install native build prerequisites
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libgc-dev libcurl4-openssl-dev libssl-dev zlib1g-dev libedit2 libxml2 perl ripgrep
+      - name: Cache the shared Cargo target of generated Rust fixtures
+        if: matrix.target == 'rust'
+        uses: actions/cache@v5
+        with:
+          path: out/fixture-cargo
+          key: ${{ runner.os }}-fixture-cargo-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('targets/rust/tests/harness/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-fixture-cargo-${{ steps.rust.outputs.cachekey }}-
       - name: Cache pinned toolchain downloads
         uses: actions/cache@v5
         with:
@@ -131,6 +139,7 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: dtolnay/rust-toolchain@stable
+        id: rust
       - name: Install native build prerequisites
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev cmake perl
       - name: Cache locked Cargo dependencies
@@ -140,6 +149,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: ${{ runner.os }}-cargo-${{ hashFiles('targets/rust/tests/harness/Cargo.lock') }}
+      - name: Cache the shared Cargo target of generated Rust fixtures
+        uses: actions/cache@v5
+        with:
+          path: out/fixture-cargo
+          key: ${{ runner.os }}-fixture-cargo-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('targets/rust/tests/harness/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-fixture-cargo-${{ steps.rust.outputs.cachekey }}-
       - name: Run Rust native pause model checks
         run: python3 scripts/ci-suite.py pause-rust
 
