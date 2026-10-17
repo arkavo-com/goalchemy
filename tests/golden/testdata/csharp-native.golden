@@ -5,128 +5,128 @@ using System.Collections.Generic;
 using Rt;
 
 public static partial class GoProgram {
-    sealed class s_main_Task_3 {
-        public long f_ID_0;
-        public string f_Title_1;
-        public bool f_Done_2;
-        public s_main_Task_3() {
-            f_ID_0 = 0L;
-            f_Title_1 = "";
-            f_Done_2 = false;
+    sealed class Task {
+        public long f_ID;
+        public string f_Title;
+        public bool f_Done;
+        public Task() {
+            f_ID = 0L;
+            f_Title = "";
+            f_Done = false;
         }
-        public s_main_Task_3 _clone() {
-            s_main_Task_3 r = new s_main_Task_3();
-            r._set(this);
-            return r;
+        public Task _clone() {
+            Task _r = new Task();
+            _r._set(this);
+            return _r;
         }
-        public void _set(s_main_Task_3 o) {
-            this.f_ID_0 = o.f_ID_0;
-            this.f_Title_1 = o.f_Title_1;
-            this.f_Done_2 = o.f_Done_2;
+        public void _set(Task _o) {
+            this.f_ID = _o.f_ID;
+            this.f_Title = _o.f_Title;
+            this.f_Done = _o.f_Done;
         }
-        public bool _eq(s_main_Task_3 o) {
-            return true && this.f_ID_0 == o.f_ID_0 && this.f_Title_1 == o.f_Title_1 && this.f_Done_2 == o.f_Done_2;
+        public bool _eq(Task _o) {
+            return true && this.f_ID == _o.f_ID && this.f_Title == _o.f_Title && this.f_Done == _o.f_Done;
         }
         public object _key() {
-            return new KeyList(new object[] {(object) (this.f_ID_0), (object) (this.f_Title_1), (object) (this.f_Done_2)});
+            return new KeyList(new object[] {(object) (this.f_ID), (object) (this.f_Title), (object) (this.f_Done)});
         }
     }
 
-    static async Async fn_main_produce_0(GoTask t, Chan v_out_0, long v_n_1) {
+    static async Async produce(GoTask _t, Chan out_2, long n) {
         Program.checkStack();
-        long v_i_2 = 0L;
-        s_main_Task_3 v_temp_4 = null;
-        v_i_2 = 1L;
-        while (v_i_2 <= v_n_1) {
-            v_temp_4 = new s_main_Task_3();
-            v_temp_4.f_ID_0 = v_i_2;
-            v_temp_4.f_Title_1 = "task";
-            v_temp_4.f_Done_2 = R.rem_i64(v_i_2, 3L) == 0L;
-            R.chanSend(t, v_out_0, v_temp_4);
-            if (t.blocked) await R.wait(t);
-            v_i_2 = R.add_i64(v_i_2, 1L);
+        long i = 0L;
+        Task _4 = null;
+        i = 1L;
+        while (i <= n) {
+            _4 = new Task();
+            _4.f_ID = i;
+            _4.f_Title = "task";
+            _4.f_Done = R.rem_i64(i, 3L) == 0L;
+            R.chanSend(_t, out_2, _4);
+            if (_t.blocked) await R.wait(_t);
+            i = R.add_i64(i, 1L);
         }
-        R.chanClose(v_out_0);
+        R.chanClose(out_2);
         return;
     }
 
-    static Frame fn_main_produce_0(Chan v_out_0, long v_n_1) => R.nativeTask(t => fn_main_produce_0(t, v_out_0, v_n_1));
+    static Frame produce(Chan out_2, long n) => R.nativeTask(_t => produce(_t, out_2, n));
 
-    static async Async<object[]> fn_main_fetchTasks_1(GoTask t, long v_n_0) {
+    static async Async<object[]> fetchTasks(GoTask _t, long n) {
         Program.checkStack();
-        Slice v_result_1 = Slice.NIL;
-        Box v_result_2 = null;
-        Box v_temp_4 = null;
-        Chan v_ch_5 = null;
-        Slice v_tasks_8 = Slice.NIL;
-        s_main_Task_3 v_temp_9 = null;
-        bool v_temp_10 = false;
-        Chan v_temp_11 = null;
-        s_main_Task_3 v_t_12 = null;
-        v_result_1 = Slice.NIL;
-        v_result_2 = null;
-        if (v_n_0 < 0L) {
-            v_temp_4 = R.stdErrorsNew("negative count");
-            v_result_1 = Slice.NIL;
-            v_result_2 = v_temp_4;
-            return new object[] {v_result_1, v_result_2};
+        Slice _1 = Slice.NIL;
+        Box _2 = null;
+        Box _4 = null;
+        Chan ch = null;
+        Slice tasks = Slice.NIL;
+        Task _9 = null;
+        bool _10 = false;
+        Chan _11 = null;
+        Task t = null;
+        _1 = Slice.NIL;
+        _2 = null;
+        if (n < 0L) {
+            _4 = R.stdErrorsNew("negative count");
+            _1 = Slice.NIL;
+            _2 = _4;
+            return new object[] {_1, _2};
         }
-        v_ch_5 = R.makeChan(0L, () => new s_main_Task_3());
-        R.spawn((Frame) (fn_main_produce_0(v_ch_5, v_n_0)));
-        v_tasks_8 = Slice.NIL;
-        v_temp_11 = v_ch_5;
+        ch = R.makeChan(0L, () => new Task());
+        R.spawn((Frame) (produce(ch, n)));
+        tasks = Slice.NIL;
+        _11 = ch;
         for (;;) {
-            R.chanRecv(t, v_temp_11);
-            if (t.blocked) await R.wait(t);
-            v_temp_9 = ((s_main_Task_3) (t.rv[0]));
-            v_temp_10 = ((bool) t.rv[1]);
-            if (!v_temp_10) {
-                v_result_1 = v_tasks_8;
-                v_result_2 = null;
-                return new object[] {v_result_1, v_result_2};
+            R.chanRecv(_t, _11);
+            if (_t.blocked) await R.wait(_t);
+            _9 = ((Task) (_t.rv[0]));
+            _10 = ((bool) _t.rv[1]);
+            if (!_10) {
+                _1 = tasks;
+                _2 = null;
+                return new object[] {_1, _2};
             }
-            v_t_12 = v_temp_9;
-            if (!v_t_12.f_Done_2) {
-                v_tasks_8 = Slice.zeroAppendGrowth(R.append(v_tasks_8, new object[] {v_t_12._clone()}, v => ((s_main_Task_3) (v))._clone()), v_tasks_8, () => new s_main_Task_3());
+            t = _9;
+            if (!t.f_Done) {
+                tasks = Slice.zeroAppendGrowth(R.append(tasks, new object[] {t._clone()}, _v => ((Task) (_v))._clone()), tasks, () => new Task());
             }
         }
     }
 
-    static Frame fn_main_fetchTasks_1(long v_n_0) => R.nativeTask(t => fn_main_fetchTasks_1(t, v_n_0), 2);
+    static Frame fetchTasks(long n) => R.nativeTask(_t => fetchTasks(_t, n), 2);
 
-    static async Async fn_main_main_2(GoTask t) {
+    static async Async main(GoTask _t) {
         Program.checkStack();
-        Slice v_tasks_0 = Slice.NIL;
-        Box v_err_1 = null;
-        Slice v_temp_2 = Slice.NIL;
-        Box v_temp_3 = null;
-        long v_temp_7 = 0L;
-        long v_temp_8 = 0L;
-        Slice v_temp_9 = Slice.NIL;
-        s_main_Task_3 v_t_13 = null;
-        Slice v_temp_16 = Slice.NIL;
-        Box v_temp_17 = null;
-        { object[] _r = await fn_main_fetchTasks_1(t, 7L); v_temp_2 = ((Slice) (_r[0])); v_temp_3 = ((Box) (_r[1])); }
-        v_tasks_0 = v_temp_2;
-        v_err_1 = v_temp_3;
-        if (!Box.ifaceEq(v_err_1, null)) {
-            R.print(true, "error:", ((string) (Program.icall(v_err_1, "Error"))));
+        Slice tasks = Slice.NIL;
+        Box err = null;
+        Slice _2 = Slice.NIL;
+        Box _3 = null;
+        long _7 = 0L;
+        long _8 = 0L;
+        Slice _9 = Slice.NIL;
+        Task t = null;
+        Slice _16 = Slice.NIL;
+        Box _17 = null;
+        { object[] _r = await fetchTasks(_t, 7L); _2 = ((Slice) (_r[0])); _3 = ((Box) (_r[1])); }
+        tasks = _2;
+        err = _3;
+        if (!Box.ifaceEq(err, null)) {
+            R.print(true, "error:", ((string) (Program.icall(err, "Error"))));
             return;
         }
-        v_temp_9 = v_tasks_0;
-        v_temp_8 = (long) v_temp_9.l;
-        v_temp_7 = 0L;
-        while (v_temp_7 < v_temp_8) {
-            v_t_13 = ((s_main_Task_3) (R.sget(v_temp_9, v_temp_7)))._clone();
-            R.print(true, v_t_13.f_ID_0, v_t_13.f_Title_1);
-            v_temp_7 = R.add_i64(v_temp_7, 1L);
+        _9 = tasks;
+        _8 = (long) _9.l;
+        _7 = 0L;
+        while (_7 < _8) {
+            t = ((Task) (R.sget(_9, _7)))._clone();
+            R.print(true, t.f_ID, t.f_Title);
+            _7 = R.add_i64(_7, 1L);
         }
-        { object[] _r = await fn_main_fetchTasks_1(t, -1L); v_temp_16 = ((Slice) (_r[0])); v_temp_17 = ((Box) (_r[1])); }
-        v_err_1 = v_temp_17;
-        R.print(true, ((string) (Program.icall(v_err_1, "Error"))));
+        { object[] _r = await fetchTasks(_t, -1L); _16 = ((Slice) (_r[0])); _17 = ((Box) (_r[1])); }
+        err = _17;
+        R.print(true, ((string) (Program.icall(err, "Error"))));
         return;
     }
 
-    static Frame fn_main_main_2() => R.nativeTask(t => fn_main_main_2(t));
+    static Frame main() => R.nativeTask(_t => main(_t));
 
 }

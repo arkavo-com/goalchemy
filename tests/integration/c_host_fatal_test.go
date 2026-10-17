@@ -73,7 +73,7 @@ func TestGeneratedCHostFatalCleanup(t *testing.T) {
 			source := fmt.Sprintf("package main\nimport(\"github.com/eugenioenko/goalchemy/lib/time\";\"github.com/eugenioenko/goalchemy/lib/context\";\"github.com/eugenioenko/goalchemy/lib/sync\")\n%s\nfunc main(){var unused sync.Mutex;_ = unused;_,cancel:=context.WithCancel(context.Background());defer cancel();go func(){time.Sleep(131)}();time.Sleep(125);%s}\n", tc.decl, tc.tail)
 			out := cHostFixture(t, source)
 			cHostAdapter(t, out, srv.URL, "https://unused.invalid", "unused")
-			cHostInject(t, filepath.Join(out, "main.c"), "    gx_run_main(init_zero_globals, entry_frame);", "    gx_host_main(init_zero_globals, entry_frame);")
+			cHostInject(t, filepath.Join(out, "main.c"), "    gx_run_main(_init_zero_globals, _entry_frame);", "    gx_host_main(_init_zero_globals, _entry_frame);")
 			marker, ack := filepath.Join(out, "fresh-native-cleanup.txt"), filepath.Join(out, "release-resource-ack")
 			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer cancel()
@@ -152,7 +152,7 @@ func cooperative(){time.Sleep(1)}
 func main(){time.Sleep(1);for i:=0;i<512;i++{guarded();cooperative()};println("source recovered")}
 `)
 	baseline := cHostCommand(t, out, "sh", "run.sh")
-	cHostInject(t, filepath.Join(out, "main.c"), "    gx_run_main(init_zero_globals, entry_frame);", "    gx_host_main(init_zero_globals, entry_frame);")
+	cHostInject(t, filepath.Join(out, "main.c"), "    gx_run_main(_init_zero_globals, _entry_frame);", "    gx_host_main(_init_zero_globals, _entry_frame);")
 	host := cHostCommand(t, out, "sh", "run.sh")
 	if baseline != host || host != strings.Repeat("true\n", 512)+"source recovered\n" {
 		t.Fatalf("balanced source recursion/panic guard %q", host)

@@ -19,7 +19,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), contracts: map[string]bool{}, symbols: symbols}
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), contracts: map[string]bool{}, symbols: symbols}
 	bodies := map[string]*bytes.Buffer{"": {}}
 	for _, pkg := range layout.Packages {
 		bodies[pkg.Path] = &bytes.Buffer{}
@@ -37,7 +37,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		bodies[owner].WriteString(e.function(function))
 	}
 	root := bodies[""]
-	root.WriteString("func gSetupMethods() {\n")
+	root.WriteString("func _gSetupMethods() {\n")
 	for _, typ := range p.Types.All {
 		for _, method := range typ.MethodSet {
 			fmt.Fprintf(root, "    GTypes.table[%d].methods[%s] = %s\n", typ.ID, quote(method.ID), e.functionValue(method.Func, ""))
@@ -57,12 +57,12 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		if entry == nil {
 			entry = p.Main
 		}
-		root.WriteString("_ = gTypeRegistration\ngSetupMethods()\nGMain {\n    do {\n        let owner = GOwner(host: " + strconv.FormatBool(ir.HostEntry(e.contracts)) + ")\n")
+		root.WriteString("_ = _gTypeRegistration\n_gSetupMethods()\nGMain {\n    do {\n        let _owner = GOwner(host: " + strconv.FormatBool(ir.HostEntry(e.contracts)) + ")\n")
 		if p.Entry == nil && p.Init != nil {
-			fmt.Fprintf(root, "        _ = try owner.run(%s([], []))\n", e.names.Symbol(p.Init.Sym))
+			fmt.Fprintf(root, "        _ = try _owner.run(%s([], []))\n", e.names.Symbol(p.Init.Sym))
 		}
 		if entry != nil {
-			fmt.Fprintf(root, "        _ = try owner.run(%s([], []))\n", e.names.Symbol(entry.Sym))
+			fmt.Fprintf(root, "        _ = try _owner.run(%s([], []))\n", e.names.Symbol(entry.Sym))
 		}
 		root.WriteString("    } catch { GReport(error) }\n}\n")
 	}

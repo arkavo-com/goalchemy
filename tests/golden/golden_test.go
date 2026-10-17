@@ -49,7 +49,7 @@ func generated(t *testing.T, fixture, prefix string) {
 	for _, v := range variants {
 		t.Run(v.name, func(t *testing.T) {
 			out := t.TempDir()
-			opts := driver.EmitOptions{PauseModel: v.pause, NoLineDirectives: true}
+			opts := driver.EmitOptions{Names: "source", PauseModel: v.pause, NoLineDirectives: true}
 			if ds := testutil.CompileGateOptions(fixture, v.target, out, "cooperative", opts); len(ds) > 0 {
 				t.Fatalf("compile: %v", ds)
 			}

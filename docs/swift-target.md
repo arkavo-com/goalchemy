@@ -64,7 +64,7 @@ overlapping operations and caller-owned inputs; source slice aliases continue
 to observe updates through their shared backing object. Other element types
 retain recursive Go value copying.
 
-Readability and `--compact-names` affect private identifiers, while the public
+The naming mode (`--names`) affects private identifiers, while the public
 Swift names retain source identifiers. Swift keywords are escaped with
 backticks. Unsupported exported shapes and reserved public names that would
 collide with the runtime or Swift primitives fail with `GCE007`.

@@ -148,31 +148,31 @@ func (e *emitter) library() error {
 	for _, h := range e.abi.Handles {
 		aliases[h.Name] = true
 	}
-	e.p_("func libraryReset() {\n")
+	e.p_("func _libraryReset() {\n")
 	for _, g := range e.p.Globals {
 		e.p_("%s = *new(%s)\n", e.names.Symbol(g.Sym), e.typ(g.Type))
 	}
 	e.p_("}\n")
-	e.p_("func librarySave() any {\nreturn []any{")
+	e.p_("func _librarySave() any {\nreturn []any{")
 	for _, g := range e.p.Globals {
 		e.p_("%s, ", e.names.Symbol(g.Sym))
 	}
-	e.p_("}\n}\nfunc libraryLoad(v any) {\nsaved := v.([]any)\n_ = saved\n")
+	e.p_("}\n}\nfunc _libraryLoad(v any) {\n_saved := v.([]any)\n_ = _saved\n")
 	for i, g := range e.p.Globals {
-		e.p_("%s, _ = saved[%d].(%s)\n", e.names.Symbol(g.Sym), i, e.typ(g.Type))
+		e.p_("%s, _ = _saved[%d].(%s)\n", e.names.Symbol(g.Sym), i, e.typ(g.Type))
 	}
-	e.p_("}\nvar libraryState = &rt.LibraryState{Reset: libraryReset, Save: librarySave, Load: libraryLoad}\n")
+	e.p_("}\nvar _libraryState = &rt.LibraryState{Reset: _libraryReset, Save: _librarySave, Load: _libraryLoad}\n")
 	for _, h := range e.abi.Handles {
 		e.p_("// %s is a handle to a source *%s owned by a library instance. Call Close\n// when done; a handle reclaimed by the garbage collector is released\n// without running Close.\n", h.Name, h.Name)
 		e.p_("type %s struct{ h *rt.Handle }\n", h.Name)
-		e.p_("func wrap%s(inst *rt.Instance, p %s) *%s {\nif p == nil { return nil }\nreturn rt.Wrap(inst, any(p), %q, func(h *rt.Handle) *%s { return &%s{h: h} })\n}\n",
-			h.Name, e.typ(h.Ptr), h.Name, h.Name, h.Name, h.Name)
+		e.p_("func %s(_inst *rt.Instance, _p %s) *%s {\nif _p == nil { return nil }\nreturn rt.Wrap(_inst, any(_p), %q, func(_h *rt.Handle) *%s { return &%s{h: _h} })\n}\n",
+			e.names.Derived("wrap", h.Name), e.typ(h.Ptr), h.Name, h.Name, h.Name, h.Name)
 		e.p_("func (x *%s) handle() *rt.Handle {\nif x == nil { return nil }\nreturn x.h\n}\n", h.Name)
 		closeRun := "nil"
 		if h.Close != nil {
-			closeRun = "func(sourceCtx rt.Context, fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{e.handleRecv(h, h.Close, "x.h")}) + "\n}"
+			closeRun = "func(_sourceCtx rt.Context, _fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{e.handleRecv(h, h.Close, "x.h")}) + "\n}"
 		}
-		e.p_("// Close runs the source Close, if any, and releases the handle. Calls\n// queued on the handle fail and an active call is canceled first.\nfunc (x *%s) Close() error {\nif x == nil { return &LibraryError{Kind: \"invalid_handle\"} }\nreturn rt.CloseHandle(x.h, libraryState, %s)\n}\n", h.Name, closeRun)
+		e.p_("// Close runs the source Close, if any, and releases the handle. Calls\n// queued on the handle fail and an active call is canceled first.\nfunc (x *%s) Close() error {\nif x == nil { return &LibraryError{Kind: \"invalid_handle\"} }\nreturn rt.CloseHandle(x.h, _libraryState, %s)\n}\n", h.Name, closeRun)
 	}
 	kinds := map[string]bool{}
 	for _, f := range e.libraryFuncs() {
@@ -181,10 +181,10 @@ func (e *emitter) library() error {
 				kinds[k] = true
 				close := ""
 				if ir.StreamCloses(k) {
-					close = "func(sourceCtx rt.Context, fresh bool) rt.Frame {\n" + e.libraryCallFrame(e.p.HostIOFunc("CloseView"), []string{"rt.Obj[*rt.StreamObj](h).V.(" + e.typ(e.p.HostIOFunc("CloseView").Sig.Params[0]) + ")"}) + "\n}"
+					close = "func(_sourceCtx rt.Context, _fresh bool) rt.Frame {\n" + e.libraryCallFrame(e.p.HostIOFunc("CloseView"), []string{"rt.Obj[*rt.StreamObj](_h).V.(" + e.typ(e.p.HostIOFunc("CloseView").Sig.Params[0]) + ")"}) + "\n}"
 				}
-				e.streamOps("streamOps"+k, ir.KindOps(k), func(iface *ir.Type) string {
-					return "rt.Obj[*rt.StreamObj](h).V.(" + e.typ(iface) + ")"
+				e.streamOps(e.names.Derived("streamOps", k), ir.KindOps(k), func(iface *ir.Type) string {
+					return "rt.Obj[*rt.StreamObj](_h).V.(" + e.typ(iface) + ")"
 				}, close)
 			}
 		}
@@ -200,10 +200,10 @@ func (e *emitter) library() error {
 		}
 		close := "nil"
 		if h.Close != nil {
-			close = "func(sourceCtx rt.Context, fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{e.handleRecv(h, h.Close, "h")}) + "\n}"
+			close = "func(_sourceCtx rt.Context, _fresh bool) rt.Frame {\n" + e.libraryCallFrame(h.Close, []string{e.handleRecv(h, h.Close, "_h")}) + "\n}"
 		}
-		e.streamOps("streamOps"+h.Name, h.Stream, func(iface *ir.Type) string {
-			return e.typ(iface) + "(rt.Obj[" + e.typ(h.Ptr) + "](h))"
+		e.streamOps(e.names.Derived("streamOps", h.Name), h.Stream, func(iface *ir.Type) string {
+			return e.typ(iface) + "(rt.Obj[" + e.typ(h.Ptr) + "](_h))"
 		}, close)
 		var parts []string
 		for _, p := range []struct {
@@ -214,7 +214,7 @@ func (e *emitter) library() error {
 				parts = append(parts, p.name)
 			}
 		}
-		e.p_("// IO returns the handle as a standard io stream. Each operation is a call\n// on the handle; Close closes the handle.\nfunc (x *%s) IO() interface{ %s } {\nif x == nil || x.h == nil { return nil }\nreturn rt.NewStream(x.h, streamOps%s)\n}\n", h.Name, strings.Join(parts, "; "), h.Name)
+		e.p_("// IO returns the handle as a standard io stream. Each operation is a call\n// on the handle; Close closes the handle.\nfunc (x *%s) IO() interface{ %s } {\nif x == nil || x.h == nil { return nil }\nreturn rt.NewStream(x.h, %s)\n}\n", h.Name, strings.Join(parts, "; "), e.names.Derived("streamOps", h.Name))
 	}
 	for _, f := range e.p.Exports {
 		name := f.Name[strings.LastIndex(f.Name, ".")+1:]
@@ -238,27 +238,27 @@ func (e *emitter) streamOps(name string, ops ir.StreamOps, obj func(*ir.Type) st
 	call := func(fn string, args []string, own string) string {
 		f := e.p.HostIOFunc(fn)
 		args = append([]string{obj(f.Sig.Params[0])}, args...)
-		return fmt.Sprintf("rv, err := rt.RunLibraryCall(context.Background(), nil, libraryState, []*rt.Handle{h}, func(sourceCtx rt.Context, fresh bool) rt.Frame {\n%s\n}, func(inst *rt.Instance, rv []any) []any {\nowned := make([]any, len(rv))\n%s\nif rv[len(rv)-1] != nil { owned[len(rv)-1] = rt.SnapshotError(rv[len(rv)-1].(error)) }\nreturn owned\n}, nil, nil)\n", e.libraryCallFrame(f, args), own)
+		return fmt.Sprintf("_rv, _err := rt.RunLibraryCall(context.Background(), nil, _libraryState, []*rt.Handle{_h}, func(_sourceCtx rt.Context, _fresh bool) rt.Frame {\n%s\n}, func(_inst *rt.Instance, _rv []any) []any {\n_owned := make([]any, len(_rv))\n%s\nif _rv[len(_rv)-1] != nil { _owned[len(_rv)-1] = rt.SnapshotError(_rv[len(_rv)-1].(error)) }\nreturn _owned\n}, nil, nil)\n", e.libraryCallFrame(f, args), own)
 	}
 	param := func(fn string, i int) string { return e.typ(e.p.HostIOFunc(fn).Sig.Params[i]) }
 	result := func(fn string, i int) string { return e.typ(e.p.HostIOFunc(fn).Sig.Results[i]) }
 	e.p_("var %s = &rt.StreamOps{\n", name)
 	if ops.Read {
-		e.p_("Read: func(h *rt.Handle, n int) ([]byte, bool, error) {\n%sif err != nil { return nil, false, err }\nif rv[2] != nil { return nil, false, rv[2].(error) }\nreturn []byte(rv[0].(%s)), rv[1].(bool), nil\n},\n",
-			call("ReadView", []string{param("ReadView", 1) + "(n)"}, fmt.Sprintf("owned[0] = rt.Snapshot(rv[0].(%s))\nowned[1] = rv[1]", result("ReadView", 0))), result("ReadView", 0))
+		e.p_("Read: func(_h *rt.Handle, _n int) ([]byte, bool, error) {\n%sif _err != nil { return nil, false, _err }\nif _rv[2] != nil { return nil, false, _rv[2].(error) }\nreturn []byte(_rv[0].(%s)), _rv[1].(bool), nil\n},\n",
+			call("ReadView", []string{param("ReadView", 1) + "(_n)"}, fmt.Sprintf("_owned[0] = rt.Snapshot(_rv[0].(%s))\n_owned[1] = _rv[1]", result("ReadView", 0))), result("ReadView", 0))
 	}
 	if ops.Write {
-		e.p_("Write: func(h *rt.Handle, p []byte) (int, error) {\n%sif err != nil { return 0, err }\nn := int(rv[0].(%s))\nif rv[1] != nil { return n, rv[1].(error) }\nreturn n, nil\n},\n",
-			call("WriteView", []string{param("WriteView", 1) + "(p)"}, "owned[0] = rv[0]"), result("WriteView", 0))
+		e.p_("Write: func(_h *rt.Handle, _p []byte) (int, error) {\n%sif _err != nil { return 0, _err }\n_n := int(_rv[0].(%s))\nif _rv[1] != nil { return _n, _rv[1].(error) }\nreturn _n, nil\n},\n",
+			call("WriteView", []string{param("WriteView", 1) + "(_p)"}, "_owned[0] = _rv[0]"), result("WriteView", 0))
 	}
 	if ops.Seek {
-		e.p_("Seek: func(h *rt.Handle, offset int64, whence int) (int64, error) {\n%sif err != nil { return 0, err }\nif rv[1] != nil { return 0, rv[1].(error) }\nreturn int64(rv[0].(%s)), nil\n},\n",
-			call("SeekView", []string{param("SeekView", 1) + "(offset)", param("SeekView", 2) + "(whence)"}, "owned[0] = rv[0]"), result("SeekView", 0))
+		e.p_("Seek: func(_h *rt.Handle, _offset int64, _whence int) (int64, error) {\n%sif _err != nil { return 0, _err }\nif _rv[1] != nil { return 0, _rv[1].(error) }\nreturn int64(_rv[0].(%s)), nil\n},\n",
+			call("SeekView", []string{param("SeekView", 1) + "(_offset)", param("SeekView", 2) + "(_whence)"}, "_owned[0] = _rv[0]"), result("SeekView", 0))
 	}
 	if close == "" {
 		close = "nil"
 	}
-	e.p_("Close: func(h *rt.Handle) error { return rt.CloseHandle(h, libraryState, %s) },\n}\n", close)
+	e.p_("Close: func(_h *rt.Handle) error { return rt.CloseHandle(_h, _libraryState, %s) },\n}\n", close)
 }
 
 // libraryCallFrame renders the frame body that calls f with the given source
@@ -267,13 +267,13 @@ func (e *emitter) libraryCallFrame(f *ir.Func, args []string) string {
 	if e.native() {
 		init := e.names.Symbol(e.p.Init.Sym) + "()"
 		if e.p.Init.MaySuspend {
-			init = e.names.Symbol(e.p.Init.Sym) + "(t)"
+			init = e.names.Symbol(e.p.Init.Sym) + "(_t)"
 		}
 		if f.MaySuspend {
-			args = append([]string{"t"}, args...)
+			args = append([]string{"_t"}, args...)
 		}
 		call := e.funcRef(f) + "(" + strings.Join(args, ", ") + ")"
-		return "return rt.NativeTask(func(t *rt.Task) []any {\nif fresh {\nlibraryReset()\n" + init + "\n}\n" + syncFrameBody(len(f.Sig.Results), call) + "\n})"
+		return "return rt.NativeTask(func(_t *rt.Task) []any {\nif _fresh {\n_libraryReset()\n" + init + "\n}\n" + syncFrameBody(len(f.Sig.Results), call) + "\n})"
 	}
 	init := e.names.Symbol(e.p.Init.Sym) + "()"
 	if !e.p.Init.MaySuspend {
@@ -283,7 +283,7 @@ func (e *emitter) libraryCallFrame(f *ir.Func, args []string) string {
 	if !f.MaySuspend {
 		call = "rt.Sync(func() []any { " + syncFrameBody(len(f.Sig.Results), call) + " })"
 	}
-	return "call := func() rt.Frame { return " + call + " }\nif fresh {\nlibraryReset()\nreturn rt.LibrarySequence(" + init + ", call)\n}\nreturn call()"
+	return "_call := func() rt.Frame { return " + call + " }\nif _fresh {\n_libraryReset()\nreturn rt.LibrarySequence(" + init + ", _call)\n}\nreturn _call()"
 }
 
 // handleRecv is the source receiver argument of method f of h on handle hv.
@@ -326,7 +326,7 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 	}
 	for i, t := range params {
 		if sourceContext(t) {
-			as = append(as, "sourceCtx")
+			as = append(as, "_sourceCtx")
 			continue
 		}
 		a := fmt.Sprintf("a%d", i)
@@ -337,7 +337,7 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 			continue
 		}
 		if k := ir.StreamKind(t); k != "" {
-			as = append(as, fmt.Sprintf("func() %s { if ids[%d] == 0 { return nil }; return %s(ids[%d]) }()", e.typ(t), len(streams), e.names.Symbol(e.p.StreamAdapter(k).Sym), len(streams)))
+			as = append(as, fmt.Sprintf("func() %s { if _ids[%d] == 0 { return nil }; return %s(_ids[%d]) }()", e.typ(t), len(streams), e.names.Symbol(e.p.StreamAdapter(k).Sym), len(streams)))
 			streams = append(streams, "rt.HostStream("+a+")")
 			continue
 		}
@@ -364,34 +364,34 @@ func (e *emitter) libraryWrapper(name string, recv *ir.Handle, f *ir.Func) {
 	if len(streams) > 0 {
 		streamList = "[]rt.Callback{" + strings.Join(streams, ", ") + "}"
 	}
-	e.p_("ids := make([]int64, %d)\n_ = ids\n", len(streams))
-	e.p_("var registry Callbacks\nif len(callbacks)>1 { return %s }\nif len(callbacks)==1 { registry=callbacks[0] }\n", libraryErrorReturn(n, "&LibraryError{Kind: \"invalid_callbacks\"}"))
+	e.p_("_ids := make([]int64, %d)\n_ = _ids\n", len(streams))
+	e.p_("var _registry Callbacks\nif len(callbacks)>1 { return %s }\nif len(callbacks)==1 { _registry=callbacks[0] }\n", libraryErrorReturn(n, "&LibraryError{Kind: \"invalid_callbacks\"}"))
 	handleList := "nil"
 	if len(handles) > 0 {
 		handleList = "[]*rt.Handle{" + strings.Join(handles, ", ") + "}"
 	}
-	e.p_("rv, runErr := rt.RunLibraryCall(ctx, registry, libraryState, %s, func(sourceCtx rt.Context, fresh bool) rt.Frame {\n%s\n}, func(inst *rt.Instance, rv []any) []any {\nowned := make([]any, len(rv))\n", handleList, e.libraryCallFrame(f, as))
+	e.p_("_rv, _runErr := rt.RunLibraryCall(ctx, _registry, _libraryState, %s, func(_sourceCtx rt.Context, _fresh bool) rt.Frame {\n%s\n}, func(_inst *rt.Instance, _rv []any) []any {\n_owned := make([]any, len(_rv))\n", handleList, e.libraryCallFrame(f, as))
 	for i := 0; i < n; i++ {
 		if h := e.abi.Handle(results[i]); h != nil {
-			e.p_("owned[%d] = wrap%s(inst, rv[%d].(%s))\n", i, h.Name, i, e.typ(results[i]))
+			e.p_("_owned[%d] = %s(_inst, _rv[%d].(%s))\n", i, e.names.Derived("wrap", h.Name), i, e.typ(results[i]))
 			continue
 		}
 		if k := ir.StreamKind(results[i]); k != "" {
-			e.p_("if rv[%d] != nil { owned[%d] = rt.Wrap(inst, any(&rt.StreamObj{V: rv[%d]}), \"io.%s\", func(h *rt.Handle) *rt.Stream { return rt.NewStream(h, streamOps%s) }).As(%q) }\n", i, i, i, k, k, k)
+			e.p_("if _rv[%d] != nil { _owned[%d] = rt.Wrap(_inst, any(&rt.StreamObj{V: _rv[%d]}), \"io.%s\", func(_h *rt.Handle) *rt.Stream { return rt.NewStream(_h, %s) }).As(%q) }\n", i, i, i, k, e.names.Derived("streamOps", k), k)
 			continue
 		}
-		e.p_("owned[%d] = rt.Snapshot(rv[%d].(%s))\n", i, i, e.typ(results[i]))
+		e.p_("_owned[%d] = rt.Snapshot(_rv[%d].(%s))\n", i, i, e.typ(results[i]))
 	}
 	if hasError {
-		e.p_("if rv[%d]!=nil { owned[%d]=rt.SnapshotError(rv[%d].(error)) }\n", n, n, n)
+		e.p_("if _rv[%d]!=nil { _owned[%d]=rt.SnapshotError(_rv[%d].(error)) }\n", n, n, n)
 	}
-	e.p_("return owned\n}, %s, ids)\n", streamList)
-	e.p_("if runErr != nil { return %s }\n_ = rv\n", libraryErrorReturn(n, "runErr"))
+	e.p_("return _owned\n}, %s, _ids)\n", streamList)
+	e.p_("if _runErr != nil { return %s }\n_ = _rv\n", libraryErrorReturn(n, "_runErr"))
 	for i := 0; i < n; i++ {
-		e.p_("r%d, _ = rv[%d].(%s)\n", i, i, publicType(results[i]))
+		e.p_("r%d, _ = _rv[%d].(%s)\n", i, i, publicType(results[i]))
 	}
 	if hasError {
-		e.p_("if rv[%d] != nil { err = rv[%d].(error) }\n", n, n)
+		e.p_("if _rv[%d] != nil { err = _rv[%d].(error) }\n", n, n)
 	}
 	e.p_("return\n}\n")
 }

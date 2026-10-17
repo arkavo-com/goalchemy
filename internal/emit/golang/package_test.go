@@ -68,7 +68,7 @@ func TestPackageOutput(t *testing.T) {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			out := t.TempDir()
 			p := *res.IR
-			p.CompactNames = compact
+			p.Names = testutil.Names(compact)
 			emitted, err := golang.Emit(&p, out, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -78,7 +78,7 @@ func TestPackageOutput(t *testing.T) {
 				t.Fatalf("nonrepeatable emission: %v", err)
 			}
 			checkPackageDeclarations(t, &p, emitted)
-			if ds := driver.EmitWithOptions("go", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("go", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			checkPackageManifest(t, out, &p, emitted)
@@ -158,14 +158,14 @@ func checkPackageDeclarations(t *testing.T, p *ir.Program, out *golang.Output) {
 		if f.MethodID != "" && !f.Wrapper || f.Closure && !f.MaySuspend {
 			continue
 		}
-		assert(naming.Symbol(p, f.Sym), f.Pkg)
+		assert(naming.New(p, golang.NameRules(p)).Symbol(f.Sym), f.Pkg)
 	}
 	for _, g := range p.Globals {
-		assert(naming.Symbol(p, g.Sym), g.Pkg)
+		assert(naming.New(p, golang.NameRules(p)).Symbol(g.Sym), g.Pkg)
 	}
 	for _, typ := range p.Types.All {
 		if typ.Kind == ir.KNamed && typ.Pkg != "" {
-			assert(naming.Type(p, typ, "type_"), typ.Pkg)
+			assert(naming.New(p, golang.NameRules(p)).Type(typ, "type_"), typ.Pkg)
 		}
 	}
 	var sameBase []string

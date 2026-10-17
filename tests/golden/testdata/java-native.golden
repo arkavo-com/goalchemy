@@ -4,104 +4,104 @@ import rt.*;
 
 @SuppressWarnings({"unchecked", "unused", "rawtypes"})
 final class pkg_co_fetch_tasks_3350c4c42297f661 extends _GoalchemySupport {
-    static void fn_main_produce_0(TaskSpawn.Task t, ChanMake.Chan v_out$0, long v_n$1) {
-        long v_i$2 = 0L;
-        S$main_Task_3 v_temp$4 = null;
-        v_i$2 = 1L;
-        while (v_i$2 <= v_n$1) {
-            v_temp$4 = new S$main_Task_3();
-            v_temp$4.f$ID_0 = v_i$2;
-            v_temp$4.f$Title_1 = "task";
-            v_temp$4.f$Done_2 = IntegerRem.rem_i64(v_i$2, 3L) == 0L;
-            ChanSend.chanSend(t, v_out$0, v_temp$4);
-            if (t.blocked) TaskSpawn.await(t);
-            v_i$2 = IntegerAdd.add_i64(v_i$2, 1L);
+    static void produce(TaskSpawn.Task _t, ChanMake.Chan out, long n) {
+        long i = 0L;
+        Task _4 = null;
+        i = 1L;
+        while (i <= n) {
+            _4 = new Task();
+            _4.f$ID = i;
+            _4.f$Title = "task";
+            _4.f$Done = IntegerRem.rem_i64(i, 3L) == 0L;
+            ChanSend.chanSend(_t, out, _4);
+            if (_t.blocked) TaskSpawn.await(_t);
+            i = IntegerAdd.add_i64(i, 1L);
         }
-        ChanClose.chanClose(v_out$0);
+        ChanClose.chanClose(out);
         return;
     }
 
-    static TaskSpawn.Frame fn_main_produce_0(ChanMake.Chan v_out$0, long v_n$1) {
-        return TaskSpawn.nativeTask(t -> { fn_main_produce_0(t, v_out$0, v_n$1); return new Object[0]; });
+    static TaskSpawn.Frame produce(ChanMake.Chan out, long n) {
+        return TaskSpawn.nativeTask(_t -> { produce(_t, out, n); return new Object[0]; });
     }
 
-    static Object[] fn_main_fetchTasks_1(TaskSpawn.Task t, long v_n$0) {
-        Slice v_result$1 = Slice.NIL;
-        Box v_result$2 = null;
-        Box v_temp$4 = null;
-        ChanMake.Chan v_ch$5 = null;
-        Slice v_tasks$8 = Slice.NIL;
-        S$main_Task_3 v_temp$9 = null;
-        boolean v_temp$10 = false;
-        ChanMake.Chan v_temp$11 = null;
-        S$main_Task_3 v_t$12 = null;
-        v_result$1 = Slice.NIL;
-        v_result$2 = null;
-        if (v_n$0 < 0L) {
-            v_temp$4 = StdErrorsNew.stdErrorsNew("negative count");
-            v_result$1 = Slice.NIL;
-            v_result$2 = v_temp$4;
-            return new Object[] {v_result$1, v_result$2};
+    static Object[] fetchTasks(TaskSpawn.Task _t, long n) {
+        Slice _1 = Slice.NIL;
+        Box _2 = null;
+        Box _4 = null;
+        ChanMake.Chan ch = null;
+        Slice tasks = Slice.NIL;
+        Task _9 = null;
+        boolean _10 = false;
+        ChanMake.Chan _11 = null;
+        Task t = null;
+        _1 = Slice.NIL;
+        _2 = null;
+        if (n < 0L) {
+            _4 = StdErrorsNew.stdErrorsNew("negative count");
+            _1 = Slice.NIL;
+            _2 = _4;
+            return new Object[] {_1, _2};
         }
-        v_ch$5 = ChanMake.makeChan(0L, () -> new S$main_Task_3());
-        TaskSpawn.spawn((TaskSpawn.Frame) (fn_main_produce_0(v_ch$5, v_n$0)));
-        v_tasks$8 = Slice.NIL;
-        v_temp$11 = v_ch$5;
+        ch = ChanMake.makeChan(0L, () -> new Task());
+        TaskSpawn.spawn((TaskSpawn.Frame) (produce(ch, n)));
+        tasks = Slice.NIL;
+        _11 = ch;
         for (;;) {
-            ChanRecv.chanRecv(t, v_temp$11);
-            if (t.blocked) TaskSpawn.await(t);
-            v_temp$9 = ((S$main_Task_3) (t.rv[0]));
-            v_temp$10 = ((Boolean) t.rv[1]);
-            if (!v_temp$10) {
-                v_result$1 = v_tasks$8;
-                v_result$2 = null;
-                return new Object[] {v_result$1, v_result$2};
+            ChanRecv.chanRecv(_t, _11);
+            if (_t.blocked) TaskSpawn.await(_t);
+            _9 = ((Task) (_t.rv[0]));
+            _10 = ((Boolean) _t.rv[1]);
+            if (!_10) {
+                _1 = tasks;
+                _2 = null;
+                return new Object[] {_1, _2};
             }
-            v_t$12 = v_temp$9;
-            if (!v_t$12.f$Done_2) {
-                v_tasks$8 = Slice.zeroAppendGrowth(SliceAppend.append(v_tasks$8, new Object[] {v_t$12.$clone()}, v -> ((S$main_Task_3) (v)).$clone()), v_tasks$8, () -> new S$main_Task_3());
+            t = _9;
+            if (!t.f$Done) {
+                tasks = Slice.zeroAppendGrowth(SliceAppend.append(tasks, new Object[] {t.$clone()}, _v -> ((Task) (_v)).$clone()), tasks, () -> new Task());
             }
         }
     }
 
-    static TaskSpawn.Frame fn_main_fetchTasks_1(long v_n$0) {
-        return TaskSpawn.nativeTask(t -> fn_main_fetchTasks_1(t, v_n$0));
+    static TaskSpawn.Frame fetchTasks(long n) {
+        return TaskSpawn.nativeTask(_t -> fetchTasks(_t, n));
     }
 
-    static void fn_main_main_2(TaskSpawn.Task t) {
-        Slice v_tasks$0 = Slice.NIL;
-        Box v_err$1 = null;
-        Slice v_temp$2 = Slice.NIL;
-        Box v_temp$3 = null;
-        long v_temp$7 = 0L;
-        long v_temp$8 = 0L;
-        Slice v_temp$9 = Slice.NIL;
-        S$main_Task_3 v_t$13 = null;
-        Slice v_temp$16 = Slice.NIL;
-        Box v_temp$17 = null;
-        { Object[] $r = fn_main_fetchTasks_1(t, 7L); v_temp$2 = ((Slice) ($r[0])); v_temp$3 = ((Box) ($r[1])); }
-        v_tasks$0 = v_temp$2;
-        v_err$1 = v_temp$3;
-        if (!Box.ifaceEq(v_err$1, null)) {
-            Print.print(true, "error:", ((String) (Program.icall(v_err$1, "Error"))));
+    static void main_2(TaskSpawn.Task _t) {
+        Slice tasks = Slice.NIL;
+        Box err = null;
+        Slice _2 = Slice.NIL;
+        Box _3 = null;
+        long _7 = 0L;
+        long _8 = 0L;
+        Slice _9 = Slice.NIL;
+        Task t = null;
+        Slice _16 = Slice.NIL;
+        Box _17 = null;
+        { Object[] $r = fetchTasks(_t, 7L); _2 = ((Slice) ($r[0])); _3 = ((Box) ($r[1])); }
+        tasks = _2;
+        err = _3;
+        if (!Box.ifaceEq(err, null)) {
+            Print.print(true, "error:", ((String) (Program.icall(err, "Error"))));
             return;
         }
-        v_temp$9 = v_tasks$0;
-        v_temp$8 = (long) v_temp$9.l;
-        v_temp$7 = 0L;
-        while (v_temp$7 < v_temp$8) {
-            v_t$13 = ((S$main_Task_3) (SliceIndex.sget(v_temp$9, v_temp$7))).$clone();
-            Print.print(true, v_t$13.f$ID_0, v_t$13.f$Title_1);
-            v_temp$7 = IntegerAdd.add_i64(v_temp$7, 1L);
+        _9 = tasks;
+        _8 = (long) _9.l;
+        _7 = 0L;
+        while (_7 < _8) {
+            t = ((Task) (SliceIndex.sget(_9, _7))).$clone();
+            Print.print(true, t.f$ID, t.f$Title);
+            _7 = IntegerAdd.add_i64(_7, 1L);
         }
-        { Object[] $r = fn_main_fetchTasks_1(t, -1L); v_temp$16 = ((Slice) ($r[0])); v_temp$17 = ((Box) ($r[1])); }
-        v_err$1 = v_temp$17;
-        Print.print(true, ((String) (Program.icall(v_err$1, "Error"))));
+        { Object[] $r = fetchTasks(_t, -1L); _16 = ((Slice) ($r[0])); _17 = ((Box) ($r[1])); }
+        err = _17;
+        Print.print(true, ((String) (Program.icall(err, "Error"))));
         return;
     }
 
-    static TaskSpawn.Frame fn_main_main_2() {
-        return TaskSpawn.nativeTask(t -> { fn_main_main_2(t); return new Object[0]; });
+    static TaskSpawn.Frame main_2() {
+        return TaskSpawn.nativeTask(_t -> { main_2(_t); return new Object[0]; });
     }
 
 }

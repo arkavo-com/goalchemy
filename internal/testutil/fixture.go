@@ -469,3 +469,12 @@ func HasDirective(src, name string) bool {
 	}
 	return false
 }
+
+// Names selects compact or readable private names, the two decorated modes
+// that tests compare against each other.
+func Names(compact bool) string {
+	if compact {
+		return "compact"
+	}
+	return "readable"
+}

@@ -18,13 +18,22 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/java"
 	"github.com/eugenioenko/goalchemy/internal/emit/py"
 	"github.com/eugenioenko/goalchemy/internal/emit/rust"
+	swiftemit "github.com/eugenioenko/goalchemy/internal/emit/swift"
 	"github.com/eugenioenko/goalchemy/internal/emit/ts"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/link"
+	"github.com/eugenioenko/goalchemy/internal/naming"
 )
 
 func init() {
 	Register("go", emitGo)
+}
+
+// nameRules gives each target's constraints on source names, for reporting
+// collisions before emission.
+var nameRules = map[string]func(*ir.Program) naming.Rules{
+	"go": golang.NameRules, "typescript": ts.NameRules, "python": py.NameRules, "java": java.NameRules,
+	"csharp": csharp.NameRules, "rust": rust.NameRules, "c": cemit.NameRules, "swift": swiftemit.NameRules,
 }
 
 func emitErr(code, msg string) []diagnostics.Diagnostic {

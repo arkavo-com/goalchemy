@@ -18,7 +18,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p), symbols: symbols, contracts: map[string]bool{}, tds: map[*ir.Type]bool{},
+	e := &emitter{p: p, names: naming.New(p, NameRules(p)), symbols: symbols, contracts: map[string]bool{}, tds: map[*ir.Type]bool{},
 		seenHelp: map[*ir.Type]bool{}, externs: map[string]*ir.Extern{}, layout: layout,
 		helpers: map[string]*bytes.Buffer{"": {}}, localProtos: map[string]*bytes.Buffer{"": {}}}
 	bodies := map[string]*bytes.Buffer{"": {}}
@@ -33,7 +33,7 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		}
 	}
 	for _, global := range p.Globals {
-		name := e.names.Symbol(global.Sym)
+		name := e.global(global.Sym)
 		fmt.Fprintf(bodies[global.Pkg], "%sgx_V %s;\n", position(global.Pos), name)
 		e.proto("extern gx_V %s", name)
 	}
@@ -48,13 +48,13 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 	}
 	e.current = ""
 	root := bodies[""]
-	root.WriteString("static void init_zero_globals(void) {\n")
+	root.WriteString("static void _init_zero_globals(void) {\n")
 	for _, global := range p.Globals {
 		zero := e.zero(global.Type)
 		if global.AddrTaken && !global.Type.IsAggregate() {
 			zero = "gx_cellv(" + zero + ")"
 		}
-		fmt.Fprintf(root, "    %s = %s;\n", e.names.Symbol(global.Sym), zero)
+		fmt.Fprintf(root, "    %s = %s;\n", e.global(global.Sym), zero)
 	}
 	root.WriteString("}\n\n")
 	var descriptors bytes.Buffer
@@ -67,23 +67,23 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		}
 	} else if p.Cooperative {
 		e.use("core.task.spawn")
-		root.WriteString("static gx_V entry_frame(void) {\n")
+		root.WriteString("static gx_V _entry_frame(void) {\n")
 		if p.Entry.MaySuspend {
-			fmt.Fprintf(root, "    return f_%s();\n", e.names.Symbol(p.Entry.Sym))
+			fmt.Fprintf(root, "    return %s();\n", e.fnName(p.Entry.Sym, "f_"))
 		} else {
-			fmt.Fprintf(root, "    return gx_sync_frame(gx_func(-1, w_%s, 0, NULL), 0, NULL, 0);\n", e.names.Symbol(p.Entry.Sym))
+			fmt.Fprintf(root, "    return gx_sync_frame(gx_func(-1, %s, 0, NULL), 0, NULL, 0);\n", e.fnName(p.Entry.Sym, "w_"))
 		}
 		run := "gx_run_main"
 		if ir.HostEntry(e.contracts) {
 			run = "gx_host_main"
 		}
-		root.WriteString("}\n\nint goalchemy_run_host(void) {\n    return gx_run_main_host(init_zero_globals, entry_frame);\n}\n\nint main(void) {\n    " + run + "(init_zero_globals, entry_frame);\n}\n")
+		root.WriteString("}\n\nint goalchemy_run_host(void) {\n    return gx_run_main_host(_init_zero_globals, _entry_frame);\n}\n\nint main(void) {\n    " + run + "(_init_zero_globals, _entry_frame);\n}\n")
 	} else {
-		fmt.Fprintf(root, "static void entry(void) {\n    f_%s();\n", e.names.Symbol(p.Init.Sym))
+		fmt.Fprintf(root, "static void _entry(void) {\n    %s();\n", e.fnName(p.Init.Sym, "f_"))
 		if p.Main != nil {
-			fmt.Fprintf(root, "    f_%s();\n", e.names.Symbol(p.Main.Sym))
+			fmt.Fprintf(root, "    %s();\n", e.fnName(p.Main.Sym, "f_"))
 		}
-		root.WriteString("}\n\nint main(void) {\n    gx_program_main(init_zero_globals, entry);\n}\n")
+		root.WriteString("}\n\nint main(void) {\n    gx_program_main(_init_zero_globals, _entry);\n}\n")
 	}
 	e.externWrappers(root)
 	e.flushHelpers()

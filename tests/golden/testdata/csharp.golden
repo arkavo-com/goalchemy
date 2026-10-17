@@ -5,180 +5,180 @@ using System.Collections.Generic;
 using Rt;
 
 public static partial class GoProgram {
-    sealed class s_main_Task_3 {
-        public long f_ID_0;
-        public string f_Title_1;
-        public bool f_Done_2;
-        public s_main_Task_3() {
-            f_ID_0 = 0L;
-            f_Title_1 = "";
-            f_Done_2 = false;
+    sealed class Task {
+        public long f_ID;
+        public string f_Title;
+        public bool f_Done;
+        public Task() {
+            f_ID = 0L;
+            f_Title = "";
+            f_Done = false;
         }
-        public s_main_Task_3 _clone() {
-            s_main_Task_3 r = new s_main_Task_3();
-            r._set(this);
-            return r;
+        public Task _clone() {
+            Task _r = new Task();
+            _r._set(this);
+            return _r;
         }
-        public void _set(s_main_Task_3 o) {
-            this.f_ID_0 = o.f_ID_0;
-            this.f_Title_1 = o.f_Title_1;
-            this.f_Done_2 = o.f_Done_2;
+        public void _set(Task _o) {
+            this.f_ID = _o.f_ID;
+            this.f_Title = _o.f_Title;
+            this.f_Done = _o.f_Done;
         }
-        public bool _eq(s_main_Task_3 o) {
-            return true && this.f_ID_0 == o.f_ID_0 && this.f_Title_1 == o.f_Title_1 && this.f_Done_2 == o.f_Done_2;
+        public bool _eq(Task _o) {
+            return true && this.f_ID == _o.f_ID && this.f_Title == _o.f_Title && this.f_Done == _o.f_Done;
         }
         public object _key() {
-            return new KeyList(new object[] {(object) (this.f_ID_0), (object) (this.f_Title_1), (object) (this.f_Done_2)});
+            return new KeyList(new object[] {(object) (this.f_ID), (object) (this.f_Title), (object) (this.f_Done)});
         }
     }
 
-    sealed class F_fn_main_produce_0 : Frame {
-        public Chan v_out_0 = null;
-        public long v_n_1 = 0L;
-        public long v_i_2 = 0L;
-        public s_main_Task_3 v_temp_4 = null;
+    sealed class _F_produce : Frame {
+        public Chan out_2 = null;
+        public long n = 0L;
+        public long i = 0L;
+        public Task _4 = null;
         public override object[] results() {
-            var fr = this;
+            var _fr = this;
             return new object[] {};
         }
-        public override void step(GoTask t) {
-            var fr = this;
-            switch (fr.pc) {
-            case 5: goto b5;
+        public override void step(GoTask _t) {
+            var _fr = this;
+            switch (_fr.pc) {
+            case 5: goto _b5;
             }
-            fr.v_i_2 = 1L;
-            b1: ;
-            if (fr.v_i_2 <= fr.v_n_1) {
-                fr.v_temp_4 = new s_main_Task_3();
-                fr.v_temp_4.f_ID_0 = fr.v_i_2;
-                fr.v_temp_4.f_Title_1 = "task";
-                fr.v_temp_4.f_Done_2 = R.rem_i64(fr.v_i_2, 3L) == 0L;
-                fr.pc = 5; R.chanSend(t, fr.v_out_0, fr.v_temp_4);
+            _fr.i = 1L;
+            _b1: ;
+            if (_fr.i <= _fr.n) {
+                _fr._4 = new Task();
+                _fr._4.f_ID = _fr.i;
+                _fr._4.f_Title = "task";
+                _fr._4.f_Done = R.rem_i64(_fr.i, 3L) == 0L;
+                _fr.pc = 5; R.chanSend(_t, _fr.out_2, _fr._4);
                             return;
             }
-            R.chanClose(fr.v_out_0);
-            R.ret(t, fr); return;
-            b5: ;
-            fr.v_i_2 = R.add_i64(fr.v_i_2, 1L);
-            goto b1;
+            R.chanClose(_fr.out_2);
+            R.ret(_t, _fr); return;
+            _b5: ;
+            _fr.i = R.add_i64(_fr.i, 1L);
+            goto _b1;
         }
     }
 
-    static Frame fn_main_produce_0(Chan v_out_0, long v_n_1) {
-        F_fn_main_produce_0 fr = new F_fn_main_produce_0();
-        fr.v_out_0 = v_out_0;
-        fr.v_n_1 = v_n_1;
-        return fr;
+    static Frame produce(Chan out_2, long n) {
+        _F_produce _fr = new _F_produce();
+        _fr.out_2 = out_2;
+        _fr.n = n;
+        return _fr;
     }
 
-    sealed class F_fn_main_fetchTasks_1 : Frame {
-        public long v_n_0 = 0L;
-        public Slice v_result_1 = Slice.NIL;
-        public Box v_result_2 = null;
-        public Box v_temp_4 = null;
-        public Chan v_ch_5 = null;
-        public Slice v_tasks_8 = Slice.NIL;
-        public s_main_Task_3 v_temp_9 = null;
-        public bool v_temp_10 = false;
-        public Chan v_temp_11 = null;
-        public s_main_Task_3 v_t_12 = null;
+    sealed class _F_fetchTasks : Frame {
+        public long n = 0L;
+        public Slice _1 = Slice.NIL;
+        public Box _2 = null;
+        public Box _4 = null;
+        public Chan ch = null;
+        public Slice tasks = Slice.NIL;
+        public Task _9 = null;
+        public bool _10 = false;
+        public Chan _11 = null;
+        public Task t = null;
         public override object[] results() {
-            var fr = this;
-            return new object[] {fr.v_result_1, fr.v_result_2};
+            var _fr = this;
+            return new object[] {_fr._1, _fr._2};
         }
-        public override void step(GoTask t) {
-            var fr = this;
-            switch (fr.pc) {
-            case 9: goto b9;
+        public override void step(GoTask _t) {
+            var _fr = this;
+            switch (_fr.pc) {
+            case 9: goto _b9;
             }
-            fr.v_result_1 = Slice.NIL;
-            fr.v_result_2 = null;
-            if (fr.v_n_0 < 0L) {
-                fr.v_temp_4 = R.stdErrorsNew("negative count");
-                fr.v_result_1 = Slice.NIL;
-                fr.v_result_2 = fr.v_temp_4;
-                R.ret(t, fr); return;
+            _fr._1 = Slice.NIL;
+            _fr._2 = null;
+            if (_fr.n < 0L) {
+                _fr._4 = R.stdErrorsNew("negative count");
+                _fr._1 = Slice.NIL;
+                _fr._2 = _fr._4;
+                R.ret(_t, _fr); return;
             }
-            fr.v_ch_5 = R.makeChan(0L, () => new s_main_Task_3());
-            R.spawn((Frame) (fn_main_produce_0(fr.v_ch_5, fr.v_n_0)));
-            fr.v_tasks_8 = Slice.NIL;
-            fr.v_temp_11 = fr.v_ch_5;
-            b3: ;
-            fr.pc = 9; R.chanRecv(t, fr.v_temp_11);
+            _fr.ch = R.makeChan(0L, () => new Task());
+            R.spawn((Frame) (produce(_fr.ch, _fr.n)));
+            _fr.tasks = Slice.NIL;
+            _fr._11 = _fr.ch;
+            _b3: ;
+            _fr.pc = 9; R.chanRecv(_t, _fr._11);
                         return;
-            b9: ;
-            fr.v_temp_9 = ((s_main_Task_3) (t.rv[0])); fr.v_temp_10 = ((bool) t.rv[1]); 
-            if (!fr.v_temp_10) {
-                fr.v_result_1 = fr.v_tasks_8;
-                fr.v_result_2 = null;
-                R.ret(t, fr); return;
+            _b9: ;
+            _fr._9 = ((Task) (_t.rv[0])); _fr._10 = ((bool) _t.rv[1]);
+            if (!_fr._10) {
+                _fr._1 = _fr.tasks;
+                _fr._2 = null;
+                R.ret(_t, _fr); return;
             }
-            fr.v_t_12 = fr.v_temp_9;
-            if (!fr.v_t_12.f_Done_2) {
-                fr.v_tasks_8 = Slice.zeroAppendGrowth(R.append(fr.v_tasks_8, new object[] {fr.v_t_12._clone()}, v => ((s_main_Task_3) (v))._clone()), fr.v_tasks_8, () => new s_main_Task_3());
+            _fr.t = _fr._9;
+            if (!_fr.t.f_Done) {
+                _fr.tasks = Slice.zeroAppendGrowth(R.append(_fr.tasks, new object[] {_fr.t._clone()}, _v => ((Task) (_v))._clone()), _fr.tasks, () => new Task());
             }
-            goto b3;
+            goto _b3;
         }
     }
 
-    static Frame fn_main_fetchTasks_1(long v_n_0) {
-        F_fn_main_fetchTasks_1 fr = new F_fn_main_fetchTasks_1();
-        fr.v_n_0 = v_n_0;
-        return fr;
+    static Frame fetchTasks(long n) {
+        _F_fetchTasks _fr = new _F_fetchTasks();
+        _fr.n = n;
+        return _fr;
     }
 
-    sealed class F_fn_main_main_2 : Frame {
-        public Slice v_tasks_0 = Slice.NIL;
-        public Box v_err_1 = null;
-        public Slice v_temp_2 = Slice.NIL;
-        public Box v_temp_3 = null;
-        public long v_temp_7 = 0L;
-        public long v_temp_8 = 0L;
-        public Slice v_temp_9 = Slice.NIL;
-        public s_main_Task_3 v_t_13 = null;
-        public Slice v_temp_16 = Slice.NIL;
-        public Box v_temp_17 = null;
+    sealed class _F_main : Frame {
+        public Slice tasks = Slice.NIL;
+        public Box err = null;
+        public Slice _2 = Slice.NIL;
+        public Box _3 = null;
+        public long _7 = 0L;
+        public long _8 = 0L;
+        public Slice _9 = Slice.NIL;
+        public Task t = null;
+        public Slice _16 = Slice.NIL;
+        public Box _17 = null;
         public override object[] results() {
-            var fr = this;
+            var _fr = this;
             return new object[] {};
         }
-        public override void step(GoTask t) {
-            var fr = this;
-            switch (fr.pc) {
-            case 7: goto b7;
-            case 8: goto b8;
+        public override void step(GoTask _t) {
+            var _fr = this;
+            switch (_fr.pc) {
+            case 7: goto _b7;
+            case 8: goto _b8;
             }
-            fr.pc = 7; R.call(t, (Frame) (fn_main_fetchTasks_1(7L)));
+            _fr.pc = 7; R.call(_t, (Frame) (fetchTasks(7L)));
                         return;
-            b7: ;
-            fr.v_temp_2 = ((Slice) (t.rv[0])); fr.v_temp_3 = ((Box) (t.rv[1])); 
-            fr.v_tasks_0 = fr.v_temp_2;
-            fr.v_err_1 = fr.v_temp_3;
-            if (!Box.ifaceEq(fr.v_err_1, null)) {
-                R.print(true, "error:", ((string) (Program.icall(fr.v_err_1, "Error"))));
-                R.ret(t, fr); return;
+            _b7: ;
+            _fr._2 = ((Slice) (_t.rv[0])); _fr._3 = ((Box) (_t.rv[1]));
+            _fr.tasks = _fr._2;
+            _fr.err = _fr._3;
+            if (!Box.ifaceEq(_fr.err, null)) {
+                R.print(true, "error:", ((string) (Program.icall(_fr.err, "Error"))));
+                R.ret(_t, _fr); return;
             }
-            fr.v_temp_9 = fr.v_tasks_0;
-            fr.v_temp_8 = (long) fr.v_temp_9.l;
-            fr.v_temp_7 = 0L;
-            while (fr.v_temp_7 < fr.v_temp_8) {
-                fr.v_t_13 = ((s_main_Task_3) (R.sget(fr.v_temp_9, fr.v_temp_7)))._clone();
-                R.print(true, fr.v_t_13.f_ID_0, fr.v_t_13.f_Title_1);
-                fr.v_temp_7 = R.add_i64(fr.v_temp_7, 1L);
+            _fr._9 = _fr.tasks;
+            _fr._8 = (long) _fr._9.l;
+            _fr._7 = 0L;
+            while (_fr._7 < _fr._8) {
+                _fr.t = ((Task) (R.sget(_fr._9, _fr._7)))._clone();
+                R.print(true, _fr.t.f_ID, _fr.t.f_Title);
+                _fr._7 = R.add_i64(_fr._7, 1L);
             }
-            fr.pc = 8; R.call(t, (Frame) (fn_main_fetchTasks_1(-1L)));
+            _fr.pc = 8; R.call(_t, (Frame) (fetchTasks(-1L)));
                         return;
-            b8: ;
-            fr.v_temp_16 = ((Slice) (t.rv[0])); fr.v_temp_17 = ((Box) (t.rv[1])); 
-            fr.v_err_1 = fr.v_temp_17;
-            R.print(true, ((string) (Program.icall(fr.v_err_1, "Error"))));
-            R.ret(t, fr); return;
+            _b8: ;
+            _fr._16 = ((Slice) (_t.rv[0])); _fr._17 = ((Box) (_t.rv[1]));
+            _fr.err = _fr._17;
+            R.print(true, ((string) (Program.icall(_fr.err, "Error"))));
+            R.ret(_t, _fr); return;
         }
     }
 
-    static Frame fn_main_main_2() {
-        F_fn_main_main_2 fr = new F_fn_main_main_2();
-        return fr;
+    static Frame main() {
+        _F_main _fr = new _F_main();
+        return _fr;
     }
 
 }

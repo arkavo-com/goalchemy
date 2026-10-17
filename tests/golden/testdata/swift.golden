@@ -3,157 +3,157 @@
 import Foundation
 
 
-func fn_main_produce_0(_ args: [GValue], _ env: [GCell]) -> GFrame {
-    _ = gTypeRegistration
-    let v_out_0 = GCell(args[0])
-    let v_n_1 = GCell(args[1])
-    var v_i_2 = GCell(GTypes.zero(4))
-    let v_temp_4 = GCell(GTypes.zero(2))
-    let frame = GFrame(0)
-    frame.dynamicResults = true
-    frame.roots = { [.pointer(v_out_0), .pointer(v_n_1), .pointer(v_i_2), .pointer(v_temp_4)] }
-    frame.results = { [] }
-    frame.step = { frame, task in
+func produce(_ _args: [GValue], _ _env: [GCell]) -> GFrame {
+    _ = _gTypeRegistration
+    let out = GCell(_args[0])
+    let n = GCell(_args[1])
+    var i = GCell(GTypes.zero(4))
+    let _4 = GCell(GTypes.zero(2))
+    let _frame = GFrame(0)
+    _frame.dynamicResults = true
+    _frame.roots = { [.pointer(out), .pointer(n), .pointer(i), .pointer(_4)] }
+    _frame.results = { [] }
+    _frame.step = { _frame, _task in
         while true {
-            task.owner.safepoint()
-            switch frame.pc {
+            _task.owner.safepoint()
+            switch _frame.pc {
                 case 0:
-                    v_i_2 = GCell(GValue.integer(1, 64, true))
-                    frame.pc = 1
+                    i = GCell(GValue.integer(1, 64, true))
+                    _frame.pc = 1
                     continue
                 case 1:
-                    if (try GNumeric.binary("<=", v_i_2.value, v_n_1.value)).boolValue {
-                        v_temp_4.value = GTypes.zero(2)
-                        GStore((try GAggregate.field(v_temp_4.value, 0)), v_i_2.value)
-                        GStore((try GAggregate.field(v_temp_4.value, 1)), GValue.text("task"))
-                        GStore((try GAggregate.field(v_temp_4.value, 2)), try GNumeric.binary("==", try GNumeric.binary("%", v_i_2.value, GValue.integer(3, 64, true)), GValue.integer(0, 64, true)))
-                        frame.pc = 5
-                        return try GChannel.send(v_out_0.value, v_temp_4.value, task)
+                    if (try GNumeric.binary("<=", i.value, n.value)).boolValue {
+                        _4.value = GTypes.zero(2)
+                        GStore((try GAggregate.field(_4.value, 0)), i.value)
+                        GStore((try GAggregate.field(_4.value, 1)), GValue.text("task"))
+                        GStore((try GAggregate.field(_4.value, 2)), try GNumeric.binary("==", try GNumeric.binary("%", i.value, GValue.integer(3, 64, true)), GValue.integer(0, 64, true)))
+                        _frame.pc = 5
+                        return try GChannel.send(out.value, _4.value, _task)
                     }
-                    try GChannel.close(v_out_0.value, task.owner)
+                    try GChannel.close(out.value, _task.owner)
                     return .complete([])
                 case 5:
-                    GStore((v_i_2), try GNumeric.binary("+", GCopy((v_i_2).value), GValue.integer(1, 64, true)))
-                    frame.pc = 1
+                    GStore((i), try GNumeric.binary("+", GCopy((i).value), GValue.integer(1, 64, true)))
+                    _frame.pc = 1
                     continue
                 default: throw GFault("invalid frame PC")
             }
         }
     }
-    return frame
+    return _frame
 }
 
-func fn_main_fetchTasks_1(_ args: [GValue], _ env: [GCell]) -> GFrame {
-    _ = gTypeRegistration
-    let v_n_0 = GCell(args[0])
-    var v_result_1 = GCell(GTypes.zero(8))
-    var v_result_2 = GCell(GTypes.zero(9))
-    let v_temp_4 = GCell(GTypes.zero(9))
-    var v_ch_5 = GCell(GTypes.zero(14))
-    var v_tasks_8 = GCell(GTypes.zero(8))
-    let v_temp_9 = GCell(GTypes.zero(2))
-    let v_temp_10 = GCell(GTypes.zero(6))
-    let v_temp_11 = GCell(GTypes.zero(14))
-    var v_t_12 = GCell(GTypes.zero(2))
-    let frame = GFrame(1)
-    frame.dynamicResults = true
-    frame.roots = { [.pointer(v_n_0), .pointer(v_result_1), .pointer(v_result_2), .pointer(v_temp_4), .pointer(v_ch_5), .pointer(v_tasks_8), .pointer(v_temp_9), .pointer(v_temp_10), .pointer(v_temp_11), .pointer(v_t_12)] }
-    frame.results = { [GCopy(v_result_1.value), GCopy(v_result_2.value)] }
-    frame.step = { frame, task in
+func fetchTasks(_ _args: [GValue], _ _env: [GCell]) -> GFrame {
+    _ = _gTypeRegistration
+    let n = GCell(_args[0])
+    var _1 = GCell(GTypes.zero(8))
+    var _2 = GCell(GTypes.zero(9))
+    let _4 = GCell(GTypes.zero(9))
+    var ch = GCell(GTypes.zero(14))
+    var tasks = GCell(GTypes.zero(8))
+    let _9 = GCell(GTypes.zero(2))
+    let _10 = GCell(GTypes.zero(6))
+    let _11 = GCell(GTypes.zero(14))
+    var t = GCell(GTypes.zero(2))
+    let _frame = GFrame(1)
+    _frame.dynamicResults = true
+    _frame.roots = { [.pointer(n), .pointer(_1), .pointer(_2), .pointer(_4), .pointer(ch), .pointer(tasks), .pointer(_9), .pointer(_10), .pointer(_11), .pointer(t)] }
+    _frame.results = { [GCopy(_1.value), GCopy(_2.value)] }
+    _frame.step = { _frame, _task in
         while true {
-            task.owner.safepoint()
-            switch frame.pc {
+            _task.owner.safepoint()
+            switch _frame.pc {
                 case 0:
-                    v_result_1 = GCell(GTypes.zero(8))
-                    v_result_2 = GCell(GTypes.zero(9))
-                    if (try GNumeric.binary("<", v_n_0.value, GValue.integer(0, 64, true))).boolValue {
-                        v_temp_4.value = try task.owner.callSync(task, GNative.std_errors_new([GValue.text("negative count")]))[0]
-                        GStore((v_result_1), GTypes.zero(8))
-                        GStore((v_result_2), v_temp_4.value)
-                        return .complete([GCopy(v_result_1.value), GCopy(v_result_2.value)])
+                    _1 = GCell(GTypes.zero(8))
+                    _2 = GCell(GTypes.zero(9))
+                    if (try GNumeric.binary("<", n.value, GValue.integer(0, 64, true))).boolValue {
+                        _4.value = try _task.owner.callSync(_task, GNative.std_errors_new([GValue.text("negative count")]))[0]
+                        GStore((_1), GTypes.zero(8))
+                        GStore((_2), _4.value)
+                        return .complete([GCopy(_1.value), GCopy(_2.value)])
                     }
-                    v_ch_5 = GCell(try GChannel.make(GValue.integer(0, 64, true), 2))
-                    task.owner.spawn(fn_main_produce_0([try GConvert(v_ch_5.value, 1, 1), v_n_0.value], []))
-                    v_tasks_8 = GCell(GTypes.zero(8))
-                    v_temp_11.value = v_ch_5.value
-                    frame.pc = 3
+                    ch = GCell(try GChannel.make(GValue.integer(0, 64, true), 2))
+                    _task.owner.spawn(produce([try GConvert(ch.value, 1, 1), n.value], []))
+                    tasks = GCell(GTypes.zero(8))
+                    _11.value = ch.value
+                    _frame.pc = 3
                     continue
                 case 3:
-                    frame.pc = 9
-                    return try GChannel.receive(v_temp_11.value, task)
+                    _frame.pc = 9
+                    return try GChannel.receive(_11.value, _task)
                 case 9:
-                    v_temp_9.value = task.rv[0]
-                    v_temp_10.value = task.rv[1]
-                    if !v_temp_10.value.boolValue {
-                        GStore((v_result_1), v_tasks_8.value)
-                        GStore((v_result_2), GTypes.zero(9))
-                        return .complete([GCopy(v_result_1.value), GCopy(v_result_2.value)])
+                    _9.value = _task.rv[0]
+                    _10.value = _task.rv[1]
+                    if !_10.value.boolValue {
+                        GStore((_1), tasks.value)
+                        GStore((_2), GTypes.zero(9))
+                        return .complete([GCopy(_1.value), GCopy(_2.value)])
                     }
-                    v_t_12 = GCell(v_temp_9.value)
-                    if !GCopy((try GAggregate.field(v_t_12.value, 2)).value).boolValue {
-                        GStore((v_tasks_8), try GSlice.append(v_tasks_8.value, [GCopy((v_t_12).value)]))
+                    t = GCell(_9.value)
+                    if !GCopy((try GAggregate.field(t.value, 2)).value).boolValue {
+                        GStore((tasks), try GSlice.append(tasks.value, [GCopy((t).value)]))
                     }
-                    frame.pc = 3
+                    _frame.pc = 3
                     continue
                 default: throw GFault("invalid frame PC")
             }
         }
     }
-    return frame
+    return _frame
 }
 
-func fn_main_main_2(_ args: [GValue], _ env: [GCell]) -> GFrame {
-    _ = gTypeRegistration
-    var v_tasks_0 = GCell(GTypes.zero(8))
-    var v_err_1 = GCell(GTypes.zero(9))
-    let v_temp_2 = GCell(GTypes.zero(8))
-    let v_temp_3 = GCell(GTypes.zero(9))
-    let v_temp_7 = GCell(GTypes.zero(4))
-    let v_temp_8 = GCell(GTypes.zero(4))
-    let v_temp_9 = GCell(GTypes.zero(8))
-    var v_t_13 = GCell(GTypes.zero(2))
-    let v_temp_16 = GCell(GTypes.zero(8))
-    let v_temp_17 = GCell(GTypes.zero(9))
-    let frame = GFrame(2)
-    frame.dynamicResults = true
-    frame.roots = { [.pointer(v_tasks_0), .pointer(v_err_1), .pointer(v_temp_2), .pointer(v_temp_3), .pointer(v_temp_7), .pointer(v_temp_8), .pointer(v_temp_9), .pointer(v_t_13), .pointer(v_temp_16), .pointer(v_temp_17)] }
-    frame.results = { [] }
-    frame.step = { frame, task in
+func main_2(_ _args: [GValue], _ _env: [GCell]) -> GFrame {
+    _ = _gTypeRegistration
+    var tasks = GCell(GTypes.zero(8))
+    var err = GCell(GTypes.zero(9))
+    let _2 = GCell(GTypes.zero(8))
+    let _3 = GCell(GTypes.zero(9))
+    let _7 = GCell(GTypes.zero(4))
+    let _8 = GCell(GTypes.zero(4))
+    let _9 = GCell(GTypes.zero(8))
+    var t = GCell(GTypes.zero(2))
+    let _16 = GCell(GTypes.zero(8))
+    let _17 = GCell(GTypes.zero(9))
+    let _frame = GFrame(2)
+    _frame.dynamicResults = true
+    _frame.roots = { [.pointer(tasks), .pointer(err), .pointer(_2), .pointer(_3), .pointer(_7), .pointer(_8), .pointer(_9), .pointer(t), .pointer(_16), .pointer(_17)] }
+    _frame.results = { [] }
+    _frame.step = { _frame, _task in
         while true {
-            task.owner.safepoint()
-            switch frame.pc {
+            _task.owner.safepoint()
+            switch _frame.pc {
                 case 0:
-                    frame.pc = 7
-                    return .call(fn_main_fetchTasks_1([GValue.integer(7, 64, true)], []))
+                    _frame.pc = 7
+                    return .call(fetchTasks([GValue.integer(7, 64, true)], []))
                 case 7:
-                    v_temp_2.value = task.rv[0]
-                    v_temp_3.value = task.rv[1]
-                    v_tasks_0 = GCell(v_temp_2.value)
-                    v_err_1 = GCell(v_temp_3.value)
-                    if (try GNumeric.unary("not", try GNumeric.binary("==", v_err_1.value, GTypes.zero(9)))).boolValue {
-                        try GPrint([GValue.text("error:"), try task.owner.callSync(task, try GInterface.start(v_err_1.value, "Error", []))[0]], true)
+                    _2.value = _task.rv[0]
+                    _3.value = _task.rv[1]
+                    tasks = GCell(_2.value)
+                    err = GCell(_3.value)
+                    if (try GNumeric.unary("not", try GNumeric.binary("==", err.value, GTypes.zero(9)))).boolValue {
+                        try GPrint([GValue.text("error:"), try _task.owner.callSync(_task, try GInterface.start(err.value, "Error", []))[0]], true)
                         return .complete([])
                     }
-                    v_temp_9.value = v_tasks_0.value
-                    v_temp_8.value = try GLength(v_temp_9.value, false)
-                    v_temp_7.value = GValue.integer(0, 64, true)
-                    while (try GNumeric.binary("<", v_temp_7.value, v_temp_8.value)).boolValue {
-                        task.owner.safepoint()
-                        v_t_13 = GCell(GCopy((try GSlice.cell(v_temp_9.value, v_temp_7.value)).value))
-                        try GPrint([GCopy((try GAggregate.field(v_t_13.value, 0)).value), GCopy((try GAggregate.field(v_t_13.value, 1)).value)], true)
-                        v_temp_7.value = try GNumeric.binary("+", v_temp_7.value, GValue.integer(1, 64, true))
+                    _9.value = tasks.value
+                    _8.value = try GLength(_9.value, false)
+                    _7.value = GValue.integer(0, 64, true)
+                    while (try GNumeric.binary("<", _7.value, _8.value)).boolValue {
+                        _task.owner.safepoint()
+                        t = GCell(GCopy((try GSlice.cell(_9.value, _7.value)).value))
+                        try GPrint([GCopy((try GAggregate.field(t.value, 0)).value), GCopy((try GAggregate.field(t.value, 1)).value)], true)
+                        _7.value = try GNumeric.binary("+", _7.value, GValue.integer(1, 64, true))
                     }
-                    frame.pc = 8
-                    return .call(fn_main_fetchTasks_1([GValue.integer(18446744073709551615, 64, true)], []))
+                    _frame.pc = 8
+                    return .call(fetchTasks([GValue.integer(18446744073709551615, 64, true)], []))
                 case 8:
-                    v_temp_16.value = task.rv[0]
-                    v_temp_17.value = task.rv[1]
-                    GStore((v_err_1), v_temp_17.value)
-                    try GPrint([try task.owner.callSync(task, try GInterface.start(v_err_1.value, "Error", []))[0]], true)
+                    _16.value = _task.rv[0]
+                    _17.value = _task.rv[1]
+                    GStore((err), _17.value)
+                    try GPrint([try _task.owner.callSync(_task, try GInterface.start(err.value, "Error", []))[0]], true)
                     return .complete([])
                 default: throw GFault("invalid frame PC")
             }
         }
     }
-    return frame
+    return _frame
 }

@@ -4,100 +4,100 @@ import rt.*;
 
 @SuppressWarnings({"unchecked", "unused", "rawtypes"})
 final class pkg_co_futures_docs_c0fa8f818a476b1d extends _GoalchemySupport {
-    static long fn_main_total_0(long v_n$0) {
-        long v_result$1 = 0L;
-        long v_sum$2 = 0L;
-        long v_i$3 = 0L;
-        v_result$1 = 0L;
-        v_sum$2 = 0L;
-        v_i$3 = 1L;
-        while (v_i$3 <= v_n$0) {
-            if (IntegerRem.rem_i64(v_i$3, 2L) == 0L) {
-                v_sum$2 = IntegerAdd.add_i64(v_sum$2, v_i$3);
+    static long total(long n) {
+        long _1 = 0L;
+        long sum = 0L;
+        long i = 0L;
+        _1 = 0L;
+        sum = 0L;
+        i = 1L;
+        while (i <= n) {
+            if (IntegerRem.rem_i64(i, 2L) == 0L) {
+                sum = IntegerAdd.add_i64(sum, i);
             }
-            v_i$3 = IntegerAdd.add_i64(v_i$3, 1L);
+            i = IntegerAdd.add_i64(i, 1L);
         }
-        v_result$1 = v_sum$2;
-        return v_result$1;
+        _1 = sum;
+        return _1;
     }
 
-    static void fn_main_main_1(TaskSpawn.Task t) {
-        S$task_Future_5 v_a$0 = null;
-        Fn v_temp$1 = null;
-        Fn v_temp$2 = null;
-        LibTaskStart.FutureState v_temp$4 = null;
-        S$task_Future_5 v_temp$5 = null;
-        S$task_Future_5 v_b$6 = null;
-        Fn v_temp$7 = null;
-        Fn v_temp$8 = null;
-        LibTaskStart.FutureState v_temp$10 = null;
-        S$task_Future_5 v_temp$11 = null;
-        LibTaskStart.FutureState v_temp$13 = null;
-        Slice v_temp$14 = Slice.NIL;
-        Box v_temp$15 = null;
-        long v_temp$16 = 0L;
-        boolean v_temp$17 = false;
-        LibTaskStart.FutureState v_temp$19 = null;
-        Slice v_temp$20 = Slice.NIL;
-        Box v_temp$21 = null;
-        long v_temp$22 = 0L;
-        boolean v_temp$23 = false;
-        v_temp$1 = Program.closure(2, _GoalchemySupport.envFn(new Object[] {}, (env, a) -> fn_main_main_u24_1_2()));
-        v_temp$2 = Program.bound(3, (Fn) a -> fn_task_Start_3(((Fn) (a[0]))), v_temp$1);
-        v_temp$4 = LibTaskStart.libTaskStart(Box.box(TD$func_10, v_temp$2));
-        v_temp$5 = new S$task_Future_5();
-        v_temp$5.f$state_0 = v_temp$4;
-        v_a$0 = v_temp$5;
-        v_temp$7 = Program.closure(4, _GoalchemySupport.envFn(new Object[] {}, (env, a) -> fn_main_main_u24_2_4()));
-        v_temp$8 = Program.bound(3, (Fn) a -> fn_task_Start_3(((Fn) (a[0]))), v_temp$7);
-        v_temp$10 = LibTaskStart.libTaskStart(Box.box(TD$func_10, v_temp$8));
-        v_temp$11 = new S$task_Future_5();
-        v_temp$11.f$state_0 = v_temp$10;
-        v_b$6 = v_temp$11;
-        v_temp$13 = v_a$0.$clone().f$state_0;
-        LibTaskAwait.libTaskAwait(t, v_temp$13);
-        if (t.blocked) TaskSpawn.await(t);
-        v_temp$14 = ((Slice) (t.rv[0]));
-        v_temp$15 = ((Box) (SliceIndex.sget(v_temp$14, 0L)));
-        v_temp$17 = (v_temp$15 != null && v_temp$15.t == TD$int_1); v_temp$16 = v_temp$17 ? ((Long) (v_temp$15.v)) : 0L;
-        v_temp$19 = v_b$6.$clone().f$state_0;
-        LibTaskAwait.libTaskAwait(t, v_temp$19);
-        if (t.blocked) TaskSpawn.await(t);
-        v_temp$20 = ((Slice) (t.rv[0]));
-        v_temp$21 = ((Box) (SliceIndex.sget(v_temp$20, 0L)));
-        v_temp$23 = (v_temp$21 != null && v_temp$21.t == TD$int_1); v_temp$22 = v_temp$23 ? ((Long) (v_temp$21.v)) : 0L;
-        Print.print(true, v_temp$16, v_temp$22);
+    static void main_2(TaskSpawn.Task _t) {
+        Future a = null;
+        Fn _1 = null;
+        Fn _2 = null;
+        LibTaskStart.FutureState _4 = null;
+        Future _5 = null;
+        Future b = null;
+        Fn _7 = null;
+        Fn _8 = null;
+        LibTaskStart.FutureState _10 = null;
+        Future _11 = null;
+        LibTaskStart.FutureState _13 = null;
+        Slice _14 = Slice.NIL;
+        Box _15 = null;
+        long _16 = 0L;
+        boolean _17 = false;
+        LibTaskStart.FutureState _19 = null;
+        Slice _20 = Slice.NIL;
+        Box _21 = null;
+        long _22 = 0L;
+        boolean _23 = false;
+        _1 = Program.closure(2, _GoalchemySupport._envFn(new Object[] {}, (_env, _a) -> _main_1()));
+        _2 = Program.bound(3, (Fn) _a -> _Start(((Fn) (_a[0]))), _1);
+        _4 = LibTaskStart.libTaskStart(Box.box(TD$func, _2));
+        _5 = new Future();
+        _5.f$state = _4;
+        a = _5;
+        _7 = Program.closure(4, _GoalchemySupport._envFn(new Object[] {}, (_env, _a) -> _main_2()));
+        _8 = Program.bound(3, (Fn) _a -> _Start(((Fn) (_a[0]))), _7);
+        _10 = LibTaskStart.libTaskStart(Box.box(TD$func, _8));
+        _11 = new Future();
+        _11.f$state = _10;
+        b = _11;
+        _13 = a.$clone().f$state;
+        LibTaskAwait.libTaskAwait(_t, _13);
+        if (_t.blocked) TaskSpawn.await(_t);
+        _14 = ((Slice) (_t.rv[0]));
+        _15 = ((Box) (SliceIndex.sget(_14, 0L)));
+        _17 = (_15 != null && _15.t == TD$int); _16 = _17 ? ((Long) (_15.v)) : 0L;
+        _19 = b.$clone().f$state;
+        LibTaskAwait.libTaskAwait(_t, _19);
+        if (_t.blocked) TaskSpawn.await(_t);
+        _20 = ((Slice) (_t.rv[0]));
+        _21 = ((Box) (SliceIndex.sget(_20, 0L)));
+        _23 = (_21 != null && _21.t == TD$int); _22 = _23 ? ((Long) (_21.v)) : 0L;
+        Print.print(true, _16, _22);
         return;
     }
 
-    static TaskSpawn.Frame fn_main_main_1() {
-        return TaskSpawn.nativeTask(t -> { fn_main_main_1(t); return new Object[0]; });
+    static TaskSpawn.Frame main_2() {
+        return TaskSpawn.nativeTask(_t -> { main_2(_t); return new Object[0]; });
     }
 
-    static long fn_main_main_u24_1_2() {
-        long v_result$0 = 0L;
-        v_result$0 = 0L;
-        v_result$0 = fn_main_total_0(10L);
-        return v_result$0;
+    static long _main_1() {
+        long _0 = 0L;
+        _0 = 0L;
+        _0 = total(10L);
+        return _0;
     }
 
-    static Slice fn_task_Start_3(Fn v_fn$0) {
-        Slice v_result$1 = Slice.NIL;
-        long v_temp$2 = 0L;
-        Box v_temp$3 = null;
-        v_result$1 = Slice.NIL;
-        v_temp$2 = ((Long) (Program.fnchk(v_fn$0).call()));
-        v_result$1 = SliceMake.makeSlice(1L, 1L, () -> null, false);
-        v_temp$3 = Box.box(TD$int_1, v_temp$2);
-        SliceStore.sset(v_result$1, 0L, v_temp$3);
-        return v_result$1;
+    static Slice _Start(Fn fn) {
+        Slice _1 = Slice.NIL;
+        long _2 = 0L;
+        Box _3 = null;
+        _1 = Slice.NIL;
+        _2 = ((Long) (Program.fnchk(fn).call()));
+        _1 = SliceMake.makeSlice(1L, 1L, () -> null, false);
+        _3 = Box.box(TD$int, _2);
+        SliceStore.sset(_1, 0L, _3);
+        return _1;
     }
 
-    static long fn_main_main_u24_2_4() {
-        long v_result$0 = 0L;
-        v_result$0 = 0L;
-        v_result$0 = fn_main_total_0(20L);
-        return v_result$0;
+    static long _main_2() {
+        long _0 = 0L;
+        _0 = 0L;
+        _0 = total(20L);
+        return _0;
     }
 
 }

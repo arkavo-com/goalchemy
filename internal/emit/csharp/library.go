@@ -148,122 +148,122 @@ func (e *emitter) library() (string, error) {
 		case ir.KArray, ir.KSlice:
 			convert(u.Elem)
 		}
-		fmt.Fprintf(&b, " private static %s %s(%s v,Library.CopyContext copy) {\n", typ(t), e.names.Type(u, "snapshot_"), typ(t))
+		fmt.Fprintf(&b, " private static %s %s(%s _v,Library.CopyContext _copy) {\n", typ(t), e.names.Type(u, "snapshot_"), typ(t))
 		aggregate := u.Kind == ir.KStruct || u.Kind == ir.KArray || u.Kind == ir.KSlice
 		if aggregate {
-			b.WriteString("object original=v;copy.enter(original);try {\n")
+			b.WriteString("object _original=_v;_copy.enter(_original);try {\n")
 		}
 		switch u.Kind {
 		case ir.KBool, ir.KFloat:
-			b.WriteString("return v;\n")
+			b.WriteString("return _v;\n")
 		case ir.KInt:
-			fmt.Fprintf(&b, "return Library.integer(v,%d,%t);\n", u.Int.Bits(), u.Int.Signed())
+			fmt.Fprintf(&b, "return Library.integer(_v,%d,%t);\n", u.Int.Bits(), u.Int.Signed())
 		case ir.KString:
-			b.WriteString("return Library.binaryString(v);\n")
+			b.WriteString("return Library.binaryString(_v);\n")
 		case ir.KStruct:
-			fmt.Fprintf(&b, "if(v==null)v=new %s(); %s r=new %s();\n", typ(t), typ(t), typ(t))
+			fmt.Fprintf(&b, "if(_v==null)_v=new %s(); %s _r=new %s();\n", typ(t), typ(t), typ(t))
 			for _, f := range u.Fields {
-				fmt.Fprintf(&b, "r.%s=%s(v.%s,copy);\n", f.Name, e.names.Type(f.Type.U(), "snapshot_"), f.Name)
+				fmt.Fprintf(&b, "_r.%s=%s(_v.%s,_copy);\n", f.Name, e.names.Type(f.Type.U(), "snapshot_"), f.Name)
 			}
-			b.WriteString("return r;\n")
+			b.WriteString("return _r;\n")
 		case ir.KArray, ir.KSlice:
 			if u.Kind == ir.KArray {
-				fmt.Fprintf(&b, "if(v==null||v.Length!=%d)throw Library.invalid();\n", u.Len)
+				fmt.Fprintf(&b, "if(_v==null||_v.Length!=%d)throw Library.invalid();\n", u.Len)
 			}
 			if byteElem(u.Elem) {
-				b.WriteString("return Library.bytes(v);\n")
+				b.WriteString("return Library.bytes(_v);\n")
 			} else {
-				b.WriteString("if(v==null)return null;Library.length(v.Length);\n")
-				fmt.Fprintf(&b, "%s r=%s;for(int i=0;i<r.Length;i++)r[i]=%s(v[i],copy);return r;\n", typ(t), publicArray(typ(u.Elem), "v.Length"), e.names.Type(u.Elem.U(), "snapshot_"))
+				b.WriteString("if(_v==null)return null;Library.length(_v.Length);\n")
+				fmt.Fprintf(&b, "%s _r=%s;for(int _i=0;_i<_r.Length;_i++)_r[_i]=%s(_v[_i],_copy);return _r;\n", typ(t), publicArray(typ(u.Elem), "_v.Length"), e.names.Type(u.Elem.U(), "snapshot_"))
 			}
 		}
 		if aggregate {
-			b.WriteString("} finally {copy.leave(original); }\n")
+			b.WriteString("} finally {_copy.leave(_original); }\n")
 		}
 		b.WriteString(" }\n")
-		fmt.Fprintf(&b, " private static %s %s(%s v) {\n", e.jt(t), e.names.Type(u, "input_"), typ(t))
+		fmt.Fprintf(&b, " private static %s %s(%s _v) {\n", e.jt(t), e.names.Type(u, "input_"), typ(t))
 		switch u.Kind {
 		case ir.KBool, ir.KFloat:
-			b.WriteString("return v;\n")
+			b.WriteString("return _v;\n")
 		case ir.KInt:
-			fmt.Fprintf(&b, "return Library.integer(v,%d,%t);\n", u.Int.Bits(), u.Int.Signed())
+			fmt.Fprintf(&b, "return Library.integer(_v,%d,%t);\n", u.Int.Bits(), u.Int.Signed())
 		case ir.KString:
-			b.WriteString("return Library.binaryString(v);\n")
+			b.WriteString("return Library.binaryString(_v);\n")
 		case ir.KStruct:
-			fmt.Fprintf(&b, "if(v==null)v=new %s(); %s r=new %s();\n", typ(t), e.jt(t), e.jt(t))
+			fmt.Fprintf(&b, "if(_v==null)_v=new %s(); %s _r=new %s();\n", typ(t), e.jt(t), e.jt(t))
 			for i, f := range u.Fields {
-				fmt.Fprintf(&b, "r.%s=%s(v.%s);\n", e.fieldProp(u, i), e.names.Type(f.Type.U(), "input_"), f.Name)
+				fmt.Fprintf(&b, "_r.%s=%s(_v.%s);\n", e.fieldProp(u, i), e.names.Type(f.Type.U(), "input_"), f.Name)
 			}
-			b.WriteString("return r;\n")
+			b.WriteString("return _r;\n")
 		case ir.KArray, ir.KSlice:
 			if byteElem(u.Elem) {
 				if u.Kind == ir.KArray {
-					fmt.Fprintf(&b, "if(v==null||v.Length!=%d)throw Library.invalid(); return Library.bytes(v);\n", u.Len)
+					fmt.Fprintf(&b, "if(_v==null||_v.Length!=%d)throw Library.invalid(); return Library.bytes(_v);\n", u.Len)
 				} else {
-					b.WriteString("byte[] a=Library.bytes(v); return a==null?Slice.BYTE_NIL:new Slice(a,0,a.Length,a.Length);\n")
+					b.WriteString("byte[] _a=Library.bytes(_v); return _a==null?Slice.BYTE_NIL:new Slice(_a,0,_a.Length,_a.Length);\n")
 				}
 			} else {
 				if u.Kind == ir.KArray {
-					fmt.Fprintf(&b, "if(v==null||v.Length!=%d)throw Library.invalid();\n", u.Len)
+					fmt.Fprintf(&b, "if(_v==null||_v.Length!=%d)throw Library.invalid();\n", u.Len)
 				} else {
-					b.WriteString("if(v==null)return Slice.NIL;\n")
+					b.WriteString("if(_v==null)return Slice.NIL;\n")
 				}
-				b.WriteString("Library.length(v.Length);object[] a=new object[v.Length];\n")
-				fmt.Fprintf(&b, "for(int i=0;i<a.Length;i++)a[i]=%s(v[i]);\n", e.names.Type(u.Elem.U(), "input_"))
+				b.WriteString("Library.length(_v.Length);object[] _a=new object[_v.Length];\n")
+				fmt.Fprintf(&b, "for(int _i=0;_i<_a.Length;_i++)_a[_i]=%s(_v[_i]);\n", e.names.Type(u.Elem.U(), "input_"))
 				if u.Kind == ir.KArray {
-					b.WriteString("return a;\n")
+					b.WriteString("return _a;\n")
 				} else {
-					b.WriteString("return new Slice(a,0,a.Length,a.Length);\n")
+					b.WriteString("return new Slice(_a,0,_a.Length,_a.Length);\n")
 				}
 			}
 		}
 		b.WriteString(" }\n")
-		fmt.Fprintf(&b, " private static %s %s(%s v) {\n", typ(t), e.names.Type(u, "output_"), e.jt(t))
+		fmt.Fprintf(&b, " private static %s %s(%s _v) {\n", typ(t), e.names.Type(u, "output_"), e.jt(t))
 		switch u.Kind {
 		case ir.KStruct:
-			fmt.Fprintf(&b, "%s r=new %s();\n", typ(t), typ(t))
+			fmt.Fprintf(&b, "%s _r=new %s();\n", typ(t), typ(t))
 			for i, f := range u.Fields {
-				fmt.Fprintf(&b, "r.%s=%s(v.%s);\n", f.Name, e.names.Type(f.Type.U(), "output_"), e.fieldProp(u, i))
+				fmt.Fprintf(&b, "_r.%s=%s(_v.%s);\n", f.Name, e.names.Type(f.Type.U(), "output_"), e.fieldProp(u, i))
 			}
-			b.WriteString("return r;\n")
+			b.WriteString("return _r;\n")
 		case ir.KArray, ir.KSlice:
 			if byteElem(u.Elem) {
 				if u.Kind == ir.KArray {
-					b.WriteString("return (byte[])v.Clone();\n")
+					b.WriteString("return (byte[])_v.Clone();\n")
 				} else {
-					b.WriteString("return Native.bytesNullable(v);\n")
+					b.WriteString("return Native.bytesNullable(_v);\n")
 				}
 			} else {
-				length := "v.Length"
-				item := "v[i]"
+				length := "_v.Length"
+				item := "_v[_i]"
 				if u.Kind == ir.KSlice {
-					b.WriteString("if(v.a==null)return null;\n")
-					length = "v.l"
-					item = "v.Get(i)"
+					b.WriteString("if(_v.a==null)return null;\n")
+					length = "_v.l"
+					item = "_v.Get(_i)"
 				}
-				fmt.Fprintf(&b, "%s a=%s;\n", typ(t), publicArray(typ(u.Elem), length))
-				fmt.Fprintf(&b, "for(int i=0;i<a.Length;i++)a[i]=%s(%s);return a;\n", e.names.Type(u.Elem.U(), "output_"), e.cast(u.Elem, item))
+				fmt.Fprintf(&b, "%s _a=%s;\n", typ(t), publicArray(typ(u.Elem), length))
+				fmt.Fprintf(&b, "for(int _i=0;_i<_a.Length;_i++)_a[_i]=%s(%s);return _a;\n", e.names.Type(u.Elem.U(), "output_"), e.cast(u.Elem, item))
 			}
 		default:
-			b.WriteString("return v;\n")
+			b.WriteString("return _v;\n")
 		}
 		b.WriteString(" }\n")
-		fmt.Fprintf(&b, " private static object %s(%s v) {\n", e.names.Type(u, "wire_"), typ(t))
+		fmt.Fprintf(&b, " private static object %s(%s _v) {\n", e.names.Type(u, "wire_"), typ(t))
 		switch u.Kind {
 		case ir.KStruct:
-			b.WriteString("var r=new System.Collections.Generic.Dictionary<string,object>();\n")
+			b.WriteString("var _r=new System.Collections.Generic.Dictionary<string,object>();\n")
 			for _, f := range u.Fields {
-				fmt.Fprintf(&b, "r.Add(%q,%s(v.%s));\n", f.Name, e.names.Type(f.Type.U(), "wire_"), f.Name)
+				fmt.Fprintf(&b, "_r.Add(%q,%s(_v.%s));\n", f.Name, e.names.Type(f.Type.U(), "wire_"), f.Name)
 			}
-			b.WriteString("return r;\n")
+			b.WriteString("return _r;\n")
 		case ir.KArray, ir.KSlice:
 			if byteElem(u.Elem) {
-				b.WriteString("return v==null?null:(byte[])v.Clone();\n")
+				b.WriteString("return _v==null?null:(byte[])_v.Clone();\n")
 			} else {
-				fmt.Fprintf(&b, "if(v==null)return null;object[] a=new object[v.Length];for(int i=0;i<a.Length;i++)a[i]=%s(v[i]);return a;\n", e.names.Type(u.Elem.U(), "wire_"))
+				fmt.Fprintf(&b, "if(_v==null)return null;object[] _a=new object[_v.Length];for(int _i=0;_i<_a.Length;_i++)_a[_i]=%s(_v[_i]);return _a;\n", e.names.Type(u.Elem.U(), "wire_"))
 			}
 		default:
-			b.WriteString("return v;\n")
+			b.WriteString("return _v;\n")
 		}
 		b.WriteString(" }\n")
 	}
@@ -304,17 +304,17 @@ func (e *emitter) library() (string, error) {
 			convert(t.Elem)
 		}
 	}
-	b.WriteString(" private static Library.Failure sourceFailure(Box err) {\nif(err==null)return null;\n")
+	b.WriteString(" private static Library.Failure _sourceFailure(Box _err) {\nif(_err==null)return null;\n")
 	for _, t := range e.p.Types.All {
 		if t.Kind == ir.KPointer && t.Elem.U().Kind == ir.KStruct && libraryValue(t.Elem, map[*ir.Type]bool{}) && e.tds[t] != "" {
-			fmt.Fprintf(&b, "if(err.t==%s) { %s v=%s((%s)err.v); var fields=new System.Collections.Generic.Dictionary<string,object>();\n", e.tds[t], typ(t.Elem), e.names.Type(t.Elem.U(), "output_"), e.jt(t.Elem))
+			fmt.Fprintf(&b, "if(_err.t==%s) { %s _v=%s((%s)_err.v); var _fields=new System.Collections.Generic.Dictionary<string,object>();\n", e.tds[t], typ(t.Elem), e.names.Type(t.Elem.U(), "output_"), e.jt(t.Elem))
 			for _, f := range t.Elem.U().Fields {
-				fmt.Fprintf(&b, "fields.Add(%q,%s(v.%s));\n", f.Name, e.names.Type(f.Type.U(), "wire_"), f.Name)
+				fmt.Fprintf(&b, "_fields.Add(%q,%s(_v.%s));\n", f.Name, e.names.Type(f.Type.U(), "wire_"), f.Name)
 			}
-			b.WriteString("return new Library.Failure(\"source\",fields); }\n")
+			b.WriteString("return new Library.Failure(\"source\",_fields); }\n")
 		}
 	}
-	b.WriteString("return new Library.Failure(\"source\");\n }\n private static void libraryReset() {\n")
+	b.WriteString("return new Library.Failure(\"source\");\n }\n private static void _libraryReset() {\n")
 	for _, g := range e.p.Globals {
 		if g.AddrTaken && !g.Type.IsAggregate() {
 			fmt.Fprintf(&b, "%s.v=%s;\n", e.symbol(g.Sym), e.zero(g.Type))
@@ -322,7 +322,7 @@ func (e *emitter) library() (string, error) {
 			fmt.Fprintf(&b, "%s=%s;\n", e.symbol(g.Sym), e.zero(g.Type))
 		}
 	}
-	b.WriteString("Rt.Program.clearFieldRefs();\n }\n private static void libraryZero() {\n")
+	b.WriteString("Rt.Program.clearFieldRefs();\n }\n private static void _libraryZero() {\n")
 	for _, g := range e.p.Globals {
 		if g.AddrTaken && !g.Type.IsAggregate() {
 			fmt.Fprintf(&b, "%s.v=%s;\n", e.symbol(g.Sym), e.zero(g.Type))
@@ -330,7 +330,7 @@ func (e *emitter) library() (string, error) {
 			fmt.Fprintf(&b, "%s=%s;\n", e.symbol(g.Sym), e.zero(g.Type))
 		}
 	}
-	b.WriteString(" }\n private static object librarySave() {\nreturn new object[]{")
+	b.WriteString(" }\n private static object _librarySave() {\nreturn new object[]{")
 	for _, g := range e.p.Globals {
 		if g.AddrTaken && !g.Type.IsAggregate() {
 			fmt.Fprintf(&b, "%s.v,", e.symbol(g.Sym))
@@ -338,15 +338,15 @@ func (e *emitter) library() (string, error) {
 			fmt.Fprintf(&b, "%s,", e.symbol(g.Sym))
 		}
 	}
-	b.WriteString("};\n }\n private static void libraryLoad(object saved) {\nvar v=(object[])saved;\n")
+	b.WriteString("};\n }\n private static void _libraryLoad(object _saved) {\nvar _v=(object[])_saved;\n")
 	for i, g := range e.p.Globals {
 		if g.AddrTaken && !g.Type.IsAggregate() {
-			fmt.Fprintf(&b, "%s.v=%s;\n", e.symbol(g.Sym), e.cast(g.Type, fmt.Sprintf("v[%d]", i)))
+			fmt.Fprintf(&b, "%s.v=%s;\n", e.symbol(g.Sym), e.cast(g.Type, fmt.Sprintf("_v[%d]", i)))
 		} else {
-			fmt.Fprintf(&b, "%s=%s;\n", e.symbol(g.Sym), e.cast(g.Type, fmt.Sprintf("v[%d]", i)))
+			fmt.Fprintf(&b, "%s=%s;\n", e.symbol(g.Sym), e.cast(g.Type, fmt.Sprintf("_v[%d]", i)))
 		}
 	}
-	b.WriteString(" }\n private static readonly Library.State libraryState=new Library.State(libraryReset,libraryZero,librarySave,libraryLoad);\n")
+	b.WriteString(" }\n private static readonly Library.State _libraryState=new Library.State(_libraryReset,_libraryZero,_librarySave,_libraryLoad);\n")
 	init := e.symbol(e.p.Init.Sym) + "()"
 	if !e.p.Init.MaySuspend {
 		init = "R.sync(() => { " + e.symbol(e.p.Init.Sym) + "();return new object[0];})"
@@ -362,7 +362,7 @@ func (e *emitter) library() (string, error) {
 			}
 			call = "R.sync(() => { " + body + "; })"
 		}
-		return "(ctx,fresh) => fresh?Library.sequence(" + init + ",() =>" + call + "):" + call
+		return "(_ctx,_fresh) => _fresh?Library.sequence(" + init + ",() =>" + call + "):" + call
 	}
 	ptyp := func(t *ir.Type) string {
 		if h := abi.Handle(t); h != nil {
@@ -381,24 +381,24 @@ func (e *emitter) library() (string, error) {
 				as = append(as, fmt.Sprintf("%s(%s)", e.names.Type(f.Sig.Params[i+1].U(), "input_"), p))
 			}
 			last := len(f.Sig.Results) - 1
-			return fmt.Sprintf("(%s)=>{var hs=new Library.Handle[]{h};return Library.submit<%s>(null,libraryState,hs,%s,(inst,rv)=>{Library.Failure err=sourceFailure((Box)rv[%d]);if(err!=null)throw err;return %s;},null);}",
-				strings.Join(append([]string{"h"}, params...), ","), result, frame(f, as), last, out)
+			return fmt.Sprintf("(%s)=>{var _hs=new Library.Handle[]{_h};return Library.submit<%s>(null,_libraryState,_hs,%s,(_inst,_rv)=>{Library.Failure _err=_sourceFailure((Box)_rv[%d]);if(_err!=null)throw _err;return %s;},null);}",
+				strings.Join(append([]string{"_h"}, params...), ","), result, frame(f, as), last, out)
 		}
 		res := func(fn string, i int) string {
 			t := e.p.HostIOFunc(fn).Sig.Results[i]
-			return fmt.Sprintf("%s(%s)", e.names.Type(t.U(), "output_"), e.cast(t, fmt.Sprintf("rv[%d]", i)))
+			return fmt.Sprintf("%s(%s)", e.names.Type(t.U(), "output_"), e.cast(t, fmt.Sprintf("_rv[%d]", i)))
 		}
 		read, write, seek := "null", "null", "null"
 		if ops.Read {
-			read = op("ReadView", []string{"n"}, "(byte[],bool)", "("+res("ReadView", 0)+","+res("ReadView", 1)+")")
+			read = op("ReadView", []string{"_n"}, "(byte[],bool)", "("+res("ReadView", 0)+","+res("ReadView", 1)+")")
 		}
 		if ops.Write {
-			write = op("WriteView", []string{"d"}, "long", res("WriteView", 0))
+			write = op("WriteView", []string{"_d"}, "long", res("WriteView", 0))
 		}
 		if ops.Seek {
-			seek = op("SeekView", []string{"off", "wh"}, "long", res("SeekView", 0))
+			seek = op("SeekView", []string{"_off", "_wh"}, "long", res("SeekView", 0))
 		}
-		fmt.Fprintf(&b, " private static readonly Library.StreamOps %s=new Library.StreamOps(%s,%s,%s,h=>{var h0=h;return Library.close(h0,libraryState,%s,sourceFailure);});\n", name, read, write, seek, closeRun)
+		fmt.Fprintf(&b, " private static readonly Library.StreamOps %s=new Library.StreamOps(%s,%s,%s,_h=>{var _h0=_h;return Library.close(_h0,_libraryState,%s,_sourceFailure);});\n", name, read, write, seek, closeRun)
 	}
 	kinds := map[string]bool{}
 	for _, f := range funcs {
@@ -408,9 +408,9 @@ func (e *emitter) library() (string, error) {
 				run := "null"
 				if ir.StreamCloses(k) {
 					cv := e.p.HostIOFunc("CloseView")
-					run = frame(cv, []string{"Library.obj<" + e.jt(cv.Sig.Params[0]) + ">(h0)"})
+					run = frame(cv, []string{"Library.obj<" + e.jt(cv.Sig.Params[0]) + ">(_h0)"})
 				}
-				streamOps("streamOps"+k, ir.KindOps(k), func(t *ir.Type) string { return "Library.obj<" + e.jt(t) + ">(hs[0])" }, run)
+				streamOps("_streamOps"+k, ir.KindOps(k), func(t *ir.Type) string { return "Library.obj<" + e.jt(t) + ">(_hs[0])" }, run)
 			}
 		}
 	}
@@ -418,16 +418,16 @@ func (e *emitter) library() (string, error) {
 		if h.Stream.Any() {
 			for _, f := range h.Methods {
 				if ir.MethodName(f) == "AsStream" {
-					return "", fmt.Errorf("library handle %s is a stream and cannot also declare method AsStream", h.Name)
+					return "", fmt.Errorf("library handle %s is _a stream and cannot also declare method AsStream", h.Name)
 				}
 			}
 			run := "null"
 			if h.Close != nil {
-				run = frame(h.Close, []string{e.handleRecv(h, h.Close, "Library.obj<"+e.jt(h.Ptr)+">(h0)")})
+				run = frame(h.Close, []string{e.handleRecv(h, h.Close, "Library.obj<"+e.jt(h.Ptr)+">(_h0)")})
 			}
 			hp := h.Ptr
-			streamOps("streamOps"+h.Name, h.Stream, func(*ir.Type) string {
-				return "Box.box(" + e.td(hp) + ",Library.obj<" + e.jt(hp) + ">(hs[0]))"
+			streamOps("_streamOps"+h.Name, h.Stream, func(*ir.Type) string {
+				return "Box.box(" + e.td(hp) + ",Library.obj<" + e.jt(hp) + ">(_hs[0]))"
 			}, run)
 		}
 	}
@@ -435,12 +435,12 @@ func (e *emitter) library() (string, error) {
 		fmt.Fprintf(&b, " /// <summary>Handle to a source *%s owned by a library instance. Dispose it when done; a\n /// collected handle is released without running Close.</summary>\n public sealed class %s : System.IDisposable, System.IAsyncDisposable {\n  internal readonly Library.Handle h;\n  internal %s(Library.Handle h){this.h=h;}\n", h.Name, h.Name, h.Name)
 		run := "null"
 		if h.Close != nil {
-			run = frame(h.Close, []string{e.handleRecv(h, h.Close, "Library.obj<"+e.jt(h.Ptr)+">(h0)")})
+			run = frame(h.Close, []string{e.handleRecv(h, h.Close, "Library.obj<"+e.jt(h.Ptr)+">(_h0)")})
 		}
-		fmt.Fprintf(&b, "  /// <summary>Runs the source Close, if any, and releases the handle. Queued calls fail and an\n  /// active call is canceled first.</summary>\n  public Library.Operation<object> CloseAsync(){var h0=h;return Library.close(h0,libraryState,%s,sourceFailure);}\n", run)
-		b.WriteString("  public void Dispose(){try{CloseAsync().Completion.GetAwaiter().GetResult();}catch(System.AggregateException e) when (e.InnerException is Library.Failure f){throw f;}}\n  public async System.Threading.Tasks.ValueTask DisposeAsync(){await CloseAsync().Completion;}\n")
+		fmt.Fprintf(&b, "  /// <summary>Runs the source Close, if any, and releases the handle. Queued calls fail and an\n  /// active call is canceled first.</summary>\n  public Library.Operation<object> CloseAsync(){var _h0=h;return Library.close(_h0,_libraryState,%s,_sourceFailure);}\n", run)
+		b.WriteString("  public void Dispose(){try{CloseAsync().Completion.GetAwaiter().GetResult();}catch(System.AggregateException _e) when (_e.InnerException is Library.Failure _f){throw _f;}}\n  public async System.Threading.Tasks.ValueTask DisposeAsync(){await CloseAsync().Completion;}\n")
 		if h.Stream.Any() {
-			fmt.Fprintf(&b, "  /// <summary>The handle as a System.IO.Stream; each operation is a call on the handle and disposing the\n  /// stream closes the handle.</summary>\n  public Library.SourceStream AsStream()=>new Library.SourceStream(h,streamOps%s);\n", h.Name)
+			fmt.Fprintf(&b, "  /// <summary>The handle as a System.IO.Stream; each operation is a call on the handle and disposing the\n  /// stream closes the handle.</summary>\n  public Library.SourceStream AsStream()=>new Library.SourceStream(h,_streamOps%s);\n", h.Name)
 		}
 		for _, f := range h.Methods {
 			if err := e.libraryWrapper(&b, abi, ir.MethodName(f), h, f, ptyp, frame, used, reserved); err != nil {
@@ -448,8 +448,8 @@ func (e *emitter) library() (string, error) {
 			}
 		}
 		b.WriteString(" }\n")
-		fmt.Fprintf(&b, " private static %s wrap%s(Library.Instance inst,object v)=>Library.wrap(inst,v,%q,h=>new %s(h));\n", h.Name, h.Name, h.Name, h.Name)
-		fmt.Fprintf(&b, " private static Library.Handle handle%s(object v)=>Library.handle(v,typeof(%s),x=>((%s)x).h);\n", h.Name, h.Name, h.Name)
+		fmt.Fprintf(&b, " private static %s _wrap%s(Library.Instance _inst,object _v)=>Library.wrap(_inst,_v,%q,_h=>new %s(_h));\n", h.Name, h.Name, h.Name, h.Name)
+		fmt.Fprintf(&b, " private static Library.Handle _handle%s(object _v)=>Library.handle(_v,typeof(%s),_x=>((%s)_x).h);\n", h.Name, h.Name, h.Name)
 	}
 	for _, f := range e.p.Exports {
 		name := f.Name[strings.LastIndex(f.Name, ".")+1:]
@@ -510,49 +510,49 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	if recv != nil {
 		params = params[1:]
 		hs = append(hs, "h")
-		as = append(as, e.handleRecv(recv, f, "Library.obj<"+e.jt(recv.Ptr)+">(hs[0])"))
+		as = append(as, e.handleRecv(recv, f, "Library.obj<"+e.jt(recv.Ptr)+">(_hs[0])"))
 	}
 	for i, t := range params {
 		if sourceContext(t) {
-			as = append(as, "ctx")
+			as = append(as, "_ctx")
 			continue
 		}
 		a := fmt.Sprintf("a%d", i)
 		if k := ir.StreamKind(t); k != "" {
 			ps = append(ps, "object "+a)
-			pre = append(pre, fmt.Sprintf("var s%d=Library.stream(a%d,%q);\n", i, i, k))
-			as = append(as, fmt.Sprintf("(ids[%d]==0?null:%s(ids[%d]))", len(streams), e.symbol(e.p.StreamAdapter(k).Sym), len(streams)))
-			streams = append(streams, fmt.Sprintf("s%d", i))
+			pre = append(pre, fmt.Sprintf("var _s%d=Library.stream(a%d,%q);\n", i, i, k))
+			as = append(as, fmt.Sprintf("(_ids[%d]==0?null:%s(_ids[%d]))", len(streams), e.symbol(e.p.StreamAdapter(k).Sym), len(streams)))
+			streams = append(streams, fmt.Sprintf("_s%d", i))
 			continue
 		}
 		ps = append(ps, typ(t)+" "+a)
 		if h := abi.Handle(t); h != nil {
-			pre = append(pre, fmt.Sprintf("var h%d=handle%s(a%d);\n", i, h.Name, i))
-			hs = append(hs, fmt.Sprintf("h%d", i))
-			as = append(as, fmt.Sprintf("Library.obj<%s>(hs[%d])", e.jt(t), len(hs)-1))
+			pre = append(pre, fmt.Sprintf("var _h%d=_handle%s(a%d);\n", i, h.Name, i))
+			hs = append(hs, fmt.Sprintf("_h%d", i))
+			as = append(as, fmt.Sprintf("Library.obj<%s>(_hs[%d])", e.jt(t), len(hs)-1))
 			continue
 		}
-		pre = append(pre, fmt.Sprintf("%s owneda%d=%s(a%d,copy);\n", typ(t), i, e.names.Type(t.U(), "snapshot_"), i))
-		as = append(as, fmt.Sprintf("%s(owned%s)", e.names.Type(t.U(), "input_"), a))
+		pre = append(pre, fmt.Sprintf("%s _owneda%d=%s(a%d,_copy);\n", typ(t), i, e.names.Type(t.U(), "snapshot_"), i))
+		as = append(as, fmt.Sprintf("%s(_owned%s)", e.names.Type(t.U(), "input_"), a))
 	}
 	ps = append(ps, "Library.Options options")
-	fmt.Fprintf(b, "%sLibrary.Operation<%s> %s(%s) {\ntry {\nLibrary.CopyContext copy=new Library.CopyContext();\n", static, result, name, strings.Join(ps, ","))
+	fmt.Fprintf(b, "%sLibrary.Operation<%s> %s(%s) {\ntry {\nLibrary.CopyContext _copy=new Library.CopyContext();\n", static, result, name, strings.Join(ps, ","))
 	for _, p := range pre {
 		b.WriteString(p)
 	}
-	fmt.Fprintf(b, "var hs=new Library.Handle[]{%s};\nvar ids=new long[%d];\n", strings.Join(hs, ","), len(streams))
-	fmt.Fprintf(b, "return Library.submit<%s>(options,libraryState,hs,%s,(inst,rv) => {\n", result, frame(f, as))
+	fmt.Fprintf(b, "var _hs=new Library.Handle[]{%s};\nvar _ids=new long[%d];\n", strings.Join(hs, ","), len(streams))
+	fmt.Fprintf(b, "return Library.submit<%s>(options,_libraryState,_hs,%s,(_inst,_rv) => {\n", result, frame(f, as))
 	if hasErr {
-		fmt.Fprintf(b, "Library.Failure err=sourceFailure((Box)rv[%d]);if(err!=null)throw err;\n", n)
+		fmt.Fprintf(b, "Library.Failure _err=_sourceFailure((Box)_rv[%d]);if(_err!=null)throw _err;\n", n)
 	}
 	out := func(i int) string {
 		if h := abi.Handle(results[i]); h != nil {
-			return fmt.Sprintf("wrap%s(inst,rv[%d])", h.Name, i)
+			return fmt.Sprintf("_wrap%s(_inst,_rv[%d])", h.Name, i)
 		}
 		if k := ir.StreamKind(results[i]); k != "" {
-			return fmt.Sprintf("Library.wrap(inst,rv[%d],\"io.%s\",h=>new Library.SourceStream(h,streamOps%s))", i, k, k)
+			return fmt.Sprintf("Library.wrap(_inst,_rv[%d],\"io.%s\",_h=>new Library.SourceStream(_h,_streamOps%s))", i, k, k)
 		}
-		return fmt.Sprintf("%s(%s)", e.names.Type(results[i].U(), "output_"), e.cast(results[i], fmt.Sprintf("rv[%d]", i)))
+		return fmt.Sprintf("%s(%s)", e.names.Type(results[i].U(), "output_"), e.cast(results[i], fmt.Sprintf("_rv[%d]", i)))
 	}
 	if n == 1 {
 		fmt.Fprintf(b, "return %s;\n", out(0))
@@ -568,6 +568,6 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 	} else {
 		b.WriteString("return null;\n")
 	}
-	fmt.Fprintf(b, "},null,new Callback.Provider[]{%s},ids);\n} catch(Library.Failure e) { return Library.failed<%s>(e); }\n%s}\n", strings.Join(streams, ","), result, indent)
+	fmt.Fprintf(b, "},null,new Callback.Provider[]{%s},_ids);\n} catch(Library.Failure _e) { return Library.failed<%s>(_e); }\n%s}\n", strings.Join(streams, ","), result, indent)
 	return nil
 }

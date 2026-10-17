@@ -3,14 +3,15 @@ package integration
 import (
 	"context"
 	"fmt"
-	"github.com/eugenioenko/goalchemy/internal/driver"
-	"github.com/eugenioenko/goalchemy/internal/testutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/eugenioenko/goalchemy/internal/driver"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestGeneratedCSharpImportingLibrary(t *testing.T) {
@@ -62,7 +63,7 @@ func Derive(ctx context.Context)([]byte,error){return crypto.HKDFSHA256([]byte{1
 			t.Fatal(e)
 		}
 	}
-	if ds := testutil.CompileGateOptions(source, "csharp", out, "cooperative", driver.EmitOptions{CompactNames: compact}); len(ds) > 0 {
+	if ds := testutil.CompileGateOptions(source, "csharp", out, "cooperative", driver.EmitOptions{Names: testutil.Names(compact)}); len(ds) > 0 {
 		t.Fatal(ds)
 	}
 	generated, e := os.ReadFile(filepath.Join(out, "Main.cs"))

@@ -13,6 +13,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
 	"github.com/eugenioenko/goalchemy/internal/driver"
 	"github.com/eugenioenko/goalchemy/internal/subset"
+	"github.com/eugenioenko/goalchemy/internal/testutil"
 )
 
 func TestGeneratedRustPackageLibrary(t *testing.T) {
@@ -56,7 +57,7 @@ func Native(ctx context.Context)([]byte,error){k,e:=crypto.GenerateP256();if e!=
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			out, consumer := t.TempDir(), t.TempDir()
-			if ds := driver.EmitWithOptions("rust", res, out, driver.EmitOptions{CompactNames: compact}); diagnostics.HasErrors(ds) {
+			if ds := driver.EmitWithOptions("rust", res, out, driver.EmitOptions{Names: testutil.Names(compact)}); diagnostics.HasErrors(ds) {
 				t.Fatal(ds)
 			}
 			// Mirror the SDK's adapter placement exactly; explicit paths must still
