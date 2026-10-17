@@ -157,7 +157,11 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		b.Write(bodies[file].Bytes())
 		src, sm := e.resolveMarkers(b.String())
 		sm.File = path.Base(file)
-		src += "//# sourceMappingURL=" + path.Base(file) + ".map\n"
+		if e.p.NoLineDirectives {
+			sm = nil
+		} else {
+			src += "//# sourceMappingURL=" + path.Base(file) + ".map\n"
+		}
 		files = append(files, artifact.File{Path: file, Source: []byte(src), Owner: owners[file], SourceMap: sm})
 	}
 	var cs []string

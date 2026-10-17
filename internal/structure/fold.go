@@ -183,10 +183,13 @@ func (fs *Folds) text(it item) string {
 	case it.pause != nil:
 		return fs.pr.Pause(it.pause)
 	}
-	if i, ok := it.term.Term.(*ir.If); ok {
-		return fs.pr.Cond(i.Cond)
+	switch t := it.term.Term.(type) {
+	case *ir.If:
+		return fs.pr.Cond(t.Cond)
+	case *ir.Panic, *ir.Pause:
+		return fs.pr.Leaf(it.term, t)
 	}
-	return fs.pr.Leaf(it.term, it.term.Term)
+	return ""
 }
 
 func extract(text, pre, suf string) (string, bool) {
@@ -566,7 +569,7 @@ func classify(it item) *cand {
 			return nil
 		}
 		pure, c.call = false, true
-	case *ir.IndexString, *ir.SliceOp, *ir.Append, *ir.MakeSlice, *ir.MakeMap, *ir.New:
+	case *ir.IndexString, *ir.SliceOp, *ir.Append, *ir.MakeSlice, *ir.MakeMap, *ir.MakeChan, *ir.New:
 		pure = false
 	case *ir.MapLookup:
 		if i.Ok != nil {

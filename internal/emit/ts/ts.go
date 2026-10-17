@@ -16,6 +16,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/naming"
 	"github.com/eugenioenko/goalchemy/internal/sourcemap"
+	"github.com/eugenioenko/goalchemy/internal/structure"
 )
 
 type Output struct {
@@ -407,6 +408,7 @@ type fnEmitter struct {
 	// frame is set when f is emitted as a resumable frame; locals are
 	// fields of fr and pc is fr.pc.
 	frame bool
+	folds *structure.Folds
 }
 
 // susp reports whether values of function type t use the resumable
@@ -453,10 +455,14 @@ func (e *emitter) symbol(sym string) string {
 func (fe *fnEmitter) w(format string, args ...any) { fmt.Fprintf(&fe.b, format, args...) }
 
 func (fe *fnEmitter) local(l *ir.Local) string {
-	if fe.frame {
-		return "fr." + fe.e.localName(l)
+	name := fe.e.localName(l)
+	if n, ok := fe.folds.Name(l); ok {
+		name = n
 	}
-	return fe.e.localName(l)
+	if fe.frame {
+		return "fr." + name
+	}
+	return name
 }
 
 // cell reports whether l lives in a rt.Cell.
@@ -465,6 +471,9 @@ func cell(l *ir.Local) bool { return l.Boxed && !l.Type.IsAggregate() }
 func (fe *fnEmitter) val(v ir.Value) string {
 	switch v := v.(type) {
 	case *ir.Local:
+		if s, ok := fe.folds.Use(v); ok {
+			return s
+		}
 		if cell(v) {
 			return fe.local(v) + ".v"
 		}
@@ -635,16 +644,18 @@ func (fe *fnEmitter) addrOf(p *ir.Place) string {
 // holding its locals and resume point, a starter that binds the arguments,
 // and a step method running the blocks until return or a pause point.
 func (e *emitter) frameFunction(f *ir.Func) string {
-	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}}
+	fe := &fnEmitter{e: e, f: f, order: map[*ir.Block]int{}, frame: true}
 	for i, b := range f.Blocks {
 		fe.order[b] = i
 	}
+	fe.analyze()
 	cls := "F$" + e.symbol(f.Sym)
 	fe.w("class %s extends rt.Frame {\n", cls)
 	for _, l := range f.Locals {
-		fe.w("  %s: any;\n", e.localName(l))
+		if !fe.folds.Temp(l) {
+			fe.w("  %s: any;\n", e.localName(l))
+		}
 	}
-	fe.frame = true
 	var rs []string
 	for _, r := range f.Results {
 		v := fe.val(r)
@@ -654,20 +665,9 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 		rs = append(rs, v)
 	}
 	fe.w("  results(): any[] {\n    const fr = this;\n    return [%s];\n  }\n", strings.Join(rs, ", "))
-	fe.w("  step(t: rt.Task): void {\n    const fr = this;\n    for (;;) switch (fr.pc) {\n")
-	for i, b := range f.Blocks {
-		fe.w("  case %d:\n", i)
-		if b.ResumeOf != nil {
-			fe.w("    ")
-			fe.resume(b.ResumeOf)
-		}
-		next := -1
-		if i+1 < len(f.Blocks) {
-			next = i + 1
-		}
-		fe.block(b, next)
-	}
-	fe.w("  default: throw rt.fault(\"bad block\");\n    }\n  }\n}\n")
+	fe.w("  step(t: rt.Task): void {\n    const fr = this;\n")
+	fe.structured(2)
+	fe.w("  }\n}\n")
 	var params []string
 	for _, l := range f.Env {
 		params = append(params, e.localName(l)+": any")
@@ -680,8 +680,82 @@ func (e *emitter) frameFunction(f *ir.Func) string {
 		fe.w("  fr.%s = %s;\n", e.localName(l), e.localName(l))
 	}
 	fe.w("  return fr;\n}\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
+
+func (fe *fnEmitter) analyze() {
+	structure.Analyze(fe.f, structure.FoldOptions{Order: structure.LeftToRight}, tsProbe{fe}, func(fs *structure.Folds) { fe.folds = fs })
+}
+
+var tsSyntax = structure.Syntax{
+	Indent: "  ", If: "if (%s) {", ElseIf: "} else if (%s) {", Else: "} else {", End: "}",
+	Loop: "for (;;) {", While: "while (%s) {", Block: "%s: {", LoopLabel: "%s: ", LabelName: "$L%d",
+	Break: "break;", BreakTo: "break %s;", Continue: "continue;", ContinueTo: "continue %s;",
+	Not: "!%s", And: "%s && %s", Or: "%s || %s",
+	CaseOpen: "case %d:", Default: []string{`default: throw rt.fault("bad block");`}, DispatchClose: []string{"}"},
+}
+
+// structured writes the function body as structured statements, with a
+// dispatch over the blocks a resumable frame resumes at.
+func (fe *fnEmitter) structured(depth int) {
+	body := structure.Build(fe.f, structure.Options{Empty: func(b *ir.Block) bool { return fe.folds.Empty(b, false) }})
+	syn := tsSyntax
+	syn.DispatchOpen = []string{"%sfor (;;) switch (" + fe.pc() + ") {"}
+	if !fe.frame {
+		syn.DispatchOpen = []string{"let $pc = 0;", syn.DispatchOpen[0]}
+	}
+	syn.SetPC = fe.pc() + " = %d;"
+	fe.b.WriteString(structure.Print(body, syn, tsEmitter{fe}, depth))
+}
+
+func (fe *fnEmitter) capture(fn func()) string {
+	saved := fe.b
+	fe.b = strings.Builder{}
+	fn()
+	out := fe.b.String()
+	fe.b = saved
+	return out
+}
+
+// tsEmitter prints the target-specific statements of a structured body.
+type tsEmitter struct{ fe *fnEmitter }
+
+func (t tsEmitter) Code(b *ir.Block) string {
+	fe := t.fe
+	return fe.capture(func() {
+		if b.ResumeOf != nil && fe.frame {
+			fe.resume(b.ResumeOf)
+		}
+		for _, in := range b.Instrs {
+			if !fe.folds.Folded(in) {
+				fe.mark(in.Position())
+				fe.instr(in)
+			}
+		}
+	})
+}
+
+func (t tsEmitter) Leaf(b *ir.Block, term ir.Terminator) string {
+	return t.fe.capture(func() {
+		t.fe.mark(term.Position())
+		t.fe.term(term)
+	})
+}
+
+func (t tsEmitter) Pause(p *ir.Pause) string  { panic("ts: inline pause") }
+func (t tsEmitter) Cond(v ir.Value) string    { return t.fe.val(v) }
+func (t tsEmitter) Mark(pos token.Pos) string { return t.fe.e.position(pos) }
+
+// tsProbe renders statements for fold analysis.
+type tsProbe struct{ fe *fnEmitter }
+
+func (t tsProbe) Instr(in ir.Instr) string { return t.fe.capture(func() { t.fe.instr(in) }) }
+func (t tsProbe) Pause(p *ir.Pause) string { panic("ts: inline pause") }
+func (t tsProbe) Cond(v ir.Value) string   { return t.fe.val(v) }
+func (t tsProbe) Leaf(b *ir.Block, term ir.Terminator) string {
+	return t.fe.capture(func() { t.fe.term(term) })
+}
+func (t tsProbe) Assign(l *ir.Local) (string, string) { return t.fe.val(l) + " = ", ";" }
 
 // resume assigns a paused operation's results from the task.
 func (fe *fnEmitter) resume(op ir.Instr) {
@@ -772,6 +846,7 @@ func (e *emitter) function(f *ir.Func) string {
 			}
 		}
 	}
+	fe.analyze()
 	var params []string
 	for _, l := range f.Env {
 		params = append(params, fe.local(l)+": any")
@@ -789,7 +864,7 @@ func (e *emitter) function(f *ir.Func) string {
 	}
 	var decls []string
 	for _, l := range f.Locals {
-		if !isParam[l] {
+		if !isParam[l] && !fe.folds.Temp(l) {
 			decls = append(decls, fe.local(l))
 		}
 	}
@@ -797,29 +872,14 @@ func (e *emitter) function(f *ir.Func) string {
 		fe.w("  let %s: any;\n", strings.Join(decls, ", "))
 	}
 	if fe.defers {
-		fe.w("  const $d: rt.Deferred[] = [];\n  let $p: any = null;\n  try {\n")
-	}
-	if len(f.Blocks) == 1 {
-		fe.w("  $body: {\n")
-		fe.block(f.Blocks[0], -1)
-		fe.w("  }\n")
+		fe.w("  const $d: rt.Deferred[] = [];\n  let $p: any = null;\n  try {\n  $body: {\n")
+		fe.structured(2)
+		fe.w("  }\n  } catch (e) {\n    $p = rt.catchPanic(e);\n  }\n  rt.runDefers($d, $p);\n  return %s;\n", fe.results())
 	} else {
-		fe.w("  let $pc = 0;\n  $body: for (;;) switch ($pc) {\n")
-		for i, b := range f.Blocks {
-			fe.w("  case %d:\n", i)
-			next := -1
-			if i+1 < len(f.Blocks) {
-				next = i + 1
-			}
-			fe.block(b, next)
-		}
-		fe.w("  default: throw rt.fault(\"bad block\");\n  }\n")
-	}
-	if fe.defers {
-		fe.w("  } catch (e) {\n    $p = rt.catchPanic(e);\n  }\n  rt.runDefers($d, $p);\n  return %s;\n", fe.results())
+		fe.structured(1)
 	}
 	fe.w("}\n\n")
-	return fe.b.String()
+	return structure.Resolve(fe.b.String())
 }
 
 func (fe *fnEmitter) results() string {
@@ -841,16 +901,6 @@ func (fe *fnEmitter) results() string {
 	return "[" + strings.Join(vs, ", ") + "]"
 }
 
-func (fe *fnEmitter) block(b *ir.Block, next int) {
-	for _, in := range b.Instrs {
-		fe.w("    ")
-		fe.mark(in.Position())
-		fe.instr(in)
-	}
-	fe.mark(b.Term.Position())
-	fe.term(b.Term, next)
-}
-
 func (fe *fnEmitter) mark(pos token.Pos) {
 	if !pos.IsValid() {
 		return
@@ -859,20 +909,8 @@ func (fe *fnEmitter) mark(pos token.Pos) {
 	fe.w("%s%d\x00", marker, len(fe.e.positions)-1)
 }
 
-func (fe *fnEmitter) goTo(target *ir.Block, next int) {
-	if fe.order[target] == next {
-		return
-	}
-	fe.w("    %s = %d; continue;\n", fe.pc(), fe.order[target])
-}
-
-func (fe *fnEmitter) term(t ir.Terminator, next int) {
+func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.goTo(t.Target, next)
-	case *ir.If:
-		fe.w("    if (%s) { %s = %d; continue; }\n", fe.val(t.Cond), fe.pc(), fe.order[t.Then])
-		fe.goTo(t.Else, next)
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:

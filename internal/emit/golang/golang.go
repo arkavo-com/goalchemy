@@ -1865,10 +1865,6 @@ func parenType(t string) string {
 
 func (fe *fnEmitter) term(t ir.Terminator) {
 	switch t := t.(type) {
-	case *ir.Jump:
-		fe.w("goto b%d\n", t.Target.ID)
-	case *ir.If:
-		fe.w("if %s {\ngoto b%d\n}\ngoto b%d\n", fe.val(t.Cond), t.Then.ID, t.Else.ID)
 	case *ir.Pause:
 		fe.pause(t)
 	case *ir.Return:
