@@ -12,8 +12,6 @@ class LibraryFailure(Exception):
         self.kind = kind
         self.fields = fields or {}
 
-LIMIT = 64 << 20
-
 def library_bool(v):
     if type(v) is not bool: raise LibraryFailure('invalid_argument')
     return v
@@ -24,20 +22,18 @@ def library_int(v, bits, signed):
     return v
 
 def library_string(v):
-    if type(v) is not bytes or len(v) > LIMIT: raise LibraryFailure('invalid_argument')
+    if type(v) is not bytes: raise LibraryFailure('invalid_argument')
     return v
 
 def library_byte_size(v):
     if type(v) not in (bytes, bytearray, memoryview): raise LibraryFailure('invalid_argument')
     try:
-        size = v.nbytes if type(v) is memoryview else len(v)
-        if size > LIMIT: raise LibraryFailure('invalid_argument')
-        return size
+        return v.nbytes if type(v) is memoryview else len(v)
     except (ValueError, TypeError):
         raise LibraryFailure('invalid_argument') from None
 
 def library_snapshot_bytes(v):
-    """Bounded immutable submission snapshot; immutable bytes need no copy."""
+    """Immutable submission snapshot; immutable bytes need no copy."""
     if v is None: return None
     library_byte_size(v)
     try: return v if type(v) is bytes else bytes(v)
@@ -50,7 +46,7 @@ def library_bytes(v):
     except (ValueError, TypeError): raise LibraryFailure('invalid_argument') from None
 
 def library_list(v):
-    if type(v) not in (list, tuple) or len(v) > LIMIT: raise LibraryFailure('invalid_argument')
+    if type(v) not in (list, tuple): raise LibraryFailure('invalid_argument')
     return v
 
 def library_fields(v, names):

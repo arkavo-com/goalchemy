@@ -191,7 +191,7 @@ func (e *emitter) library() (string, error) {
 			b.WriteString("};\n")
 		case ir.KSlice:
 			if byteElem(u.Elem) {
-				b.WriteString("return _v.a===null?null:rt.bytes(_v);\n")
+				b.WriteString("return _v.a===null?null:rt.bytes(_v,Number.MAX_SAFE_INTEGER);\n")
 			} else {
 				fmt.Fprintf(&b, "return _v.a===null?null:rt.toArray(_v).map(_x=>%s(_x));\n", e.names.Type(u.Elem.U(), "output$"))
 			}

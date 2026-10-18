@@ -24,7 +24,7 @@ func TestInstalledCompilerOutsideRepository(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
 	dir := t.TempDir()
-	module := fmt.Sprintf("module example.com/goalchemy-external-test\n\ngo 1.25\n\nrequire github.com/eugenioenko/goalchemy v0.7.3\n\nreplace github.com/eugenioenko/goalchemy => %s\n", root)
+	module := fmt.Sprintf("module example.com/goalchemy-external-test\n\ngo 1.25\n\nrequire github.com/eugenioenko/goalchemy v0.7.4\n\nreplace github.com/eugenioenko/goalchemy => %s\n", root)
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(module), 0o644); err != nil {
 		t.Fatal(err)
 	}

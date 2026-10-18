@@ -30,8 +30,9 @@ change the trusted resource.
 Public structs and arrays are copied synchronously into native value trees
 before queueing. Only the acquired owner constructs source structs, slice
 headers, Boxes, contexts and key shells. Snapshot traversal rejects cycles,
-depth beyond 128, more than one million aggregate nodes, and individual arrays
-or strings beyond 64 MiB. Nil and empty slices remain distinct. Successful
+depth beyond 128 and more than one million aggregate nodes. Individual buffer,
+string and collection lengths have no additional byte-size cap; native storage
+and source descriptor ranges still apply. Nil and empty slices remain distinct. Successful
 results and recursively structured error maps are copied while the owner is
 alive. Repeated `Failure.fields()` calls return independent mutable leaves.
 

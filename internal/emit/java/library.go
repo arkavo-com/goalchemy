@@ -176,7 +176,7 @@ func (e *emitter) library() (string, error) {
 			if byteElem(u.Elem) {
 				b.WriteString("return Library.bytes(_v);\n")
 			} else {
-				b.WriteString("if(_v==null)return null;Library.length(_v.length);\n")
+				b.WriteString("if(_v==null)return null;\n")
 				fmt.Fprintf(&b, "%s _r=%s;for(int _i=0;_i<_r.length;_i++)_r[_i]=%s(_v[_i],_copy);return _r;\n", typ(t), publicArray(typ(u.Elem), "_v.length"), e.names.Type(u.Elem.U(), "snapshot$"))
 			}
 		}
@@ -211,7 +211,7 @@ func (e *emitter) library() (string, error) {
 				} else {
 					b.WriteString("if(_v==null)return Slice.NIL;\n")
 				}
-				b.WriteString("Library.length(_v.length);Object[] _a=new Object[_v.length];\n")
+				b.WriteString("Object[] _a=new Object[_v.length];\n")
 				fmt.Fprintf(&b, "for(int _i=0;_i<_a.length;_i++)_a[_i]=%s(_v[_i]);\n", e.names.Type(u.Elem.U(), "input$"))
 				if u.Kind == ir.KArray {
 					b.WriteString("return _a;\n")

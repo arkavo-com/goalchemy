@@ -185,3 +185,16 @@ The host receives a native stream. A handle type whose pointer has
 Copying 256 MiB host → source → host (a host stream passed to an export that
 returns it as an `io.ReadCloser`) runs with bounded memory; the integration
 tests log the rate per target.
+
+## Value sizes
+
+Generated library boundaries impose no fixed byte-size cap on byte buffers,
+binary strings or collections. Values must fit the target's native storage and
+source length representation. Input snapshots and owned outputs still allocate
+copies, so available memory determines which sizes succeed. Allocation failures
+follow the host runtime's behavior; clean error reporting is not guaranteed for
+process-level exhaustion. Applications can enforce their own input budgets.
+
+Type, fixed-array length, integer-range, cycle and structural traversal checks
+still apply. Operation-specific capability limits, such as an HTTP response
+budget or a crypto operation's documented input range, are separate contracts.

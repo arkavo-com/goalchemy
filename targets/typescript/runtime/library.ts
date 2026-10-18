@@ -16,11 +16,11 @@ export function boundaryInt(v:unknown,bits:number,signed:boolean):bigint|number{
  if(wide?typeof v!=='bigint':typeof v!=='number'||!Number.isInteger(v))invalidBoundary();
  const n=wide?v as bigint:BigInt(v as number),lo=signed?-(1n<<BigInt(bits-1)):0n,hi=(1n<<BigInt(signed?bits-1:bits))-1n;if(n<lo||n>hi)invalidBoundary();return wide?n:Number(n);
 }
-export function boundaryString(v:unknown):string{if(v===undefined)return '';if(typeof v!=='string'||v.length>64<<20)invalidBoundary();for(let i=0;i<v.length;i++)if(v.charCodeAt(i)>255)invalidBoundary();return v;}
+export function boundaryString(v:unknown):string{if(v===undefined)return '';if(typeof v!=='string')invalidBoundary();for(let i=0;i<v.length;i++)if(v.charCodeAt(i)>255)invalidBoundary();return v;}
 export function boundaryBool(v:unknown):boolean{if(v===undefined)return false;if(typeof v!=='boolean')invalidBoundary();return v;}
 export function boundaryObject(v:unknown):Record<string,unknown>{if(v===undefined)return {};if(v===null||typeof v!=='object'||Array.isArray(v))invalidBoundary();return v as Record<string,unknown>;}
-export function boundaryArray(v:unknown):unknown[]|null{if(v===undefined||v===null)return null;if(!Array.isArray(v)||v.length>64<<20)invalidBoundary();return v;}
-export function boundaryBytes(v:unknown):Uint8Array|null{if(v===undefined||v===null)return null;if(!(v instanceof Uint8Array)||v.length>64<<20)invalidBoundary();return new Uint8Array(v);}
+export function boundaryArray(v:unknown):unknown[]|null{if(v===undefined||v===null)return null;if(!Array.isArray(v))invalidBoundary();return v;}
+export function boundaryBytes(v:unknown):Uint8Array|null{if(v===undefined||v===null)return null;if(!(v instanceof Uint8Array))invalidBoundary();return new Uint8Array(v);}
 interface Waiter { resolve:(release:()=>void)=>void;reject:(e:unknown)=>void;signal?:AbortSignal;abort:()=>void; }
 let reserved=false;const queue:Waiter[]=[];
 function release():void {for(;;){const w=queue.shift();if(!w){reserved=false;return;}w.signal?.removeEventListener('abort',w.abort);if(w.signal?.aborted){w.reject(new LibraryError('canceled',{},w.signal.reason));continue;}w.resolve(release);return;}}

@@ -73,13 +73,9 @@ for shape in ('typed','multidimensional','strided'):
  view.release()
  error(p.Echo({'Data':view}),'invalid_argument')
 check(not lib._queue,'view operations retired')
-old_limit=lib.LIMIT;lib.LIMIT=4
-try:
- for view in (memoryview(bytes(8)).cast('I'),memoryview(bytes(8)).cast('B',shape=[2,4])):
-  op=p.Echo({'Data':view})
-  check(op.done() and not lib._queue,'nbytes rejected before source thread')
-  error(op,'invalid_argument')
-finally:lib.LIMIT=old_limit
+for view in (memoryview(bytes(8)).cast('I'),memoryview(bytes(8)).cast('B',shape=[2,4])):
+ check(lib.library_byte_size(view)==8,'memoryview nbytes')
+ check(lib.library_snapshot_bytes(view)==bytes(8),'memoryview snapshot')
 immutable=b'\0\xffbounded';check(lib.library_snapshot_bytes(immutable) is immutable,'immutable snapshot retained')
 
 async def async_cases():
