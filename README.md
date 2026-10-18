@@ -82,7 +82,7 @@ The `go get` makes Goalchemy's packages resolvable from your module. Source modu
 
 The Go standard library is replaced by packages that keep the standard names, so code still reads and runs as ordinary Go:
 
-- [`std/`](std): pure-logic packages (`strings`, `strconv`, `bytes`, `io`, `sort`, `unicode`, `unicode/utf8`, `encoding/hex`, `encoding/binary`, `encoding/json` (`Marshal`, `Unmarshal`, `Encoder`, `Decoder`), `encoding/jsonvalue`, `encoding/protojson`, `connect`, `time`, `errors`, `fmt`, `log/slog`, `os`, `net/url`, and `net` for `JoinHostPort` and `SplitHostPort`) written once in the Goalchemy subset and compiled with your program. They behave identically on every target with no native dependencies.
+- [`std/`](std): pure-logic packages (`strings`, `strconv`, `bytes`, `io`, `sort`, `unicode`, `unicode/utf8`, `encoding/hex`, `encoding/binary`, `encoding/json` (`Marshal`, `Unmarshal`, `Encoder`, `Decoder`), `encoding/jsonvalue`, `encoding/json/jcs` (RFC 8785 canonical JSON), `encoding/protojson`, `connect`, `time`, `errors`, `fmt`, `log/slog`, `os`, `net/url`, and `net` for `JoinHostPort` and `SplitHostPort`) written once in the Goalchemy subset and compiled with your program. They behave identically on every target with no native dependencies.
 - [`lib/`](lib): capability packages that reach the host (`crypto`, `http`, `encoding`, `checksum`, `clock`, `log`, `os`, `callback`, `sync`, `context`, `time`, `errors`). Each has a native implementation per target, checked against a contract.
 
 The [runtime library reference](docs/library.md) explains the split and documents every function.
