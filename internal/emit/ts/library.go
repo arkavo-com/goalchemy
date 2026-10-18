@@ -2,6 +2,7 @@ package ts
 
 import (
 	"fmt"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"go/token"
 	"strings"
@@ -117,6 +118,7 @@ func (e *emitter) library() (string, error) {
 	}
 	for _, t := range e.p.Types.All {
 		if n := names[t]; n != "" {
+			start := b.Len()
 			u := t.U()
 			if u.Kind == ir.KStruct {
 				fmt.Fprintf(&b, "export interface %s {\n", n)
@@ -129,6 +131,7 @@ func (e *emitter) library() (string, error) {
 				fmt.Fprintf(&b, "export type %s = %s;\n", n, typ(t))
 				names[t] = n
 			}
+			e.api = append(e.api, artifact.APIDeclaration{Type: t, Name: n, Signature: b.String()[start:]})
 		}
 	}
 	// Generate owner-side recursive conversion for every admitted type.
@@ -352,6 +355,10 @@ func (e *emitter) library() (string, error) {
 		}
 	}
 	for _, h := range abi.Handles {
+		e.api = append(e.api, artifact.APIDeclaration{Type: h.Elem, Name: h.Name, Signature: "export class " + h.Name})
+		if h.Close != nil {
+			e.api = append(e.api, artifact.APIDeclaration{Function: h.Close, Name: "close", Signature: "close(): Promise<void>"})
+		}
 		fmt.Fprintf(&b, "/** Handle to a source *%s owned by a library instance. Call close() when\n * done; a collected handle is released without running Close. */\nexport class %s {\nreadonly [_H]:rt.Handle;\n/** @internal */\nconstructor(_h:rt.Handle){this[_H]=_h;}\n", h.Name, h.Name)
 		run := "null"
 		if h.Close != nil {
@@ -448,6 +455,11 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 			}
 			result = "[" + strings.Join(rs, ",") + "]"
 		}
+		prefix := "async"
+		if recv == nil {
+			prefix = "export async function"
+		}
+		e.api = append(e.api, artifact.APIDeclaration{Function: f, Name: name, Signature: fmt.Sprintf("%s %s(%s): Promise<%s>", prefix, name, strings.Join(ps, ","), result)})
 		if recv != nil {
 			fmt.Fprintf(b, "async %s(%s):Promise<%s>{\noptions=rt.snapshotOptions(options);\n", name, strings.Join(ps, ","), result)
 		} else {

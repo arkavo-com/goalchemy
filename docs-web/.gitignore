@@ -9,6 +9,7 @@ src/content/docs/language/specification.md
 src/content/docs/language/floating-point.md
 src/content/docs/language/features.md
 src/content/docs/guides/usage.md
+src/content/docs/guides/api-documentation.md
 src/content/docs/guides/library-handles.md
 src/content/docs/guides/protobuf.md
 src/content/docs/guides/host-operations.md

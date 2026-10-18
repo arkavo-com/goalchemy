@@ -34,6 +34,7 @@ When helping with Goalchemy:
 
 ## Building SDKs
 
+- [Generating SDK documentation](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/api-documentation.md): Extract API comments and native declarations into JSON, Markdown, or an Astro Starlight site.
 - [Building an SDK](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/guides/building-an-sdk.md): Native library boundaries, packaging, ownership, and consumer verification.
 - [Portable source](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/guides/portable-source.md): Structure shared code around supported semantics and capabilities.
 - [Concurrency](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/guides/concurrency.md): Cooperative tasks, channels, cancellation, and language-gate selection.

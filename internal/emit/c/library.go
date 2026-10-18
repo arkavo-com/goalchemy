@@ -3,6 +3,7 @@ package c
 import (
 	"bytes"
 	"fmt"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"go/token"
 	"sort"
@@ -264,6 +265,7 @@ static void gxc_poll(void) {
 	for _, h := range abi.Handles {
 		closeEntry[h] = -1
 		if h.Close != nil {
+			e.api = append(e.api, artifact.APIDeclaration{Function: h.Close, Name: "gxc_handle_close", Signature: "int gxc_handle_close(gxc_handle *h, gxc_error *error)"})
 			closeEntry[h] = len(entries)
 			entries = append(entries, entry{name: "", f: h.Close, recv: h, close: true})
 		}
@@ -316,6 +318,9 @@ static void gxc_poll(void) {
 		return en.f.Sig.Params
 	}
 	for _, en := range entries {
+		if en.name != "" && en.self == "" {
+			e.api = append(e.api, artifact.APIDeclaration{Function: en.f, Name: en.name, Signature: "int goalchemy_invoke(const char *name, const gxc_value *args, size_t count, const gxc_options *opts, gxc_value *result, gxc_error *error)", Invocation: fmt.Sprintf("goalchemy_invoke(%q, args, count, options, &result, &error)", en.name)})
+		}
 		for _, t := range params(en) {
 			if !cContext(t) && abi.Handle(t) == nil && ir.StreamKind(t) == "" {
 				convert(t)

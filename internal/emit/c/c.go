@@ -22,6 +22,7 @@ import (
 )
 
 type Output struct {
+	API      []artifact.APIDeclaration
 	Files    []artifact.File
 	Packages []artifact.PackageFiles
 	// Header declares a library's exported functions; nil for programs.
@@ -30,6 +31,7 @@ type Output struct {
 }
 
 type emitter struct {
+	api         []artifact.APIDeclaration
 	p           *ir.Program
 	names       *naming.Names
 	symbols     map[string]string
@@ -138,6 +140,7 @@ func (e *emitter) library(out *bytes.Buffer) ([]byte, error) {
 		if len(decls) == 0 {
 			proto = fmt.Sprintf("int %s(void)", name)
 		}
+		e.api = append(e.api, artifact.APIDeclaration{Function: f, Name: name, Signature: proto})
 		fmt.Fprintf(&h, "%s;\n", proto)
 		fmt.Fprintf(out, "%s {\n    gx_Handler h;\n    if (GX_TRY(h)) {\n        gx_last_panic = gx_panic_text(gx_thrown);\n        return 1;\n    }\n    gx_V r = %s(%s);\n    GX_END(h);\n", proto, e.fnName(f.Sym, "f_"), strings.Join(args, ", "))
 		for _, st := range stores {

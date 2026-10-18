@@ -26,12 +26,14 @@ import (
 
 // Output contains package-owned files in one native Go package.
 type Output struct {
+	API       []artifact.APIDeclaration
 	Files     []artifact.File
 	Packages  []artifact.PackageFiles
 	Contracts []string
 }
 
 type emitter struct {
+	api         []artifact.APIDeclaration
 	p           *ir.Program
 	names       *naming.Names
 	outDir      string
@@ -100,7 +102,7 @@ func Emit(p *ir.Program, outDir string, symbols map[string]string) (*Output, err
 		paths = append(paths, name)
 	}
 	sort.Strings(paths)
-	output := &Output{}
+	output := &Output{API: e.api}
 	for _, name := range paths {
 		src, lines, err := e.sourceFile(name, pkg)
 		output.Files = append(output.Files, artifact.File{Path: name, Source: src, Owner: e.owners[name], Lines: lines})

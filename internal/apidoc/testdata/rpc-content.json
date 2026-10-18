@@ -1,0 +1,46 @@
+{
+  "examples": [
+    {
+      "id": "list-platform-attributes",
+      "title": "List platform attributes",
+      "for": "policy.attributes.AttributesService/ListAttributes",
+      "description": "Given an authenticated OpenTDF SDK, list attributes in an existing namespace. These examples use the SDK's native host clients; documentation generation does not create or run those clients. The illustrative response represents an empty namespace.",
+      "snippets": [
+        {
+          "target": "go",
+          "code": "import \"github.com/opentdf/platform/protocol/go/policy/attributes\"\n\nresponse, err := sdk.Attributes().ListAttributes(ctx, &attributes.ListAttributesRequest{\n    Namespace: \"example.com\",\n})\nif err != nil {\n    return err\n}"
+        },
+        {
+          "target": "typescript",
+          "code": "const response = await sdk.attributes.listAttributes({\n  namespace: 'example.com',\n});"
+        },
+        {
+          "target": "python",
+          "code": "from opentdf_tdf3.protocol.policy.attributes import attributes_pb2\n\nrequest = attributes_pb2.ListAttributesRequest(namespace=\"example.com\")\nresponse = await sdk.attributes.list_attributes_async(request)"
+        },
+        {
+          "target": "java",
+          "code": "var request = io.opentdf.tdf3.protocol.policy.attributes.ListAttributesRequest\n    .newBuilder().setNamespace(\"example.com\").build();\nvar response = sdk.attributes().listAttributes(request);"
+        },
+        {
+          "target": "csharp",
+          "code": "var request = new OpenTDF.Protocol.Policy.Attributes.ListAttributesRequest\n{\n    Namespace = \"example.com\"\n};\nvar response = await sdk.Attributes.ListAttributesAsync(request, cancellationToken);"
+        },
+        {
+          "target": "rust",
+          "code": "let request = protocol::policy::attributes::ListAttributesRequest {\n    namespace: \"example.com\".into(),\n    ..Default::default()\n};\nlet response = sdk.attributes().list_attributes_async(&request).await?;"
+        },
+        {
+          "target": "c",
+          "code": "char *response_json = NULL;\notdf_error error = {0};\nint status = otdf_attributes_list_attributes(\n    sdk, \"{\\\"namespace\\\":\\\"example.com\\\"}\",\n    call, &response_json, &error);\nif (status == 0) {\n    puts(response_json);\n}\notdf_string_free(response_json);\notdf_error_free(&error);"
+        },
+        {
+          "target": "swift",
+          "code": "var request = Policy_Attributes_ListAttributesRequest()\nrequest.namespace = \"example.com\"\nlet response = try await sdk.attributes.listAttributes(request)"
+        }
+      ],
+      "request": { "namespace": "example.com" },
+      "response": { "attributes": [] }
+    }
+  ]
+}

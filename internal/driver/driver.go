@@ -7,6 +7,7 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/catalog"
 	"github.com/eugenioenko/goalchemy/internal/contracts"
 	"github.com/eugenioenko/goalchemy/internal/diagnostics"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/frontend"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"github.com/eugenioenko/goalchemy/internal/lower"
@@ -21,10 +22,12 @@ type Options struct {
 }
 
 type Result struct {
-	Catalog  *contracts.Catalog
-	Registry *catalog.Registry
-	Program  *frontend.Program
-	IR       *ir.Program
+	// ObserveAPI receives native public declarations during documentation generation.
+	ObserveAPI func([]artifact.APIDeclaration)
+	Catalog    *contracts.Catalog
+	Registry   *catalog.Registry
+	Program    *frontend.Program
+	IR         *ir.Program
 }
 
 // Build loads and validates the source and lowers it to IR.

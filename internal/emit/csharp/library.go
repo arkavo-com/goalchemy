@@ -2,6 +2,7 @@ package csharp
 
 import (
 	"fmt"
+	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/ir"
 	"go/token"
 	"strings"
@@ -136,6 +137,7 @@ func (e *emitter) library() (string, error) {
 			for _, f := range u.Fields {
 				convert(f.Type)
 			}
+			start := b.Len()
 			fmt.Fprintf(&b, " public sealed class %s {\n", n)
 			for _, f := range u.Fields {
 				z := ""
@@ -145,6 +147,7 @@ func (e *emitter) library() (string, error) {
 				fmt.Fprintf(&b, "  public %s %s%s;\n", typ(f.Type), f.Name, z)
 			}
 			b.WriteString(" }\n")
+			e.api = append(e.api, artifact.APIDeclaration{Type: t, Name: n, Signature: b.String()[start:]})
 		case ir.KArray, ir.KSlice:
 			convert(u.Elem)
 		}
@@ -432,6 +435,10 @@ func (e *emitter) library() (string, error) {
 		}
 	}
 	for _, h := range abi.Handles {
+		e.api = append(e.api, artifact.APIDeclaration{Type: h.Elem, Name: h.Name, Signature: "public sealed class " + h.Name})
+		if h.Close != nil {
+			e.api = append(e.api, artifact.APIDeclaration{Function: h.Close, Name: "CloseAsync", Signature: "public Library.Operation<object> CloseAsync()"})
+		}
 		fmt.Fprintf(&b, " /// <summary>Handle to a source *%s owned by a library instance. Dispose it when done; a\n /// collected handle is released without running Close.</summary>\n public sealed class %s : System.IDisposable, System.IAsyncDisposable {\n  internal readonly Library.Handle h;\n  internal %s(Library.Handle h){this.h=h;}\n", h.Name, h.Name, h.Name)
 		run := "null"
 		if h.Close != nil {
@@ -536,6 +543,7 @@ func (e *emitter) libraryWrapper(b *strings.Builder, abi *ir.LibraryABI, name st
 		as = append(as, fmt.Sprintf("%s(_owned%s)", e.names.Type(t.U(), "input_"), a))
 	}
 	ps = append(ps, "Library.Options options")
+	e.api = append(e.api, artifact.APIDeclaration{Function: f, Name: name, Signature: fmt.Sprintf("%sLibrary.Operation<%s> %s(%s)", static, result, name, strings.Join(ps, ","))})
 	fmt.Fprintf(b, "%sLibrary.Operation<%s> %s(%s) {\ntry {\nLibrary.CopyContext _copy=new Library.CopyContext();\n", static, result, name, strings.Join(ps, ","))
 	for _, p := range pre {
 		b.WriteString(p)

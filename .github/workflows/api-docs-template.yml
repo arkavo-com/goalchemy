@@ -1,0 +1,62 @@
+name: SDK documentation template
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/api-docs-template.yml'
+      - 'internal/apidoc/**'
+      - 'internal/emit/**'
+      - 'internal/driver/**'
+      - 'cmd/goalchemy/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/api-docs-template.yml'
+      - 'internal/apidoc/**'
+      - 'internal/emit/**'
+      - 'internal/driver/**'
+      - 'cmd/goalchemy/**'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Generate a consumer site from the library fixture
+        run: |
+          go run ./cmd/goalchemy docs -format site -out "$RUNNER_TEMP/sdk-docs" \
+            -proto-descriptor "$PWD/internal/protoc/testdata/platform.binpb" \
+            -proto-services policy.attributes.AttributesService \
+            -content "$PWD/internal/apidoc/testdata/rpc-content.json" \
+            -C internal/apidoc/testdata/library .
+          python3 - "$RUNNER_TEMP/sdk-docs/astro.config.mjs" <<'PY'
+          from pathlib import Path
+          import sys
+          file = Path(sys.argv[1])
+          text = file.read_text().replace('defineConfig({', "defineConfig({\n  site: 'https://sdk.example.com',\n  base: '/sdk-docs',")
+          file.write_text(text)
+          PY
+      - name: Install the template package manager
+        run: npm install --global pnpm@10.34.7
+      - name: Check and build the generated site
+        working-directory: ${{ runner.temp }}/sdk-docs
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm check
+          pnpm build
+      - name: Check RPC and API links under a repository base
+        run: python3 internal/apidoc/testdata/check-site.py "$RUNNER_TEMP/sdk-docs/dist" --base /sdk-docs/
