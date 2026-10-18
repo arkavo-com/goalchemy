@@ -1,0 +1,63 @@
+# Goalchemy
+
+> Goalchemy compiles a restricted, Go-compatible source language into native programs and SDK libraries for multiple languages. Shared SDK logic stays in Go source; target runtimes and host capabilities preserve its specified behavior.
+
+Documentation: https://goalchemy.dev/
+Repository: https://github.com/eugenioenko/goalchemy
+
+Use this file as a navigation guide. Linked repository documents are readable Markdown and track main, as does the documentation site. Root-relative links in documentation sources refer to https://goalchemy.dev/. For an installed release, run `goalchemy version` and consult the same documents at its matching Git tag. Read the linked references for current flags, defaults, supported features, dependencies, and limitations.
+
+When helping with Goalchemy:
+
+- Ordinary Go compilation does not establish compatibility with the Goalchemy subset. Check source with `goalchemy check` using the intended language gate, and inspect `goalchemy features` for the installed compiler.
+- Use documented Goalchemy `std/` packages for portable library logic and `lib/` capabilities for host operations. Familiar package names do not imply support for the entire Go standard library.
+- Select a non-main root package to produce an SDK library. Source language support and types accepted across a target's native public boundary are separate concerns.
+- Consult the usage and target references before selecting a pause model or naming mode. Read the generated README and goalchemy.manifest.json for the actual output's build instructions and compiler information.
+- Change shared source and regenerate output instead of maintaining independent edits to generated target code. Verify behavior from a native consumer when changing an SDK boundary.
+
+## Getting started
+
+- [Introduction](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/getting-started/introduction.md): Project scope and the compilation model.
+- [Installation](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/getting-started/installation.md): Compiler installation and source-module setup; check here for current toolchain requirements.
+- [Quick start](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/getting-started/quick-start.md): Check, run, and compile a first program.
+- [Usage reference](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/usage.md): Commands, configuration, generated names, pause models, package output, and library APIs.
+- [Project configuration](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/guides/project-configuration.md): Configure packages, gates, and multi-target builds.
+- [Troubleshooting](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/getting-started/troubleshooting.md): Diagnose source, dependency, and target-toolchain failures.
+
+## Language and runtime
+
+- [Language specification](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/specs/language.md): Authoritative accepted subset, evaluation rules, value semantics, and language gates.
+- [Feature matrix](https://goalchemy.dev/language/features/): Published feature support generated from the checked manifest; use the installed compiler's features command for release-specific support.
+- [Runtime API reference](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/library.md): Portable packages, host capabilities, function signatures, and behavioral contracts.
+- [Limitations](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/language/limitations.md): Source restrictions, public API limits, and target support boundaries.
+- [Diagnostics](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/specs/diagnostics.md): Diagnostic categories, source spans, and remedies.
+
+## Building SDKs
+
+- [Building an SDK](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/guides/building-an-sdk.md): Native library boundaries, packaging, ownership, and consumer verification.
+- [Portable source](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/guides/portable-source.md): Structure shared code around supported semantics and capabilities.
+- [Concurrency](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/guides/concurrency.md): Cooperative tasks, channels, cancellation, and language-gate selection.
+- [Stateful library handles](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/library-handles.md): Retained state, instances, callbacks, streams, and resource lifetimes.
+- [Host operations](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/host-operations.md): Native operation ownership, completion, and cancellation cleanup.
+- [Protobuf and Connect](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/protobuf.md): Generate subset-Go messages, JSON codecs, and service clients from protocol definitions.
+
+## Target guides
+
+- [Target overview](https://goalchemy.dev/targets/): Compare output formats and prerequisites; follow each guide's links to detailed boundary and runtime references.
+- [Go](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/targets/go.md): Go output and native library integration.
+- [TypeScript](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/targets/typescript.md): JavaScript environments, values, and package integration.
+- [Python](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/targets/python.md): Python output, dependencies, and public APIs.
+- [Java](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/targets/java.md): JVM output and library integration.
+- [C#](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/targets/csharp.md): .NET output and library integration.
+- [Rust](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/targets/rust.md): Rust packages, native dependencies, and library integration.
+- [C](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/targets/c.md): Native build requirements, memory management, and library boundaries; verify platform suitability here.
+- [Swift](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/swift-target.md): Current support status, native prerequisites, SwiftPM integration, and library APIs.
+
+## Optional
+
+- [Examples](https://github.com/eugenioenko/goalchemy/tree/main/examples): Complete source programs and multi-target configurations.
+- [Compiler architecture](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs-web/src/content/docs/internals/architecture.md): Loading, language gates, typed IR, emitters, and runtime linking.
+- [Adding a target](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/adding-language.md): Emitter, runtime, capability, and conformance requirements.
+- [Testing and hardening](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/hardening.md): Differential testing and the scope of verification evidence.
+- [Compiler CI](https://raw.githubusercontent.com/eugenioenko/goalchemy/main/docs/ci.md): Current prerequisites and focused local reproduction of CI checks.
+- [Releases](https://github.com/eugenioenko/goalchemy/releases): Release tags and changes; match these to the compiler version in use.
