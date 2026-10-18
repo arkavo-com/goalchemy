@@ -62,7 +62,7 @@ func (r *renderer) href(from, to string) string {
 		return relative(from, to)
 	}
 	route := func(file string) string {
-		s := strings.TrimSuffix(file, ".md")
+		s := strings.TrimSuffix(strings.TrimSuffix(file, ".mdx"), ".md")
 		if path.Base(s) == "index" {
 			s = path.Dir(s)
 		}
@@ -103,7 +103,11 @@ func (r *renderer) prose(text, pkg, file string) string {
 		}
 		return "https://pkg.go.dev/" + owner + "#" + link.Name
 	}}
-	return string(printer.Markdown(parser.Parse(text)))
+	value := string(printer.Markdown(parser.Parse(text)))
+	if r.site {
+		value = escapeMDX(value)
+	}
+	return value
 }
 func code(b *bytes.Buffer, lang, text string) {
 	fence := "```"
@@ -113,7 +117,7 @@ func code(b *bytes.Buffer, lang, text string) {
 	fmt.Fprintf(b, "%s%s\n%s\n%s\n\n", fence, lang, strings.TrimRight(text, "\n"), fence)
 }
 func label(text string) string {
-	return strings.NewReplacer("[", "\\[", "]", "\\]", "\n", " ", "|", "\\|").Replace(html.EscapeString(text))
+	return strings.NewReplacer("[", "\\[", "]", "\\]", "{", "&#123;", "}", "&#125;", "\n", " ", "|", "\\|").Replace(html.EscapeString(text))
 }
 func (r *renderer) references(b *bytes.Buffer, file string, refs []string) {
 	for _, id := range refs {
@@ -153,6 +157,7 @@ func (r *renderer) symbol(s *Symbol, site bool) []byte {
 	if site {
 		title, _ := json.Marshal(s.Name)
 		fmt.Fprintf(&b, "---\ntitle: %s\neditUrl: false\nsidebar:\n  hidden: true\n---\n\n", title)
+		r.imports(&b, file, false)
 	} else {
 		fmt.Fprintf(&b, "# %s\n\n", label(s.Name))
 	}
@@ -183,20 +188,25 @@ func (r *renderer) symbol(s *Symbol, site bool) []byte {
 	}
 	if len(s.Bindings) > 0 {
 		b.WriteString("## Native APIs\n\n")
-		for _, t := range r.catalog.Targets {
-			for _, binding := range s.Bindings {
-				if binding.Target == t.Name {
-					fmt.Fprintf(&b, "### %s\n\n", targetLabel(t.Name))
-					code(&b, language(t.Name), binding.Signature)
-					if binding.Invocation != "" {
-						b.WriteString("Call selector:\n\n")
-						code(&b, language(t.Name), binding.Invocation)
+		if site {
+			r.bindings(&b, s.Bindings)
+		} else {
+			for _, t := range r.catalog.Targets {
+				for _, binding := range s.Bindings {
+					if binding.Target == t.Name {
+						fmt.Fprintf(&b, "### %s\n\n", targetLabel(t.Name))
+						code(&b, language(t.Name), binding.Signature)
+						if binding.Invocation != "" {
+							b.WriteString("Call selector:\n\n")
+							code(&b, language(t.Name), binding.Invocation)
+						}
 					}
 				}
 			}
 		}
 		b.WriteString("Signatures describe compiler-generated library boundaries. Host adapters added by an SDK can expose additional APIs.\n\n")
 	}
+	r.examplesFor(&b, s.ID)
 	if len(s.References) > 0 {
 		b.WriteString("## Related types\n\n")
 		r.references(&b, file, s.References)
@@ -222,6 +232,12 @@ func (c *Catalog) Markdown() map[string][]byte { return c.pages(false) }
 func (c *Catalog) pages(site bool) map[string][]byte {
 	r := newRenderer(c)
 	r.site = site
+	if site {
+		for _, s := range c.Symbols {
+			r.files[s.ID] = strings.TrimSuffix(r.files[s.ID], ".md") + ".mdx"
+		}
+	}
+	r.rpcFiles()
 	files := map[string][]byte{}
 	var b bytes.Buffer
 	if site {
@@ -245,6 +261,12 @@ func (c *Catalog) pages(site bool) map[string][]byte {
 		b.WriteByte('\n')
 	}
 	b.WriteString("\nNative declarations are listed where a symbol is separately exposed. Source constants, variables, interfaces, aliases, or implementation methods may have no standalone native declaration. Swift is experimental.\n\n")
+	if c.RPC != nil {
+		fmt.Fprintf(&b, "## RPC services\n\n[Browse services, methods, requests, and responses](%s).\n\n", r.href("index.md", "rpc/index.md"))
+	}
+	if len(c.Examples) > 0 {
+		fmt.Fprintf(&b, "## Usage examples\n\n[Browse task and RPC examples](%s).\n\n", r.href("index.md", "examples/index.md"))
+	}
 	files["index.md"] = append([]byte{}, b.Bytes()...)
 	for _, p := range c.Packages {
 		b.Reset()
@@ -288,5 +310,7 @@ func (c *Catalog) pages(site bool) map[string][]byte {
 	for _, s := range c.Symbols {
 		files[r.files[s.ID]] = r.symbol(s, site)
 	}
+	r.rpcPages(files)
+	r.examplePages(files)
 	return files
 }

@@ -16,4 +16,19 @@ Edit the homepage, navigation, theme, and additional guides. Regenerating into t
 
 `public/api.json` is the schema-versioned catalog for custom API browsers. All references use stable source symbol IDs; native declarations come from the same emitters as library builds. Markdown pages link types, methods and packages and work independently of this template when generated with `-format markdown`.
 
-The reference describes the compiler-generated facade. Handwritten host adapters or SDK packaging layers can expose additional APIs that need separate documentation. Source comments may describe a larger Go API than any one native facade. Target availability is reported explicitly; a target that rejects this API has its reason listed in the reference index.
+Native declarations and usage examples use `src/components/LanguageTabs.astro`.
+The language selection is shared across pages through Starlight's synchronized
+tabs. Authored MDX guides can import the component with a `snippets` array of
+`{ target, code }` objects. Target keys are `go`, `typescript`, `python`, `java`,
+`csharp`, `rust`, `c`, and `swift`.
+
+Use `goalchemy docs -proto-descriptor services.binpb -content examples.json`
+to include RPC services and reviewed examples. Build descriptors with imports
+and source information. RPC methods link to request and response types; the
+`RpcFields.astro` viewer expands nested fields and enum values. Its generated
+data is in `src/data/rpc.json`. JSON payload examples are checked against their
+protobuf types; native code examples are supplied by the consuming SDK. No
+live server is contacted. Generated site pages use MDX where components are
+needed; portable Markdown remains independent of Astro.
+
+The reference describes the compiler-generated library boundary. Handwritten host adapters or SDK packaging layers can expose additional APIs that need separate documentation. Source comments may describe a larger Go API than any one native API. Target availability is reported explicitly; a target that rejects this API has its reason listed in the reference index.

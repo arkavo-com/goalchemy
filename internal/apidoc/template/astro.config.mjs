@@ -6,6 +6,7 @@ export default defineConfig({
   trailingSlash: 'always',
   integrations: [starlight({
     title: __TITLE__,
+    components: { Sidebar: './src/components/Sidebar.astro' },
     customCss: ['./src/styles/custom.css'],
     sidebar: [
       { label: 'Guides', items: [{ label: 'Introduction', link: '/' }] },

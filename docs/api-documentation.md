@@ -34,6 +34,9 @@ it does not invoke native compilers or install target toolchains.
 | `-gate sequential\|cooperative` | Compiler language gate. |
 | `-config <goalchemy.yaml>` | Use configured packages, tags, gate, and targets. |
 | `-json` | Emit source diagnostics as JSON on stderr. |
+| `-proto-descriptor <file>` | Add RPC schemas from a binary protobuf `FileDescriptorSet`. |
+| `-proto-services a.Service,b.Service` | Select fully qualified services; defaults to all descriptor services. |
+| `-content <file>` | Add reviewed usage examples and native host RPC declarations from JSON. |
 
 With `-config`, package patterns come from the configuration. Explicit `-C`,
 `-tags`, `-gate`, or `-target` flags override the corresponding setting. Output
@@ -45,13 +48,12 @@ source reference and other targets are still generated. Generation exits
 successfully in that case; consumers requiring every language should check
 `targets[].status` in the JSON catalog.
 
-For the OpenTDF SDK, both its current handle API and its older value facade can
-be documented together:
+For the OpenTDF SDK, select its current public SDK package:
 
 ```sh
 goalchemy docs -C /path/to/tdf/sdk -gate cooperative \
   -title 'OpenTDF SDK API' -format markdown -out /tmp/opentdf-reference \
-  ./src ./src/library
+  ./src
 ```
 
 ## Embed Markdown in an existing site
@@ -106,6 +108,117 @@ custom API browsers. Regeneration preserves existing scaffold files, including
 your Astro configuration and homepage, while updating generated reference
 pages. The scaffold dependencies can be maintained like any other Astro site.
 
+Native declarations and examples use language tabs. All tab groups share the
+`goalchemy-language` preference, so choosing TypeScript also selects it on other
+pages that offer TypeScript. Languages without a supplied example are omitted.
+The template provides `src/components/LanguageTabs.astro` for authored MDX guides:
+
+```mdx
+import LanguageTabs from '../../../components/LanguageTabs.astro';
+
+<LanguageTabs snippets={[
+  { target: 'go', code: 'result, err := client.Encrypt(ctx, input)' },
+  { target: 'typescript', code: 'const result = await client.encrypt(input);' },
+]} />
+```
+
+Adjust the import to the guide's location and use the consuming SDK's actual
+API. Target keys are `go`, `typescript`, `python`, `java`, `csharp`, `rust`, `c`,
+and `swift`. Portable Markdown keeps language headings and ordinary code fences.
+
+## RPC requests and responses
+
+Supply a protobuf descriptor set from your protocol build. Include imports for
+type resolution and source information for descriptions:
+
+```sh
+protoc -I proto --include_imports --include_source_info \
+  --descriptor_set_out=out/services.binpb proto/example/v1/service.proto
+
+goalchemy docs -proto-descriptor out/services.binpb \
+  -proto-services example.v1.Service -format site -out docs-web
+```
+
+Descriptor-only generation needs no Go module or native SDK build. To combine
+RPC schemas with a Goalchemy library, supply package arguments as well:
+
+```sh
+goalchemy docs -C /path/to/sdk -gate cooperative \
+  -proto-descriptor out/services.binpb -content docs/examples.json \
+  -format site -out /tmp/sdk-docs ./src
+```
+
+Descriptor and content paths are relative to `-C` or the configured source
+directory. The output path remains relative to the invoking directory.
+Missing imports, unknown selected services, and invalid examples fail generation.
+
+Each method page has request and response viewers showing JSON names, protobuf
+names and numbers, nested messages, maps, lists, enums, oneof alternatives,
+deprecation, explicit presence, and field options including validation
+extensions supplied in the descriptors. Nested fields expand without contacting
+a server. Recursive or deeply nested fields link to full type pages. Explicit
+presence does not mean a field is required by the server; consult its comments
+and validation options. Well-known protobuf types can have special JSON forms.
+
+Streaming methods are identified as streaming schemas. Their presence does not
+imply that a particular SDK transport implements streaming. The reference is
+static, with no credential entry or live RPC console.
+
+## Reviewed usage examples
+
+Pass `-content docs/examples.json` to attach practical examples to a source
+symbol, RPC method, or the standalone examples index:
+
+```json
+{
+  "examples": [{
+    "id": "list-notes",
+    "title": "List notes",
+    "for": "example.v1.Service/ListNotes",
+    "description": "List notes in an existing workspace with an authenticated client.",
+    "snippets": [
+      { "target": "go", "code": "response, err := client.ListNotes(ctx, request)" },
+      { "target": "typescript", "code": "const response = await client.listNotes(request);" }
+    ],
+    "request": { "workspace": "example-workspace" },
+    "response": { "notes": [] }
+  }]
+}
+```
+
+`for` uses `import/path#Symbol` for source APIs or `package.Service/Method` for
+RPCs. Omit it for a task example that does not belong to one declaration. IDs
+must be unique. Each example needs code or an RPC JSON body. Add snippets only
+for languages the consumer actually exposes.
+
+RPC payload examples are parsed as protobuf JSON with unknown fields rejected.
+This checks message shape, scalar values, enums, and oneof usage. It does not
+execute code, call the server, or enforce application and validation-extension
+rules. Missing examples stay missing; the generator does not invent IDs,
+policies, responses, or native client methods.
+
+Host adapter declarations can be supplied explicitly when they are generated
+outside Goalchemy's library emitters:
+
+```json
+{
+  "rpc_bindings": [{
+    "method": "example.v1.Service/ListNotes",
+    "bindings": [{
+      "target": "typescript",
+      "name": "listNotes",
+      "signature": "listNotes(request: ListNotesRequest): Promise<ListNotesResponse>"
+    }]
+  }],
+  "examples": []
+}
+```
+
+These appear as supplied native declarations, distinct from compiler-observed
+source bindings. Prefer producing them from the same service-wrapper generator
+as the SDK. Keep task examples in the SDK repository so their authentication,
+ownership, and package names can be reviewed with its code.
+
 ## JSON contract
 
 `api.json` is the common machine-readable model behind all three formats.
@@ -116,6 +229,9 @@ pages. The scaffold dependencies can be maintained like any other Astro site.
 - `symbols`: public declarations, comments, deprecation notices, source signatures,
   locations, fields, parameters, results, methods, related types, and native bindings.
 - `targets`: selected language names, availability, and failure reasons.
+- Optional `rpc`: services, methods, reachable messages, fields, enums,
+  source locations, comments, and supplied host bindings.
+- Optional `examples`: reviewed native snippets and protobuf JSON payloads.
 
 Symbol IDs use `import/path#Name` or `import/path#Type.Method`; pointer and value
 receivers share the same method identity. IDs do not depend on private emitted
@@ -140,3 +256,8 @@ source reference without a separate native declaration. Some native signatures
 use helper types provided by the generated library/runtime. Handwritten SDK host
 adapters, distribution packages, and convenience APIs need their own additional
 documentation. The generator does not infer those APIs from Go comments.
+
+RPC IDs use `package.Service/Method`; message and enum IDs use fully qualified
+protobuf names. The graph includes only types reachable from selected methods.
+RPC and example fields are optional additions to schema version 1. JSON and
+portable Markdown carry the same content as the Starlight viewer.

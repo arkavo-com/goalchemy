@@ -49,6 +49,29 @@ func (c *Catalog) Write(out, format string) error {
 			files["src/content/docs/api/"+file] = body
 		}
 		files["public/api.json"] = catalog
+		graph := struct {
+			Messages map[string]RPCMessage `json:"messages"`
+			Enums    map[string]RPCEnum    `json:"enums"`
+			Links    map[string]string     `json:"links"`
+		}{map[string]RPCMessage{}, map[string]RPCEnum{}, map[string]string{}}
+		if c.RPC != nil {
+			r := newRenderer(c)
+			r.site = true
+			r.rpcFiles()
+			for _, m := range c.RPC.Messages {
+				graph.Messages[m.ID] = m
+				graph.Links[m.ID] = strings.TrimSuffix(r.files[m.ID], ".mdx") + "/"
+			}
+			for _, e := range c.RPC.Enums {
+				graph.Enums[e.ID] = e
+				graph.Links[e.ID] = strings.TrimSuffix(r.files[e.ID], ".md") + "/"
+			}
+		}
+		graphData, err := json.MarshalIndent(graph, "", "  ")
+		if err != nil {
+			return err
+		}
+		files["src/data/rpc.json"] = append(graphData, '\n')
 		title, _ := json.Marshal(c.Title)
 		err = fs.WalkDir(template, "template", func(file string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {

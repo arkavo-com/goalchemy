@@ -1,0 +1,87 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import data from '../data/rpc.json';
+
+interface Field {
+  name: string;
+  json_name: string;
+  number: number;
+  type: string;
+  json_type: string;
+  map_key?: string;
+  repeated?: boolean;
+  presence?: boolean;
+  required?: boolean;
+  oneof?: string;
+  description?: string;
+  deprecated?: boolean;
+  options?: Record<string, unknown>;
+}
+interface Message { id: string; fields: Field[]; json_encoding?: string }
+interface EnumValue { name: string; number: number; description?: string; deprecated?: boolean }
+interface Props { type: string; ancestors?: string[] }
+
+const graph = data as {
+  messages: Record<string, Message>;
+  enums: Record<string, { values: EnumValue[] }>;
+  links: Record<string, string>;
+};
+const { type, ancestors = [] } = Astro.props;
+const message = graph.messages[type];
+const visited = [...ancestors, type];
+const href = (id: string) => `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/${graph.links[id]}`;
+---
+
+{message?.json_encoding && <p>JSON encoding: {message.json_encoding}. The fields below describe its protobuf structure.</p>}
+{message && message.fields.length === 0 && <p>No fields.</p>}
+{message && <dl class="rpc-fields">
+  {message.fields.map((field) => (
+    <div class="rpc-field">
+      <dt>
+        <code>{field.json_name}</code>
+        <span class="rpc-type">
+          {field.map_key && <>map&lt;{field.map_key}, </>}
+          {graph.links[field.type] ? <a href={href(field.type)}>{field.type}</a> : <code>{field.type}</code>}
+          {field.map_key && <>&gt;</>}{field.repeated && <>[]</>}
+        </span>
+      </dt>
+      <dd>
+        <p class="rpc-spelling">Protobuf: <code>{field.name}</code> · field {field.number}
+          {field.required ? ' · required' : field.presence ? ' · explicit presence' : ''}
+          {field.oneof && <> · oneof <code>{field.oneof}</code></>}
+          {field.deprecated && <> · <strong>deprecated</strong></>}
+        </p>
+        <p class="rpc-spelling">JSON: {field.json_type}</p>
+        {field.description && <p class="rpc-description">{field.description}</p>}
+        {field.options && <details>
+          <summary>Field options and validation rules</summary>
+          <Code code={JSON.stringify(field.options, null, 2)} lang="json" />
+        </details>}
+        {graph.messages[field.type] && <details>
+          <summary>Nested fields</summary>
+          {visited.includes(field.type) || visited.length >= 3
+            ? <p><a href={href(field.type)}>Open the full type</a> to continue browsing.</p>
+            : <Astro.self type={field.type} ancestors={visited} />}
+        </details>}
+        {graph.enums[field.type] && <details>
+          <summary>Enum values</summary>
+          <ul>{graph.enums[field.type].values.map((value) => <li>
+            <code>{value.name}</code> = {value.number}{value.deprecated && ' (deprecated)'}
+            {value.description && <p>{value.description}</p>}
+          </li>)}</ul>
+        </details>}
+      </dd>
+    </div>
+  ))}
+</dl>}
+
+<style>
+  .rpc-field { border-block-start: 1px solid var(--sl-color-gray-5); padding-block: 1rem; }
+  dt { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: baseline; font-weight: 600; }
+  dd { margin-inline-start: 0; }
+  .rpc-type, .rpc-spelling { font-size: var(--sl-text-sm); }
+  .rpc-spelling { color: var(--sl-color-gray-2); margin-block: 0.4rem; }
+  .rpc-description { white-space: pre-line; }
+  details { margin-block: 0.75rem; }
+  summary { cursor: pointer; }
+</style>

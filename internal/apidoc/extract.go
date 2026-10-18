@@ -395,7 +395,7 @@ func (c *Catalog) Check() error {
 			}
 		}
 	}
-	return nil
+	return c.checkContent()
 }
 
 // SymbolID returns a package-qualified symbol identity for native emission metadata.

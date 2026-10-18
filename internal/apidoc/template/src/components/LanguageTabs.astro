@@ -1,0 +1,22 @@
+---
+import { Code, Tabs, TabItem } from '@astrojs/starlight/components';
+
+interface Props {
+  snippets: { target: string; code: string }[];
+}
+
+const names: Record<string, string> = {
+  go: 'Go', typescript: 'TypeScript', python: 'Python', java: 'Java',
+  csharp: 'C#', rust: 'Rust', c: 'C', swift: 'Swift',
+};
+const order = Object.keys(names);
+const snippets = [...Astro.props.snippets].sort((a, b) => order.indexOf(a.target) - order.indexOf(b.target));
+---
+
+<Tabs syncKey="goalchemy-language">
+  {snippets.map(({ target, code }) => (
+    <TabItem label={names[target] ?? target}>
+      <Code code={code} lang={target} />
+    </TabItem>
+  ))}
+</Tabs>

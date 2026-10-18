@@ -1,6 +1,8 @@
 // Package apidoc extracts source documentation and native API declarations.
 package apidoc
 
+import "encoding/json"
+
 // Catalog is the versioned, deterministic documentation interchange format.
 type Catalog struct {
 	SchemaVersion int       `json:"schema_version"`
@@ -9,6 +11,37 @@ type Catalog struct {
 	Packages      []Package `json:"packages"`
 	Symbols       []*Symbol `json:"symbols"`
 	Targets       []Target  `json:"targets"`
+	RPC           *RPC      `json:"rpc,omitempty"`
+	Examples      []Example `json:"examples,omitempty"`
+}
+
+// Example supplies reviewed usage code rather than inferred application behavior.
+type Example struct {
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	For         string          `json:"for,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Snippets    []Snippet       `json:"snippets,omitempty"`
+	Request     json.RawMessage `json:"request,omitempty"`
+	Response    json.RawMessage `json:"response,omitempty"`
+}
+
+// Snippet is a native usage example for one language.
+type Snippet struct {
+	Target string `json:"target"`
+	Code   string `json:"code"`
+}
+
+// Content augments extracted APIs with examples and explicit host RPC declarations.
+type Content struct {
+	Examples []Example    `json:"examples"`
+	Bindings []RPCBinding `json:"rpc_bindings,omitempty"`
+}
+
+// RPCBinding identifies declarations supplied by a native host adapter.
+type RPCBinding struct {
+	Method   string    `json:"method"`
+	Bindings []Binding `json:"bindings"`
 }
 
 // Package identifies a documented source package.
