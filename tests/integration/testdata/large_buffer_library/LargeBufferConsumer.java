@@ -6,6 +6,9 @@ import java.util.concurrent.TimeUnit;
 public final class LargeBufferConsumer {
     static void check(boolean ok) { if (!ok) throw new AssertionError("large buffer boundary"); }
     public static void main(String[] args) throws Exception {
+        io.goalchemy.runtime.Library.length(100 << 20);
+        try { io.goalchemy.runtime.Library.length(-1); throw new AssertionError("negative length accepted"); }
+        catch (io.goalchemy.runtime.Library.Failure error) { check(error.kind.equals("invalid_argument")); }
         byte[] input = new byte[100 << 20];
         input[0] = 7; input[input.length - 1] = 19;
         byte[] output = Generated.Echo(input, null).completion().toCompletableFuture().get(30, TimeUnit.SECONDS);

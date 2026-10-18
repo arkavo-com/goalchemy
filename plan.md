@@ -460,3 +460,9 @@ all five changed targets, including both naming modes where supported and
 actual Chromium imports. Java/C# emitter checks, spec validation and all 1,121
 generated-spec freshness checks passed, as did the installed compiler test.
 Hosted CI on the release PR is the remaining merge and release gate.
+
+An SDK build during CI exposed its C# adapter's direct use of the public
+`Library.length` helper. Preserve the Java/C# helper for compatibility, validating
+only nonnegative native lengths. Large-buffer consumers now exercise this API
+at 100 MiB and reject negative lengths in both pause models. Recheck the real
+C# SDK build before publishing the corrected PR head.

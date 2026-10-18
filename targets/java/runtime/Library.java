@@ -355,6 +355,7 @@ public final class Library {
         public void leave(Object value){if(value!=null)path.remove(value);}
     }
     public static Failure invalid(){return new Failure("invalid_argument");}
+    public static void length(int n){if(n<0)throw invalid();}
     public static byte[] bytes(byte[] v){if(v==null)return null;return v.clone();}
     public static String binaryString(String s){if(s==null)return "";for(int i=0;i<s.length();i++)if(s.charAt(i)>255)throw invalid();return s;}
     public static long integer(long value,int bits,boolean signed) {
