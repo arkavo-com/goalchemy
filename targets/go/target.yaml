@@ -144,6 +144,17 @@ functions:
   - {id: lib.log.emit, contract_version: 1.0.0, symbol: rt.LibLogEmit, implementation: runtime/lib_log_emit.go}
   - {id: lib.os.read_file, contract_version: 1.0.0, symbol: rt.LibOsReadFile, implementation: runtime/lib_os_read_file.go}
   - {id: lib.os.write_file, contract_version: 1.0.0, symbol: rt.LibOsWriteFile, implementation: runtime/lib_os_write_file.go}
+  - {id: lib.os.open, contract_version: 1.0.0, symbol: rt.LibOsOpen, implementation: runtime/lib_os_open.go}
+  - {id: lib.os.read, contract_version: 1.0.0, symbol: rt.LibOsRead, implementation: runtime/lib_os_read.go}
+  - {id: lib.os.read_at, contract_version: 1.0.0, symbol: rt.LibOsReadAt, implementation: runtime/lib_os_read_at.go}
+  - {id: lib.os.write, contract_version: 1.0.0, symbol: rt.LibOsWrite, implementation: runtime/lib_os_write.go}
+  - {id: lib.os.seek, contract_version: 1.0.0, symbol: rt.LibOsSeek, implementation: runtime/lib_os_seek.go}
+  - {id: lib.os.sync, contract_version: 1.0.0, symbol: rt.LibOsSync, implementation: runtime/lib_os_sync.go}
+  - {id: lib.os.close, contract_version: 1.0.0, symbol: rt.LibOsClose, implementation: runtime/lib_os_close.go}
+  - {id: lib.os.stat, contract_version: 1.0.0, symbol: rt.LibOsStat, implementation: runtime/lib_os_stat.go}
+  - {id: lib.os.create_temp, contract_version: 1.0.0, symbol: rt.LibOsCreateTemp, implementation: runtime/lib_os_create_temp.go}
+  - {id: lib.os.remove, contract_version: 1.0.0, symbol: rt.LibOsRemove, implementation: runtime/lib_os_remove.go}
+  - {id: lib.os.rename, contract_version: 1.0.0, symbol: rt.LibOsRename, implementation: runtime/lib_os_rename.go}
   - {id: lib.http.do, contract_version: 1.1.0, symbol: rt.LibHTTPDo, implementation: runtime/lib_http_do.go, requires: [std.context.err], harness: "await: rt.LibHTTPDo(t, {0}, {1}, {2}, {3}, {4}, {5}, {6})"}
   - {id: lib.http.do_with, contract_version: 1.1.0, symbol: rt.LibHTTPDoWith, implementation: runtime/lib_http_do_with.go, requires: [lib.http.do], harness: "await: rt.LibHTTPDoWith(t, {0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})"}
   - {id: lib.http.open, contract_version: 1.0.0, symbol: rt.LibHTTPOpen, implementation: runtime/lib_http_open.go, requires: [lib.http.exchange_close, std.context.err]}

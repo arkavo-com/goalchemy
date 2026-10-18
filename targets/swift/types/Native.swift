@@ -336,6 +336,17 @@ enum GNative {
       return []
     case "lib.os.read_file": return GFiles.readFile(args[0])
     case "lib.os.write_file": return try GFiles.writeFile(args[0], args[1], args[2])
+    case "lib.os.open": return GFiles.openHandle(args[0], args[1], args[2])
+    case "lib.os.read": return GFiles.readHandle(args[0], args[1])
+    case "lib.os.read_at": return GFiles.readAtHandle(args[0], args[1], args[2])
+    case "lib.os.write": return try GFiles.writeHandle(args[0], args[1])
+    case "lib.os.seek": return GFiles.seekHandle(args[0], args[1], args[2])
+    case "lib.os.sync": return GFiles.syncHandle(args[0])
+    case "lib.os.close": return GFiles.closeHandle(args[0])
+    case "lib.os.stat": return GFiles.statPath(args[0])
+    case "lib.os.create_temp": return GFiles.createTemp(args[0], args[1], args[2])
+    case "lib.os.remove": return GFiles.removePath(args[0])
+    case "lib.os.rename": return GFiles.renamePath(args[0], args[1])
     default:
       if contract.hasPrefix("lib.encoding.") { return try encoding(contract, args) }
       if contract == "lib.checksum.crc32_ieee" { return [try GCrypto.crc32(args[0])] }

@@ -146,6 +146,17 @@ functions:
   - {id: lib.log.emit, contract_version: 1.0.0, symbol: LibLogEmit.libLogEmit, implementation: runtime/LibLogEmit.java}
   - {id: lib.os.read_file, contract_version: 1.0.0, symbol: LibOsReadFile.libOsReadFile, implementation: runtime/LibOsReadFile.java}
   - {id: lib.os.write_file, contract_version: 1.0.0, symbol: LibOsWriteFile.libOsWriteFile, implementation: runtime/LibOsWriteFile.java, requires: [lib.os.read_file]}
+  - {id: lib.os.open, contract_version: 1.0.0, symbol: LibOsOpen.libOsOpen, implementation: runtime/LibOsOpen.java, requires: [lib.os.read_file]}
+  - {id: lib.os.read, contract_version: 1.0.0, symbol: LibOsRead.libOsRead, implementation: runtime/LibOsRead.java, requires: [lib.os.open]}
+  - {id: lib.os.read_at, contract_version: 1.0.0, symbol: LibOsReadAt.libOsReadAt, implementation: runtime/LibOsReadAt.java, requires: [lib.os.read]}
+  - {id: lib.os.write, contract_version: 1.0.0, symbol: LibOsWrite.libOsWrite, implementation: runtime/LibOsWrite.java, requires: [lib.os.open]}
+  - {id: lib.os.seek, contract_version: 1.0.0, symbol: LibOsSeek.libOsSeek, implementation: runtime/LibOsSeek.java, requires: [lib.os.open]}
+  - {id: lib.os.sync, contract_version: 1.0.0, symbol: LibOsSync.libOsSync, implementation: runtime/LibOsSync.java, requires: [lib.os.open]}
+  - {id: lib.os.close, contract_version: 1.0.0, symbol: LibOsClose.libOsClose, implementation: runtime/LibOsClose.java, requires: [lib.os.open]}
+  - {id: lib.os.stat, contract_version: 1.0.0, symbol: LibOsStat.libOsStat, implementation: runtime/LibOsStat.java, requires: [lib.os.open]}
+  - {id: lib.os.create_temp, contract_version: 1.0.0, symbol: LibOsCreateTemp.libOsCreateTemp, implementation: runtime/LibOsCreateTemp.java, requires: [lib.os.open]}
+  - {id: lib.os.remove, contract_version: 1.0.0, symbol: LibOsRemove.libOsRemove, implementation: runtime/LibOsRemove.java, requires: [lib.os.open]}
+  - {id: lib.os.rename, contract_version: 1.0.0, symbol: LibOsRename.libOsRename, implementation: runtime/LibOsRename.java, requires: [lib.os.open]}
   - {id: lib.callback.request, contract_version: 1.0.0, symbol: LibCallbackRequest.libCallbackRequest, implementation: runtime/LibCallbackRequest.java, requires: [std.context.err], harness: "host: LibCallbackRequest.libCallbackRequest(t,{0},{1},{2})"}
   - {id: lib.http.do, contract_version: 1.1.0, symbol: LibHttpDo.libHttpDo, implementation: runtime/LibHttpDo.java, requires: [std.context.err], harness: "host: LibHttpDo.libHttpDo(t,{0},{1},{2},{3},{4},{5},{6})"}
   - {id: lib.http.do_with, contract_version: 1.1.0, symbol: LibHttpDoWith.libHttpDoWith, implementation: runtime/LibHttpDoWith.java, requires: [lib.http.do], harness: "host: LibHttpDoWith.libHttpDoWith(t,{0},{1},{2},{3},{4},{5},{6},{7})"}

@@ -1,0 +1,56 @@
+{
+  "id": "lib.os.seek",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "File.Seek: moves a file handle's offset and returns the new offset.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Seek",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "file",
+        "type": "int64"
+      },
+      {
+        "name": "offset",
+        "type": "int64"
+      },
+      {
+        "name": "whence",
+        "type": "int"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "position",
+        "type": "int64"
+      },
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "Seek(0, 1) reports the current offset.",
+    "nil": "Failures return position 0.",
+    "bounds": "whence is 0 (start), 1 (current) or 2 (end); other values, or a resulting offset below zero, report Invalid. Offsets past the end are allowed, as in Go.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "The handle's offset changes.",
+    "aliasing": "Not applicable.",
+    "allocation": "No semantic allocation.",
+    "errors": "Unknown handles Invalid; other host failures IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "A file handle is an int64 issued by lib.os.open or lib.os.create_temp and released by lib.os.close; an unknown or released handle reports Invalid (8). Handles are process-wide and never reused. Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

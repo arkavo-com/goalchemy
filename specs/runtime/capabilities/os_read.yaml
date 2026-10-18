@@ -1,0 +1,56 @@
+{
+  "id": "lib.os.read",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "File.Read: reads up to max bytes from a file handle's offset and reports the end of the file.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Read",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "file",
+        "type": "int64"
+      },
+      {
+        "name": "max",
+        "type": "int"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "data",
+        "type": "[]byte"
+      },
+      {
+        "name": "eof",
+        "type": "bool"
+      },
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "At the end of the file data is empty, non-nil, and eof is true.",
+    "nil": "Failures return a nil slice and eof false.",
+    "bounds": "max is 1..1048576 (MaxChunk); other values report Invalid. A read may return fewer bytes than max before the end.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "The file offset advances by the bytes returned.",
+    "aliasing": "The result is independently owned.",
+    "allocation": "One host buffer of at most max bytes per call.",
+    "errors": "Reading a directory reports IsDir; a handle opened write-only reports Permission or IO as the host reports it; unknown handles Invalid; other host failures IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "A file handle is an int64 issued by lib.os.open or lib.os.create_temp and released by lib.os.close; an unknown or released handle reports Invalid (8). Handles are process-wide and never reused. Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

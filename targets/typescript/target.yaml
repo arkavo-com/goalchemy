@@ -110,6 +110,17 @@ functions:
   - {id: lib.log.emit, contract_version: 1.0.0, symbol: rt.libLogEmit, implementation: runtime/lib_log_emit.ts}
   - {id: lib.os.read_file, contract_version: 1.0.0, symbol: rt.libOsReadFile, implementation: runtime/lib_os_read_file.ts}
   - {id: lib.os.write_file, contract_version: 1.0.0, symbol: rt.libOsWriteFile, implementation: runtime/lib_os_write_file.ts}
+  - {id: lib.os.open, contract_version: 1.0.0, symbol: rt.libOsOpen, implementation: runtime/lib_os_open.ts}
+  - {id: lib.os.read, contract_version: 1.0.0, symbol: rt.libOsRead, implementation: runtime/lib_os_read.ts}
+  - {id: lib.os.read_at, contract_version: 1.0.0, symbol: rt.libOsReadAt, implementation: runtime/lib_os_read_at.ts}
+  - {id: lib.os.write, contract_version: 1.0.0, symbol: rt.libOsWrite, implementation: runtime/lib_os_write.ts}
+  - {id: lib.os.seek, contract_version: 1.0.0, symbol: rt.libOsSeek, implementation: runtime/lib_os_seek.ts}
+  - {id: lib.os.sync, contract_version: 1.0.0, symbol: rt.libOsSync, implementation: runtime/lib_os_sync.ts}
+  - {id: lib.os.close, contract_version: 1.0.0, symbol: rt.libOsClose, implementation: runtime/lib_os_close.ts}
+  - {id: lib.os.stat, contract_version: 1.0.0, symbol: rt.libOsStat, implementation: runtime/lib_os_stat.ts}
+  - {id: lib.os.create_temp, contract_version: 1.0.0, symbol: rt.libOsCreateTemp, implementation: runtime/lib_os_create_temp.ts}
+  - {id: lib.os.remove, contract_version: 1.0.0, symbol: rt.libOsRemove, implementation: runtime/lib_os_remove.ts}
+  - {id: lib.os.rename, contract_version: 1.0.0, symbol: rt.libOsRename, implementation: runtime/lib_os_rename.ts}
   - {id: lib.crypto.aes256_gcm_decrypt, contract_version: 1.0.0, symbol: rt.libCryptoAes256GcmDecrypt, implementation: runtime/lib_crypto_aes256_gcm_decrypt.ts, requires: [lib.crypto.close], harness: "host: rt.libCryptoAes256GcmDecrypt(t,{0},{1},{2},{3})"}
   - {id: lib.crypto.aes256_gcm_encrypt, contract_version: 1.0.0, symbol: rt.libCryptoAes256GcmEncrypt, implementation: runtime/lib_crypto_aes256_gcm_encrypt.ts, requires: [lib.crypto.close], harness: "host: rt.libCryptoAes256GcmEncrypt(t,{0},{1},{2},{3})"}
   - {id: lib.crypto.close, contract_version: 1.0.0, symbol: rt.libCryptoClose, implementation: runtime/lib_crypto_close.ts, requires: [core.task.spawn], harness: "host: rt.libCryptoClose(t,{0})"}

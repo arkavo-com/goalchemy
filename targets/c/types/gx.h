@@ -17,6 +17,7 @@
 #define GC_THREADS
 #endif
 #include <pthread.h>
+#include <sys/types.h>
 #include <gc.h>
 #include <time.h>
 #include <setjmp.h>
@@ -500,6 +501,21 @@ gx_V gx_lib_os_read_file(gx_V name);
 gx_V gx_lib_os_write_file(gx_V name, gx_V data, gx_V perm);
 int64_t gx_os_status(int e);
 char *gx_os_path(gx_V name, int64_t *status);
+gx_V gx_lib_os_open(gx_V name, gx_V flag, gx_V perm);
+gx_V gx_lib_os_read(gx_V file, gx_V max);
+gx_V gx_lib_os_read_at(gx_V file, gx_V offset, gx_V max);
+gx_V gx_lib_os_write(gx_V file, gx_V data);
+gx_V gx_lib_os_seek(gx_V file, gx_V offset, gx_V whence);
+gx_V gx_lib_os_sync(gx_V file);
+gx_V gx_lib_os_close(gx_V file);
+gx_V gx_lib_os_stat(gx_V name);
+gx_V gx_lib_os_create_temp(gx_V dir, gx_V prefix, gx_V suffix);
+gx_V gx_lib_os_remove(gx_V name);
+gx_V gx_lib_os_rename(gx_V oldpath, gx_V newpath);
+int64_t gx_os_register(int fd);
+int gx_os_fd(gx_V handle);
+int gx_os_forget(gx_V handle);
+gx_V gx_os_chunk(ssize_t r, uint8_t *data, int64_t status);
 bool gx_log_enabled(int64_t level);
 void gx_log_emit(int64_t level, int64_t unix_nano, gx_V message, gx_V attrs, gx_V text);
 void gx_lib_http_do(gx_Task *,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V,gx_V);

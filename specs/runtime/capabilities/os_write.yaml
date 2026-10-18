@@ -1,0 +1,52 @@
+{
+  "id": "lib.os.write",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "File.Write: writes data at a file handle's offset, or at the end of a file opened with APPEND.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Write",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "file",
+        "type": "int64"
+      },
+      {
+        "name": "data",
+        "type": "[]byte"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "written",
+        "type": "int"
+      },
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "Empty data writes nothing and reports OK.",
+    "nil": "A nil slice is empty.",
+    "bounds": "data is at most 1048576 bytes (MaxChunk); more reports Invalid.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "The file grows or is overwritten from the offset, which advances by the bytes written.",
+    "aliasing": "data is not retained.",
+    "allocation": "No semantic allocation.",
+    "errors": "On failure written is the count accepted before it. A handle opened read-only reports Permission or IO as the host reports it; unknown handles Invalid; a full device or quota IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "A file handle is an int64 issued by lib.os.open or lib.os.create_temp and released by lib.os.close; an unknown or released handle reports Invalid (8). Handles are process-wide and never reused. Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

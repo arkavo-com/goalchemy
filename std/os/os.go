@@ -73,11 +73,15 @@ func (e sysError) Is(target error) bool {
 	return false
 }
 
-func pathError(op, name string, status int) error {
+func sysErr(status int) error {
 	if status < os.NotExist || status > os.IO {
 		status = os.IO
 	}
-	return &PathError{Op: op, Path: name, Err: sysError(status)}
+	return sysError(status)
+}
+
+func pathError(op, name string, status int) error {
+	return &PathError{Op: op, Path: name, Err: sysErr(status)}
 }
 
 // ReadFile reads the named file and returns its contents. A directory fails

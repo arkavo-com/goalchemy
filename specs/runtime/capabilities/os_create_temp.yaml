@@ -1,0 +1,60 @@
+{
+  "id": "lib.os.create_temp",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "os.CreateTemp: creates a new uniquely named file in a directory, opened for reading and writing.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.CreateTemp",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "dir",
+        "type": "string"
+      },
+      {
+        "name": "prefix",
+        "type": "string"
+      },
+      {
+        "name": "suffix",
+        "type": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "file",
+        "type": "int64"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "An empty dir selects the host's temporary directory (TMPDIR or /tmp on POSIX hosts). Empty prefix and suffix leave only the random part.",
+    "nil": "Failures return handle 0 and the last name tried, or an empty name when none was.",
+    "bounds": "The random part is one to sixteen characters from [0-9a-z]. A prefix or suffix containing a path separator, or a NUL byte in any argument, reports Invalid. The host retries a name that already exists, as Go does.",
+    "conversions": "Name conversion follows lib.os.read_file. The returned name is dir joined to the base name with the host separator, exactly as the file was created, so later lib.os.rename and lib.os.remove calls can use it.",
+    "overflow": "Not applicable.",
+    "mutations": "A new file with permission 0600 (before the umask) is created with exclusive creation, so no existing file is reused.",
+    "aliasing": "The returned handle is independently owned.",
+    "allocation": "One host descriptor or stream until lib.os.close.",
+    "errors": "A missing dir NotExist; access denial Permission; a dir that is not a directory NotDir; hosts without a file system Unsupported; other host failures IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler. Names are unpredictable enough for a private temporary directory; callers wanting a secret name use their own randomness."
+  },
+  "notes": "A file handle is an int64 issued by lib.os.open or lib.os.create_temp and released by lib.os.close; an unknown or released handle reports Invalid (8). Handles are process-wide and never reused. Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}
