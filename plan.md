@@ -447,7 +447,7 @@ Keep type, fixed-array shape, integer-range and structural traversal validation,
 owned snapshots and operation-specific capability contracts.
 
 Acceptance: importing consumers round-trip 100 MiB buffers on the four affected
-managed targets, 129 MiB through C, and copy a C value tree containing 270 MiB
+managed targets, 257 MiB through C, and copy a C value tree containing 270 MiB
 of byte leaves. Verify large binary strings and input ownership, retain malformed
 value rejection, and run existing importing-library checks on affected targets.
 Publish through a reviewed PR with green CI and a signed v0.7.4 release, then
@@ -466,3 +466,10 @@ An SDK build during CI exposed its C# adapter's direct use of the public
 only nonnegative native lengths. Large-buffer consumers now exercise this API
 at 100 MiB and reject negative lengths in both pause models. Recheck the real
 C# SDK build before publishing the corrected PR head.
+
+The final C audit also removed the detached-output allocator's 256 MiB budget.
+A 257 MiB round trip reproduced the failure before this correction and passed
+after it, alongside the 270 MiB aggregate copy and existing C importing suites.
+C emitter tests and all generated-spec freshness checks passed. The four
+managed-target benchmark artifacts remain unchanged; released output for those
+targets will be compared with the frozen measured artifacts before adoption.

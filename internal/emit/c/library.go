@@ -54,9 +54,9 @@ static gx_V gxc_context;
 static void gxc_invalid(void) { gxc_failure->kind=5; gx_host_fault("invalid native library value"); }
 typedef struct gxc_allocation {void *pointer;struct gxc_allocation *next;} gxc_allocation;
 static gxc_allocation *gxc_allocations;
-static size_t gxc_output_bytes,gxc_output_nodes;static unsigned gxc_output_depth;
+static size_t gxc_output_nodes;static unsigned gxc_output_depth;
 static void gxc_allocation_release(bool failed) {while(gxc_allocations){gxc_allocation *node=gxc_allocations;gxc_allocations=node->next;if(failed)free(node->pointer);free(node);}}
-static void *gxc_alloc(size_t n) { if(n>256u*1024u*1024u-gxc_output_bytes)gx_host_fault("native result byte budget");gxc_output_bytes+=n; void *p=calloc(n?n:1,1); if(!p) gx_host_fault("native library allocation");gxc_allocation *node=malloc(sizeof(*node));if(!node){free(p);gx_host_fault("native library allocation tracking");}node->pointer=p;node->next=gxc_allocations;gxc_allocations=node;return p; }
+static void *gxc_alloc(size_t n) { void *p=calloc(n?n:1,1); if(!p) gx_host_fault("native library allocation");gxc_allocation *node=malloc(sizeof(*node));if(!node){free(p);gx_host_fault("native library allocation tracking");}node->pointer=p;node->next=gxc_allocations;gxc_allocations=node;return p; }
 static gxc_value gxc_bytes_out(const void *p,size_t n) {
  gxc_value v={.kind=GXC_BYTES,.length=n}; v.bytes=gxc_alloc(n); if(n) memcpy(v.bytes,p,n); return v;
 }
@@ -437,7 +437,7 @@ static void gxc_poll(void) {
 static int gxc_run(int which,const gxc_value *args,size_t count,const gxc_options *opts,gxc_value *result,gxc_error *error){
  const gxc_options *user=opts;if(!gxc_streams(args,count,&opts)){error->kind=3;return 3;}
  gxc_args=args;gxc_opts=opts;gxc_active_options=opts;gxc_result=result;gxc_failure=error;gxc_export=which;
- gxc_output_bytes=0;gxc_output_nodes=0;gxc_output_depth=0;gxc_keep=false;gxc_left=0;
+ gxc_output_nodes=0;gxc_output_depth=0;gxc_keep=false;gxc_left=0;
  uint8_t *report=NULL;size_t n=0;
  int rc=gx_run_library_host(gxc_init_source,gxc_entry,gxc_finish,gxc_poll,&report,&n);
  gxc_allocation_release(rc!=0);

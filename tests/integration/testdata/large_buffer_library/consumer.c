@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 int main(void) {
-    size_t n = 129u << 20;
+    size_t n = 257u << 20;
     gxc_value input = {.kind=GXC_BYTES, .length=n, .bytes=calloc(n,1)}, output = {0};
     gxc_error error = {0};
     assert(input.bytes);
