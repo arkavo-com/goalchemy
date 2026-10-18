@@ -315,6 +315,11 @@ func (e *extractor) add(obj types.Object) {
 		s.Results = e.tuple(sig.Results())
 		if recv := sig.Recv(); recv != nil {
 			s.Kind = "method"
+			name := recv.Name()
+			if name == "" {
+				name = "receiver"
+			}
+			s.Signature = "func (" + name + " " + types.TypeString(recv.Type(), qualify) + ") " + obj.Name() + strings.TrimPrefix(types.TypeString(sig, qualify), "func")
 			if n := named(recv.Type()); n != nil {
 				s.Parent = objectID(n.Obj())
 				e.queue = append(e.queue, n.Obj())

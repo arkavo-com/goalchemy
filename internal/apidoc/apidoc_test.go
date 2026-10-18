@@ -49,6 +49,9 @@ func TestCatalogAndNativeBoundaries(t *testing.T) {
 	if next.Parent != find(c, "Client").ID || next.Kind != "method" {
 		t.Fatal("method identity lost")
 	}
+	if !strings.HasPrefix(next.Signature, "func (c *Client) Next(") {
+		t.Fatalf("invalid Go receiver declaration: %s", next.Signature)
+	}
 	if method := find(c, "Reader.Read"); method == nil || method.Parent != find(c, "Reader").ID || !strings.Contains(method.Description, "accepts an Item") {
 		t.Fatal("interface method identity or documentation lost")
 	}
