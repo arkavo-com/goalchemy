@@ -125,9 +125,19 @@ func (c *Catalog) checkContent() error {
 		primitives := " double float int64 uint64 int32 fixed64 fixed32 bool string bytes uint32 sfixed32 sfixed64 sint32 sint64 "
 		for _, m := range c.RPC.Messages {
 			seenNames, seenNumbers := map[string]bool{}, map[int32]bool{}
+			oneofs := map[string]bool{}
+			for _, oneof := range m.Oneofs {
+				if oneof.Name == "" || oneofs[oneof.Name] {
+					return fmt.Errorf("%s has invalid oneof %q", m.ID, oneof.Name)
+				}
+				oneofs[oneof.Name] = true
+			}
 			for _, f := range m.Fields {
 				if f.Name == "" || f.JSONName == "" || f.JSONType == "" || f.Number <= 0 || seenNames[f.Name] || seenNumbers[f.Number] || (!types[f.Type] && !strings.Contains(primitives, " "+f.Type+" ")) {
 					return fmt.Errorf("%s has invalid RPC field %q", m.ID, f.Name)
+				}
+				if f.Oneof != "" && !oneofs[f.Oneof] {
+					return fmt.Errorf("%s.%s references missing oneof %s", m.ID, f.Name, f.Oneof)
 				}
 				seenNames[f.Name], seenNumbers[f.Number] = true, true
 			}

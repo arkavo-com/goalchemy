@@ -155,7 +155,8 @@ Missing imports, unknown selected services, and invalid examples fail generation
 Each method page has request and response viewers showing JSON names, protobuf
 names and numbers, nested messages, maps, lists, enums, oneof alternatives,
 deprecation, explicit presence, and field options including validation
-extensions supplied in the descriptors. Nested fields expand without contacting
+extensions supplied in the descriptors. Message and oneof options also retain
+validation rules such as mutually exclusive or required identifiers. Nested fields expand without contacting
 a server. Recursive or deeply nested fields link to full type pages. Explicit
 presence does not mean a field is required by the server; consult its comments
 and validation options. Well-known protobuf types can have special JSON forms.

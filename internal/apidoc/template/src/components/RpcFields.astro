@@ -17,7 +17,13 @@ interface Field {
   deprecated?: boolean;
   options?: Record<string, unknown>;
 }
-interface Message { id: string; fields: Field[]; json_encoding?: string }
+interface Message {
+  id: string;
+  fields: Field[];
+  json_encoding?: string;
+  options?: Record<string, unknown>;
+  oneofs?: { name: string; description?: string; options?: Record<string, unknown> }[];
+}
 interface EnumValue { name: string; number: number; description?: string; deprecated?: boolean }
 interface Props { type: string; ancestors?: string[] }
 
@@ -33,6 +39,18 @@ const href = (id: string) => `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api
 ---
 
 {message?.json_encoding && <p>JSON encoding: {message.json_encoding}. The fields below describe its protobuf structure.</p>}
+{message?.options && <details>
+  <summary>Message options and validation rules</summary>
+  <Code code={JSON.stringify(message.options, null, 2)} lang="json" />
+</details>}
+{message?.oneofs?.map((oneof) => <div>
+  <p>Oneof <code>{oneof.name}</code>: choose at most one member.</p>
+  {oneof.description && <p class="rpc-description">{oneof.description}</p>}
+  {oneof.options && <details>
+    <summary>Oneof options and validation rules</summary>
+    <Code code={JSON.stringify(oneof.options, null, 2)} lang="json" />
+  </details>}
+</div>)}
 {message && message.fields.length === 0 && <p>No fields.</p>}
 {message && <dl class="rpc-fields">
   {message.fields.map((field) => (

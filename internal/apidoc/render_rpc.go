@@ -61,6 +61,17 @@ func (r *renderer) rpcFields(b *bytes.Buffer, file, id string) {
 		if m.JSONEncoding != "" {
 			fmt.Fprintf(b, "JSON encoding: %s. Fields below describe its protobuf structure.\n\n", m.JSONEncoding)
 		}
+		if len(m.Options) > 0 {
+			b.WriteString("Message options and validation rules:\n\n")
+			code(b, "json", string(m.Options))
+		}
+		for _, oneof := range m.Oneofs {
+			fmt.Fprintf(b, "Oneof `%s`: choose at most one member.\n\n", oneof.Name)
+			r.protoProse(b, oneof.Description)
+			if len(oneof.Options) > 0 {
+				code(b, "json", string(oneof.Options))
+			}
+		}
 		if len(m.Fields) == 0 {
 			b.WriteString("No fields.\n\n")
 			return

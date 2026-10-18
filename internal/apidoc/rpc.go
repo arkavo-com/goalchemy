@@ -46,12 +46,20 @@ type RPCMethod struct {
 }
 
 type RPCMessage struct {
-	ID           string     `json:"id"`
-	Description  string     `json:"description,omitempty"`
-	Deprecated   bool       `json:"deprecated,omitempty"`
-	Location     Location   `json:"location"`
-	Fields       []RPCField `json:"fields"`
-	JSONEncoding string     `json:"json_encoding,omitempty"`
+	ID           string          `json:"id"`
+	Description  string          `json:"description,omitempty"`
+	Deprecated   bool            `json:"deprecated,omitempty"`
+	Location     Location        `json:"location"`
+	Fields       []RPCField      `json:"fields"`
+	JSONEncoding string          `json:"json_encoding,omitempty"`
+	Options      json.RawMessage `json:"options,omitempty"`
+	Oneofs       []RPCOneof      `json:"oneofs,omitempty"`
+}
+
+type RPCOneof struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Options     json.RawMessage `json:"options,omitempty"`
 }
 
 type RPCField struct {
@@ -178,6 +186,32 @@ func (c *Catalog) AddDescriptors(data []byte, selected []string) error {
 	}
 	seen := map[string]bool{}
 	var optionsErr error
+	options := func(d protoreflect.Descriptor) json.RawMessage {
+		data, err := (protojson.MarshalOptions{Resolver: resolver}).Marshal(d.Options())
+		if err != nil {
+			if optionsErr == nil {
+				optionsErr = fmt.Errorf("protobuf options for %s: %w", d.FullName(), err)
+			}
+			return nil
+		}
+		if string(data) == "{}" {
+			return nil
+		}
+		var value any
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		if err := decoder.Decode(&value); err != nil {
+			if optionsErr == nil {
+				optionsErr = err
+			}
+			return nil
+		}
+		canonical, err := json.Marshal(value)
+		if err != nil && optionsErr == nil {
+			optionsErr = err
+		}
+		return canonical
+	}
 	var visitEnum func(protoreflect.EnumDescriptor)
 	visitEnum = func(d protoreflect.EnumDescriptor) {
 		id := string(d.FullName())
@@ -211,7 +245,13 @@ func (c *Catalog) AddDescriptors(data []byte, selected []string) error {
 			return
 		}
 		seen[id] = true
-		m := RPCMessage{ID: id, Description: protoComment(d), Deprecated: protoDeprecated(d), Location: protoLocation(d), Fields: []RPCField{}, JSONEncoding: messageJSONType(id)}
+		m := RPCMessage{ID: id, Description: protoComment(d), Deprecated: protoDeprecated(d), Location: protoLocation(d), Fields: []RPCField{}, JSONEncoding: messageJSONType(id), Options: options(d)}
+		for i := 0; i < d.Oneofs().Len(); i++ {
+			oneof := d.Oneofs().Get(i)
+			if !oneof.IsSynthetic() {
+				m.Oneofs = append(m.Oneofs, RPCOneof{Name: string(oneof.Name()), Description: protoComment(oneof), Options: options(oneof)})
+			}
+		}
 		for i := 0; i < d.Fields().Len(); i++ {
 			f := d.Fields().Get(i)
 			field := RPCField{Name: string(f.Name()), JSONName: f.JSONName(), Number: int32(f.Number()), JSONType: fieldJSONType(f), Presence: f.HasPresence(), Required: f.Cardinality() == protoreflect.Required, Repeated: f.IsList(), Description: protoComment(f), Deprecated: protoDeprecated(f)}
@@ -223,26 +263,7 @@ func (c *Catalog) AddDescriptors(data []byte, selected []string) error {
 			if oneof := f.ContainingOneof(); oneof != nil && !oneof.IsSynthetic() {
 				field.Oneof = string(oneof.Name())
 			}
-			options, err := (protojson.MarshalOptions{Resolver: resolver}).Marshal(f.Options())
-			if err != nil && optionsErr == nil {
-				optionsErr = fmt.Errorf("protobuf options for %s: %w", f.FullName(), err)
-			}
-			if err == nil && string(options) != "{}" {
-				var value any
-				decoder := json.NewDecoder(bytes.NewReader(options))
-				decoder.UseNumber()
-				if err := decoder.Decode(&value); err != nil {
-					if optionsErr == nil {
-						optionsErr = err
-					}
-				} else {
-					canonical, err := json.Marshal(value)
-					if err != nil && optionsErr == nil {
-						optionsErr = err
-					}
-					field.Options = canonical
-				}
-			}
+			field.Options = options(f)
 			m.Fields = append(m.Fields, field)
 		}
 		r.Messages = append(r.Messages, m)

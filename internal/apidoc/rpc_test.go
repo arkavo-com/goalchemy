@@ -201,3 +201,31 @@ func TestSourceAndTaskUsageExamples(t *testing.T) {
 		t.Fatal("unknown source symbol accepted")
 	}
 }
+
+func TestRPCMessageValidationExtensions(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "protoc", "testdata", "platform.binpb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Catalog{SchemaVersion: 1}
+	if err := c.AddDescriptors(data, []string{"policy.attributes.AttributesService"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range c.RPC.Messages {
+		if m.ID != "policy.attributes.GetAttributeRequest" {
+			continue
+		}
+		if !strings.Contains(string(m.Options), "exclusive_fields") || !strings.Contains(string(m.Options), "required_fields") || len(m.Oneofs) != 1 || m.Oneofs[0].Name != "identifier" {
+			t.Fatalf("message validation or oneof metadata lost: %+v", m)
+		}
+		pages := c.Markdown()
+		r := newRenderer(c)
+		r.rpcFiles()
+		body := pages[r.files[m.ID]]
+		if !strings.Contains(string(body), "required_fields") {
+			t.Fatal("portable reference lost message validation")
+		}
+		return
+	}
+	t.Fatal("expected request missing")
+}
