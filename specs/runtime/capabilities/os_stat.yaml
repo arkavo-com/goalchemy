@@ -1,0 +1,56 @@
+{
+  "id": "lib.os.stat",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "os.Stat: reports a named file's size, permission bits and whether it is a directory.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Stat",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "name",
+        "type": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "size",
+        "type": "int64"
+      },
+      {
+        "name": "mode",
+        "type": "int"
+      },
+      {
+        "name": "dir",
+        "type": "bool"
+      },
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "An empty name reports NotExist. A directory's size is host-defined.",
+    "nil": "Failures return 0, 0, false.",
+    "bounds": "mode is the low nine permission bits; hosts without POSIX permissions report 0o666 for files and 0o777 for directories, or 0.",
+    "conversions": "Name conversion follows lib.os.read_file; a NUL byte reports Invalid. Symbolic links are followed.",
+    "overflow": "Not applicable.",
+    "mutations": "Nothing is modified.",
+    "aliasing": "Not applicable.",
+    "allocation": "No semantic allocation.",
+    "errors": "Missing paths NotExist; access denial Permission; a non-directory path component NotDir; hosts without a file system Unsupported; other host failures IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

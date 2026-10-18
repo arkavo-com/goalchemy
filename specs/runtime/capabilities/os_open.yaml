@@ -1,0 +1,56 @@
+{
+  "id": "lib.os.open",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "os.Open: opens a host file with access and modifier flags and returns a file handle.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Open",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "flag",
+        "type": "int"
+      },
+      {
+        "name": "perm",
+        "type": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "file",
+        "type": "int64"
+      },
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "An empty name reports NotExist. flag 0 is read-only access.",
+    "nil": "Failures return handle 0.",
+    "bounds": "flag is a combination of RDONLY 0, WRONLY 1, RDWR 2, APPEND 4, CREATE 8, EXCL 16 and TRUNC 32; any other bit, or WRONLY with RDWR, reports Invalid. perm keeps its low nine bits and applies only to a file CREATE creates, minus the process umask on POSIX hosts.",
+    "conversions": "Name conversion follows lib.os.read_file; a NUL byte reports Invalid. Directories open read-only on hosts that allow it; a later read then reports IsDir.",
+    "overflow": "Not applicable.",
+    "mutations": "With CREATE a missing file is created; with TRUNC an existing file is emptied; otherwise the file is not modified.",
+    "aliasing": "Handles are opaque integers; two opens of one path are independent files with their own offsets.",
+    "allocation": "One host file descriptor or stream per handle until lib.os.close.",
+    "errors": "Missing paths report NotExist (or, without CREATE, for a missing final component); CREATE with EXCL on an existing path reports Exist; access denial Permission; a non-directory path component NotDir; hosts without a file system Unsupported; other host failures IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler. Relative names resolve against the host process working directory."
+  },
+  "notes": "A file handle is an int64 issued by lib.os.open or lib.os.create_temp and released by lib.os.close; an unknown or released handle reports Invalid (8). Handles are process-wide and never reused. Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

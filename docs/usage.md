@@ -390,7 +390,7 @@ The split, and the core runtime layer behind both, is explained in [the runtime 
 | `github.com/eugenioenko/goalchemy/std/net` | `JoinHostPort`, `SplitHostPort`, `AddrError`; no dialing, listening or name resolution |
 | `github.com/eugenioenko/goalchemy/std/errors` | `New`, `Is`, `As`, `Unwrap`, `Join`, `ErrUnsupported`, including `Unwrap() []error` trees |
 | `github.com/eugenioenko/goalchemy/std/fmt` | `Sprintf`, `Sprint`, `Sprintln`, `Errorf` with one or more `%w`, `Append`/`Appendf`/`Appendln`, `Stringer`, `GoStringer`, `Formatter`, `State`, `FormatString` (see below) |
-| `github.com/eugenioenko/goalchemy/std/os` | `ReadFile`, `WriteFile`, `PathError`, `FileMode`, `ErrNotExist`, `ErrExist`, `ErrPermission`, `ErrInvalid`, `MaxFileBytes` (see below) |
+| `github.com/eugenioenko/goalchemy/std/os` | `ReadFile`, `WriteFile`, `Open`, `Create`, `OpenFile`, `CreateTemp`, `File` (`Read`, `ReadAt`, `Write`, `WriteString`, `Seek`, `Stat`, `Sync`, `Close`, `Name`), `Stat`, `FileInfo`, `Remove`, `Rename`, `PathError`, `LinkError`, `FileMode` (`IsDir`, `IsRegular`, `Perm`, `ModeDir`, `ModePerm`), the `O_*` flags, `ErrNotExist`, `ErrExist`, `ErrPermission`, `ErrInvalid`, `ErrClosed`, `MaxFileBytes` (see below) |
 | `github.com/eugenioenko/goalchemy/std/log/slog` | `Logger`, `Default`/`SetDefault`, `New`, `Debug`/`Info`/`Warn`/`Error`, their `Context` forms, `Log`/`LogAttrs`, `With`/`WithGroup`, `Attr`, `Value`, `Level`, `LevelVar`, `Record`, `Handler`, `HandlerOptions`, `LogValuer`, `DiscardHandler` and `NewHostHandler` (see below) |
 | `github.com/eugenioenko/goalchemy/lib/errors` | `New`, `Is`, `Unwrap`; the native layer under `std/errors`, whose `Is` does not follow `Unwrap() []error` |
 | `github.com/eugenioenko/goalchemy/lib/sync` | `Mutex`, `WaitGroup` (cooperative gate) |
@@ -403,7 +403,7 @@ The split, and the core runtime layer behind both, is explained in [the runtime 
 | `github.com/eugenioenko/goalchemy/lib/http` | `Do`, a bounded GET or POST exchange, `DoWith`, the same with [transport options](#http-transport-options), and `Open`, an `Exchange` whose bodies are written and read in chunks |
 | `github.com/eugenioenko/goalchemy/lib/clock` | `Unix` and `UnixNano`, host wall-clock seconds and nanoseconds |
 | `github.com/eugenioenko/goalchemy/lib/log` | `Enabled` and `Emit`, the host log sink behind `std/log/slog` |
-| `github.com/eugenioenko/goalchemy/lib/os` | `ReadFile` and `WriteFile` with portable status codes, the host file system behind `std/os` |
+| `github.com/eugenioenko/goalchemy/lib/os` | `ReadFile`, `WriteFile` and the file-handle operations `Open`, `Read`, `ReadAt`, `Write`, `Seek`, `Sync`, `Close`, `Stat`, `CreateTemp`, `Remove`, `Rename` with portable status codes, the host file system behind `std/os` |
 | `github.com/eugenioenko/goalchemy/lib/callback` | `Request`, a bounded call to a host-registered callback |
 
 The [runtime library reference](library.md) documents every function. For `lib/` it lists the gate, bounds, error behavior, per-target availability and native dependencies. It is generated from the `std/` and `lib/` sources and the contracts with `make spec-generate`.
@@ -478,7 +478,7 @@ Passing a null handler (`nil`, `None`, `NULL`) restores the default standard err
 - `String` returns the content of a JSON string and the compact encoding of any other value, so `fmt` prints values as JSON. Use `AsString` to require a string.
 - Strings are encoded as `json.Marshal` encodes them, including `\u003c`, `\u003e` and `\u0026` for `<`, `>` and `&`. Invalid UTF-8 and unpaired surrogate escapes become U+FFFD, as in Go.
 
-`std/os` reads and writes whole files:
+`std/os` reads and writes whole files, and opens files as handles:
 
 - Errors are `*PathError` values with Go's `Op`, `Path` and Linux error text, for example `open key.pem: no such file or directory`. `errors.Is` matches `ErrNotExist`, `ErrExist`, `ErrPermission` and `errors.ErrUnsupported` as in Go, and `errors.As` finds the `*PathError`. Reading a directory fails with op `read`, as on Linux; other failures use op `open`.
 - Failures are reported in these classes: not found, exists, permission denied, is a directory, not a directory, file too large, operation not supported, invalid argument (for a NUL byte in the name), and input/output error for anything else.
@@ -486,6 +486,10 @@ Passing a null handler (`nil`, `None`, `NULL`) restores the default standard err
 - `WriteFile` creates a missing file with `perm` minus the process umask and keeps the permissions of an existing file it truncates, as in Go. Only the low nine permission bits are applied; hosts without POSIX permissions ignore them.
 - Names are byte strings passed to the host unchanged on Go, TypeScript (Node), Python, Rust, C and Swift. Java and C# decode them as UTF-8, replacing invalid sequences. Relative names resolve against the process working directory.
 - Calls are synchronous and never suspend the cooperative scheduler. TypeScript reads files only through the Node entry points (executables and the library package's `node` export, which install the `node:fs` adapter); in browsers and other portable hosts every call fails with `operation not supported`.
+- `Open`, `Create`, `OpenFile` and `CreateTemp` return a `*File` with Go's `Read`, `ReadAt`, `Write`, `WriteString`, `Seek`, `Stat`, `Sync`, `Close` and `Name`, so a `*File` is an `io.Reader`, `io.ReaderAt`, `io.Writer`, `io.Seeker` and `io.Closer`. Reads and writes cross to the host in chunks of at most 1 MiB, so a file of any size streams without being held in memory. A read at the end returns `io.EOF`; `ReadAt` fills its buffer or returns `io.EOF` with the count; a closed file fails with `ErrClosed` and a nil `*File` with `ErrInvalid`.
+- `OpenFile` takes the `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_APPEND`, `O_CREATE`, `O_EXCL` and `O_TRUNC` flags with Go's meaning. `CreateTemp(dir, pattern)` creates a new file with mode `0600` whose name replaces the last `*` of the pattern with a random string (or appends one); an empty `dir` is the host's temporary directory, and a pattern containing `/` fails with `pattern contains path separator`.
+- `Stat` and `File.Stat` return a `FileInfo` with `Name`, `Size`, `Mode` and `IsDir`; `FileMode` carries the permission bits and `ModeDir`, and no modification time. `Remove` removes a file or an empty directory; `Rename` replaces a file at the new path and fails with a `*LinkError`. Failures are `*PathError` values with ops `open`, `read`, `readat`, `write`, `seek`, `sync`, `close`, `stat`, `remove` and `createtemp`, as in Go.
+- Handles are host file descriptors or streams until `Close`; a `*File` has no finalizer, so a file left open stays open until the process ends. Base names in `FileInfo.Name` are split on `/`; Windows separators are not interpreted.
 
 Every package is ordinary Go, so programs still build and run with the Go toolchain. Importing a standard package such as `"sync"`, `"strings"` or `"fmt"` directly is rejected with a remedy naming its `std/` or `lib/` replacement.
 

@@ -1,0 +1,44 @@
+{
+  "id": "lib.os.remove",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "os.Remove: removes a named file or empty directory.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Remove",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "name",
+        "type": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "An empty name reports NotExist.",
+    "nil": "Not applicable.",
+    "bounds": "Not applicable.",
+    "conversions": "Name conversion follows lib.os.read_file; a NUL byte reports Invalid.",
+    "overflow": "Not applicable.",
+    "mutations": "The directory entry is removed; an open handle on the file stays readable on POSIX hosts.",
+    "aliasing": "Not applicable.",
+    "allocation": "No semantic allocation.",
+    "errors": "Missing paths NotExist; access denial Permission; a non-empty directory reports what the host reports, Permission or IO; hosts without a file system Unsupported; other host failures IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

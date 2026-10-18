@@ -1,0 +1,60 @@
+{
+  "id": "lib.os.read_at",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "File.ReadAt: reads up to max bytes at an offset without moving the handle's offset.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.ReadAt",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "file",
+        "type": "int64"
+      },
+      {
+        "name": "offset",
+        "type": "int64"
+      },
+      {
+        "name": "max",
+        "type": "int"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "data",
+        "type": "[]byte"
+      },
+      {
+        "name": "eof",
+        "type": "bool"
+      },
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "An offset at or past the end returns empty, non-nil data and eof true.",
+    "nil": "Failures return a nil slice and eof false.",
+    "bounds": "max is 1..1048576 (MaxChunk) and offset is non-negative; other values report Invalid.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "The file offset is unchanged, except on hosts whose positional reads move it (documented per target); std/os never relies on the offset after ReadAt.",
+    "aliasing": "The result is independently owned.",
+    "allocation": "One host buffer of at most max bytes per call.",
+    "errors": "As lib.os.read.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "A file handle is an int64 issued by lib.os.open or lib.os.create_temp and released by lib.os.close; an unknown or released handle reports Invalid (8). Handles are process-wide and never reused. Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

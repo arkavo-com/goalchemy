@@ -781,6 +781,50 @@ functions:
   contract_version: 1.0.0
   symbol: GNative.lib_os_write_file
   implementation: runtime/lib_os_write_file.swift
+- id: lib.os.open
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_open
+  implementation: runtime/lib_os_open.swift
+- id: lib.os.read
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_read
+  implementation: runtime/lib_os_read.swift
+- id: lib.os.read_at
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_read_at
+  implementation: runtime/lib_os_read_at.swift
+- id: lib.os.write
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_write
+  implementation: runtime/lib_os_write.swift
+- id: lib.os.seek
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_seek
+  implementation: runtime/lib_os_seek.swift
+- id: lib.os.sync
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_sync
+  implementation: runtime/lib_os_sync.swift
+- id: lib.os.close
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_close
+  implementation: runtime/lib_os_close.swift
+- id: lib.os.stat
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_stat
+  implementation: runtime/lib_os_stat.swift
+- id: lib.os.create_temp
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_create_temp
+  implementation: runtime/lib_os_create_temp.swift
+- id: lib.os.remove
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_remove
+  implementation: runtime/lib_os_remove.swift
+- id: lib.os.rename
+  contract_version: 1.0.0
+  symbol: GNative.lib_os_rename
+  implementation: runtime/lib_os_rename.swift
 - id: lib.http.do
   contract_version: 1.1.0
   symbol: GNative.lib_http_do

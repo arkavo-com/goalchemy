@@ -56,7 +56,7 @@ Why two importable roots:
 | [lib/errors](#errors) | `github.com/eugenioenko/goalchemy/lib/errors` | Package errors provides Goalchemy's error values. |
 | [lib/http](#http) | `github.com/eugenioenko/goalchemy/lib/http` | Package http provides bounded HTTP exchanges, retaining TLS verification and returning redirect responses without following them. |
 | [lib/log](#log) | `github.com/eugenioenko/goalchemy/lib/log` | Package log routes structured log records from Goalchemy programs to a sink the host application installs. |
-| [lib/os](#os) | `github.com/eugenioenko/goalchemy/lib/os` | Package os reads and writes whole host files. |
+| [lib/os](#os) | `github.com/eugenioenko/goalchemy/lib/os` | Package os reads and writes whole host files and opens files as handles. |
 | [lib/runtime](#runtime) | `github.com/eugenioenko/goalchemy/lib/runtime` | Package runtime provides Goalchemy's scheduler controls. |
 | [lib/sync](#sync) | `github.com/eugenioenko/goalchemy/lib/sync` | Package sync provides Goalchemy's synchronization primitives. |
 | [lib/task](#task) | `github.com/eugenioenko/goalchemy/lib/task` | Package task provides structured waiting for Goalchemy programs. |
@@ -4706,6 +4706,20 @@ import "github.com/eugenioenko/goalchemy/std/os"
 Package os reads and writes whole files on the host file system. Errors are *PathError values whose Err matches ErrNotExist, ErrExist, ErrPermission or errors.ErrUnsupported through errors.Is, as in Go. Hosts without a file system, such as browsers, fail every call with an error matching errors.ErrUnsupported.
 
 ```go
+const (
+	O_RDONLY int = os.RDONLY
+	O_WRONLY int = os.WRONLY
+	O_RDWR   int = os.RDWR
+	O_APPEND int = os.APPEND
+	O_CREATE int = os.CREATE
+	O_EXCL   int = os.EXCL
+	O_TRUNC  int = os.TRUNC
+)
+```
+
+Flags to OpenFile, combined with bitwise or. Exactly one of O_RDONLY, O_WRONLY and O_RDWR selects the access mode.
+
+```go
 const MaxFileBytes = os.MaxFileBytes
 ```
 
@@ -4722,6 +4736,12 @@ var (
 
 Portable analogs of the io/fs errors.
 
+```go
+var ErrClosed = errors.New("file already closed")
+```
+
+ErrClosed is the error of an operation on a closed File, as in Go.
+
 ### ReadFile
 
 ```go
@@ -4729,6 +4749,22 @@ func ReadFile(name string) ([]byte, error)
 ```
 
 ReadFile reads the named file and returns its contents. A directory fails with op "read", as on Linux; other failures use op "open".
+
+### Remove
+
+```go
+func Remove(name string) error
+```
+
+Remove removes the named file or empty directory.
+
+### Rename
+
+```go
+func Rename(oldpath, newpath string) error
+```
+
+Rename renames oldpath to newpath, replacing a file at newpath. Failures are *LinkError values.
 
 ### WriteFile
 
@@ -4738,6 +4774,140 @@ func WriteFile(name string, data []byte, perm FileMode) error
 
 WriteFile writes data to the named file, creating it if necessary. If the file does not exist, WriteFile creates it with permissions perm (before the umask); otherwise WriteFile truncates it before writing, without changing permissions.
 
+### type File
+
+```go
+type File struct {
+}
+```
+
+File is an open host file. Its methods implement io.Reader, io.ReaderAt, io.Writer, io.Seeker, io.StringWriter and io.Closer. A nil *File fails every method with ErrInvalid; a closed one with ErrClosed.
+
+### Create
+
+```go
+func Create(name string) (*File, error)
+```
+
+Create creates or truncates the named file for reading and writing with mode 0o666 before the umask.
+
+### CreateTemp
+
+```go
+func CreateTemp(dir, pattern string) (*File, error)
+```
+
+CreateTemp creates a new file in dir, or in the host's temporary directory when dir is empty, opened for reading and writing with mode 0o600. Its base name is pattern with the last "*" replaced by a random string, or pattern followed by one. The caller removes the file.
+
+### Open
+
+```go
+func Open(name string) (*File, error)
+```
+
+Open opens the named file for reading.
+
+### OpenFile
+
+```go
+func OpenFile(name string, flag int, perm FileMode) (*File, error)
+```
+
+OpenFile opens the named file with the given flags and, when it creates the file, perm before the umask. Failures are *PathError values with op "open".
+
+### File.Close
+
+```go
+func (f *File) Close() error
+```
+
+Close closes the file. A second Close fails with ErrClosed.
+
+### File.Name
+
+```go
+func (f *File) Name() string
+```
+
+Name returns the name the file was opened with.
+
+### File.Read
+
+```go
+func (f *File) Read(b []byte) (int, error)
+```
+
+Read reads up to len(b) bytes into b and returns the count. At the end of the file it returns 0, io.EOF.
+
+### File.ReadAt
+
+```go
+func (f *File) ReadAt(b []byte, off int64) (int, error)
+```
+
+ReadAt reads len(b) bytes starting at offset off, without moving the file's offset. It returns io.EOF with the count when the file ends first.
+
+### File.Seek
+
+```go
+func (f *File) Seek(offset int64, whence int) (int64, error)
+```
+
+Seek sets the offset for the next Read or Write relative to the start (io.SeekStart), the current offset (io.SeekCurrent) or the end (io.SeekEnd), and returns the new offset.
+
+### File.Stat
+
+```go
+func (f *File) Stat() (FileInfo, error)
+```
+
+Stat describes the file by its name.
+
+### File.Sync
+
+```go
+func (f *File) Sync() error
+```
+
+Sync commits the file's written data to the storage device.
+
+### File.Write
+
+```go
+func (f *File) Write(b []byte) (int, error)
+```
+
+Write writes b at the file's offset, or at its end when it was opened with O_APPEND, and returns the bytes written. A short write without a host failure returns io.ErrShortWrite.
+
+### File.WriteString
+
+```go
+func (f *File) WriteString(s string) (int, error)
+```
+
+WriteString writes s.
+
+### type FileInfo
+
+```go
+type FileInfo interface {
+	Name() string
+	Size() int64
+	Mode() FileMode
+	IsDir() bool
+}
+```
+
+A FileInfo describes a file, as returned by Stat. Modification times are not reported.
+
+### Stat
+
+```go
+func Stat(name string) (FileInfo, error)
+```
+
+Stat describes the named file. Failures are *PathError values with op "stat".
+
 ### type FileMode
 
 ```go
@@ -4745,6 +4915,64 @@ type FileMode uint32
 ```
 
 A FileMode holds permission bits; only the low nine bits are applied.
+
+```go
+const (
+	ModeDir  FileMode = 1 << 31
+	ModePerm FileMode = 0o777
+)
+```
+
+ModeDir marks a directory in a FileMode; ModePerm selects its permission bits. Other Go mode bits are not reported.
+
+### FileMode.IsDir
+
+```go
+func (m FileMode) IsDir() bool
+```
+
+IsDir reports whether m describes a directory.
+
+### FileMode.IsRegular
+
+```go
+func (m FileMode) IsRegular() bool
+```
+
+IsRegular reports whether m describes a regular file.
+
+### FileMode.Perm
+
+```go
+func (m FileMode) Perm() FileMode
+```
+
+Perm returns the permission bits of m.
+
+### type LinkError
+
+```go
+type LinkError struct {
+	Op  string
+	Old string
+	New string
+	Err error
+}
+```
+
+LinkError records an error during a Rename and the paths that caused it.
+
+### LinkError.Error
+
+```go
+func (e *LinkError) Error() string
+```
+
+### LinkError.Unwrap
+
+```go
+func (e *LinkError) Unwrap() error
+```
 
 ### type PathError
 
@@ -7599,12 +7827,92 @@ Reports whether the host log sink accepts records at a level.
 import "github.com/eugenioenko/goalchemy/lib/os"
 ```
 
-Package os reads and writes whole host files.
+Package os reads and writes whole host files and opens files as handles.
 
 | Function | c | csharp | go | java | python | rust | swift | typescript |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `Close` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `CreateTemp` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Open` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Read` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `ReadAt` | yes | yes | yes | yes | yes | yes | yes | yes |
 | `ReadFile` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Remove` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Rename` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Seek` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Stat` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Sync` | yes | yes | yes | yes | yes | yes | yes | yes |
+| `Write` | yes | yes | yes | yes | yes | yes | yes | yes |
 | `WriteFile` | yes | yes | yes | yes | yes | yes | yes | yes |
+
+### Close
+
+```go
+func Close(file int64) int
+```
+
+Closes a file handle and releases it.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Errors**: An unknown or already closed handle reports Invalid; a host failure while closing IO.
+- **Contract**: `lib.os.close` 1.0.0
+
+### CreateTemp
+
+```go
+func CreateTemp(dir string, prefix string, suffix string) (int64, string, int)
+```
+
+Creates a new uniquely named file in a directory, opened for reading and writing.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Bounds**: The random part is one to sixteen characters from [0-9a-z]. A prefix or suffix containing a path separator, or a NUL byte in any argument, reports Invalid. The host retries a name that already exists, as Go does.
+- **Errors**: A missing dir NotExist; access denial Permission; a dir that is not a directory NotDir; hosts without a file system Unsupported; other host failures IO.
+- **Contract**: `lib.os.create_temp` 1.0.0
+
+### Open
+
+```go
+func Open(name string, flag int, perm uint32) (int64, int)
+```
+
+Opens a host file with access and modifier flags and returns a file handle.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Bounds**: flag is a combination of RDONLY 0, WRONLY 1, RDWR 2, APPEND 4, CREATE 8, EXCL 16 and TRUNC 32; any other bit, or WRONLY with RDWR, reports Invalid. perm keeps its low nine bits and applies only to a file CREATE creates, minus the process umask on POSIX hosts.
+- **Errors**: Missing paths report NotExist (or, without CREATE, for a missing final component); CREATE with EXCL on an existing path reports Exist; access denial Permission; a non-directory path component NotDir; hosts without a file system Unsupported; other host failures IO.
+- **Contract**: `lib.os.open` 1.0.0
+
+### Read
+
+```go
+func Read(file int64, max int) ([]byte, bool, int)
+```
+
+Reads up to max bytes from a file handle's offset and reports the end of the file.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Bounds**: max is 1..1048576 (MaxChunk); other values report Invalid. A read may return fewer bytes than max before the end.
+- **Errors**: Reading a directory reports IsDir; a handle opened write-only reports Permission or IO as the host reports it; unknown handles Invalid; other host failures IO.
+- **Contract**: `lib.os.read` 1.0.0
+
+### ReadAt
+
+```go
+func ReadAt(file int64, offset int64, max int) ([]byte, bool, int)
+```
+
+Reads up to max bytes at an offset without moving the handle's offset.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Bounds**: max is 1..1048576 (MaxChunk) and offset is non-negative; other values report Invalid.
+- **Errors**: As lib.os.read.
+- **Contract**: `lib.os.read_at` 1.0.0
 
 ### ReadFile
 
@@ -7619,6 +7927,87 @@ Reads a whole host file and reports a portable status code.
 - **Bounds**: Files larger than MaxFileBytes (1 GiB) report TooLarge without returning data.
 - **Errors**: Missing paths report NotExist; access denial Permission; reading a directory IsDir; a non-directory path component NotDir; hosts without a file system Unsupported; other host failures IO.
 - **Contract**: `lib.os.read_file` 1.0.0
+
+### Remove
+
+```go
+func Remove(name string) int
+```
+
+Removes a named file or empty directory.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Errors**: Missing paths NotExist; access denial Permission; a non-empty directory reports what the host reports, Permission or IO; hosts without a file system Unsupported; other host failures IO.
+- **Contract**: `lib.os.remove` 1.0.0
+
+### Rename
+
+```go
+func Rename(oldpath string, newpath string) int
+```
+
+Renames a file, replacing an existing file at the new path.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Errors**: A missing oldpath or a missing parent of newpath NotExist; access denial Permission; a non-directory path component NotDir; hosts without a file system Unsupported; other host failures IO.
+- **Contract**: `lib.os.rename` 1.0.0
+
+### Seek
+
+```go
+func Seek(file int64, offset int64, whence int) (int64, int)
+```
+
+Moves a file handle's offset and returns the new offset.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Bounds**: whence is 0 (start), 1 (current) or 2 (end); other values, or a resulting offset below zero, report Invalid. Offsets past the end are allowed, as in Go.
+- **Errors**: Unknown handles Invalid; other host failures IO.
+- **Contract**: `lib.os.seek` 1.0.0
+
+### Stat
+
+```go
+func Stat(name string) (int64, int, bool, int)
+```
+
+Reports a named file's size, permission bits and whether it is a directory.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Bounds**: mode is the low nine permission bits; hosts without POSIX permissions report 0o666 for files and 0o777 for directories, or 0.
+- **Errors**: Missing paths NotExist; access denial Permission; a non-directory path component NotDir; hosts without a file system Unsupported; other host failures IO.
+- **Contract**: `lib.os.stat` 1.0.0
+
+### Sync
+
+```go
+func Sync(file int64) int
+```
+
+Flushes a file handle's written data to the storage device.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Errors**: Unknown handles Invalid; a read-only handle or a host that cannot sync reports what the host reports, Invalid or IO.
+- **Contract**: `lib.os.sync` 1.0.0
+
+### Write
+
+```go
+func Write(file int64, data []byte) (int, int)
+```
+
+Writes data at a file handle's offset, or at the end of a file opened with APPEND.
+
+- **Gate**: `sequential` (never suspends)
+- **Determinism**: nondeterministic
+- **Bounds**: data is at most 1048576 bytes (MaxChunk); more reports Invalid.
+- **Errors**: On failure written is the count accepted before it. A handle opened read-only reports Permission or IO as the host reports it; unknown handles Invalid; a full device or quota IO.
+- **Contract**: `lib.os.write` 1.0.0
 
 ### WriteFile
 

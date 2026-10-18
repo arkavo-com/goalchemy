@@ -1,0 +1,48 @@
+{
+  "id": "lib.os.rename",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "os.Rename: renames a file, replacing an existing file at the new path.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Rename",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "oldpath",
+        "type": "string"
+      },
+      {
+        "name": "newpath",
+        "type": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "An empty path reports NotExist.",
+    "nil": "Not applicable.",
+    "bounds": "Not applicable.",
+    "conversions": "Name conversion follows lib.os.read_file; a NUL byte reports Invalid.",
+    "overflow": "Not applicable.",
+    "mutations": "oldpath disappears and newpath names its content, atomically on POSIX hosts within one file system. A file at newpath is replaced; a directory at newpath, or a move across file systems, reports what the host reports.",
+    "aliasing": "Open handles follow the file, not the name.",
+    "allocation": "No semantic allocation.",
+    "errors": "A missing oldpath or a missing parent of newpath NotExist; access denial Permission; a non-directory path component NotDir; hosts without a file system Unsupported; other host failures IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}

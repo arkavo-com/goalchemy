@@ -1,0 +1,44 @@
+{
+  "id": "lib.os.sync",
+  "schema_version": 1,
+  "version": "1.0.0",
+  "summary": "File.Sync: flushes a file handle's written data to the storage device.",
+  "signature": {
+    "source": "declaration",
+    "symbol": "github.com/eugenioenko/goalchemy/lib/os.Sync",
+    "type_parameters": [],
+    "inputs": [
+      {
+        "name": "file",
+        "type": "int64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "status",
+        "type": "int"
+      }
+    ]
+  },
+  "depends_on": [],
+  "suspension": "never",
+  "determinism": "nondeterministic",
+  "behavior": {
+    "zero": "Not applicable.",
+    "nil": "Not applicable.",
+    "bounds": "Not applicable.",
+    "conversions": "Not applicable.",
+    "overflow": "Not applicable.",
+    "mutations": "The file content is unchanged; buffered data reaches the device.",
+    "aliasing": "Not applicable.",
+    "allocation": "No semantic allocation.",
+    "errors": "Unknown handles Invalid; a read-only handle or a host that cannot sync reports what the host reports, Invalid or IO.",
+    "panics": "No deliberate panic.",
+    "observations": "Blocking synchronous host I/O on the calling thread; it never suspends the cooperative scheduler."
+  },
+  "notes": "A file handle is an int64 issued by lib.os.open or lib.os.create_temp and released by lib.os.close; an unknown or released handle reports Invalid (8). Handles are process-wide and never reused. Status codes: 0 OK, 1 NotExist, 2 Exist, 3 Permission, 4 IsDir, 5 NotDir, 6 TooLarge, 7 Unsupported, 8 Invalid, 9 IO. std/os maps them to *PathError values. Native acceptance tests in lib/os.",
+  "cases": [],
+  "native_tests": [
+    "lib/os/file_test.go"
+  ]
+}
