@@ -31,6 +31,23 @@ async function collect(directory) {
 }
 
 await collect(dist);
+const llms = await readFile(path.join(dist, 'llms.txt'), 'utf8');
+const llmsLinks = [...llms.matchAll(/^- \[[^\]]+\]\((https:\/\/[^)]+)\)/gm)].map((match) => match[1]);
+const repositoryPrefixes = [
+  'https://raw.githubusercontent.com/eugenioenko/goalchemy/main/',
+  'https://github.com/eugenioenko/goalchemy/blob/main/',
+  'https://github.com/eugenioenko/goalchemy/tree/main/',
+];
+for (const link of llmsLinks) {
+  const prefix = repositoryPrefixes.find((prefix) => link.startsWith(prefix));
+  if (!prefix) continue;
+  try {
+    await stat(fileURLToPath(new URL(`../../${link.slice(prefix.length)}`, import.meta.url)));
+  } catch {
+    failures.push(`llms.txt: missing repository path ${link}`);
+  }
+}
+pages.set(path.join(dist, 'llms.txt'), { ids: new Set(), links: llmsLinks });
 let checked = 0;
 for (const [file, { links }] of pages) {
   const pathname = path.relative(dist, file).split(path.sep).join('/').replace(/index\.html$/, '');
@@ -55,4 +72,4 @@ if (!(await readFile(path.join(dist, 'sitemap-0.xml'), 'utf8')).includes(`${orig
 if (failures.length) {
   console.error([...new Set(failures)].join('\n'));
   process.exitCode = 1;
-} else console.log(`Checked ${checked} internal links and assets across ${pages.size} HTML pages, including fragment targets, CNAME, and sitemap.`);
+} else console.log(`Checked ${checked} internal links and assets across ${pages.size - 1} HTML pages, including fragment targets, llms.txt references, CNAME, and sitemap.`);

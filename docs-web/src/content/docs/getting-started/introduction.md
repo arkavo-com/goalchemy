@@ -35,3 +35,5 @@ See [compiler architecture](/internals/architecture/) to work on the compiler it
 - [Install Goalchemy](/getting-started/installation/) and [run your first program](/getting-started/quick-start/).
 - [Build an SDK](/guides/building-an-sdk/) to generate reusable libraries.
 - [Explore examples](/getting-started/examples/) for errors, concurrency, HTTP, and crypto.
+
+For AI assistants and coding agents, [llms.txt](/llms.txt) provides a concise reading guide with links to canonical Markdown references.

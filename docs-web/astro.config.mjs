@@ -17,6 +17,7 @@ export default defineConfig({
       customCss: ['./src/styles/custom.css'],
       components: { Sidebar: './src/components/Sidebar.astro' },
       head: [
+        { tag: 'link', attrs: { rel: 'describedby', href: '/llms.txt', type: 'text/plain' } },
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://goalchemy.dev/social.png' } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
         { tag: 'meta', attrs: { name: 'theme-color', content: '#0e1b30' } },
@@ -44,7 +45,7 @@ export default defineConfig({
             { label: 'Host capabilities', collapsed: true, items: [{ autogenerate: { directory: 'runtime/lib' } }] },
           ],
         },
-        { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
+        { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }, { label: 'llms.txt (AI agents)', link: 'https://goalchemy.dev/llms.txt' }] },
         { label: 'Compiler development', items: [{ autogenerate: { directory: 'internals' } }] },
       ],
     }),

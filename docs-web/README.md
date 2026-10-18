@@ -29,6 +29,8 @@ Markdown links to published source documents are rewritten to site URLs. Runtime
 
 New canonical documents need a source mapping. Keep generated output paths in `.gitignore` aligned with the mapping. Do not place authored content inside the generated `runtime/` or `targets/details/` directories. Restart `docs:dev` after editing an imported source or the feature manifest to rerun preparation; authored site content updates through Astro's normal watcher.
 
+`public/llms.txt` is served unchanged at `/llms.txt` and linked from the documentation sidebar, introduction, and page metadata. Keep it as a concise navigation guide to canonical Markdown sources. Link to maintained references instead of copying release numbers, toolchain versions, defaults, or API inventories. Repository links track `main`; agents using a release are directed to the matching tag. The docs build checks its site URLs and repository paths, so moved or removed references fail the build.
+
 The social image is copied from the existing README graphic during preparation. The Erlenmeyer-flask SVG logo in `src/assets/goalchemy.svg` is also copied to the favicon path during preparation. The SVG hero diagram includes all eight targets; Swift remains explicitly experimental. Do not add analytics or external font dependencies without a deliberate project decision.
 
 ## Homepage code example
