@@ -44,7 +44,7 @@ public static class Native
     public static Lease acquire(Key key){if(key==null||key.owner!=state())throw new Reject("crypto: invalid input or key");var m=key.owner.material(key.id);if(m==null)throw new Reject("crypto: key is closed");return m.acquire();}
     public static Material invalidate(Key key){if(key==null)return null;if(key.owner!=state())throw new Reject("crypto: invalid input or key");var m=key.owner.material(key.id);m?.invalidate();return m;}
     public static byte[] bytes(Slice value,int maximum=MAX){if(value==null||value.l<0||value.l>maximum||!value.bytes&&value.l>0)throw new Reject("crypto: invalid input or key");if(value.a==null)return Array.Empty<byte>();var result=new byte[value.l];Array.Copy((byte[])value.a,value.o,result,0,value.l);return result;}
-    public static byte[] bytesNullable(Slice value)=>value.a==null?null:bytes(value);
+    public static byte[] bytesNullable(Slice value)=>value.a==null?null:bytes(value,int.MaxValue);
     public static Slice slice(byte[] value)=>value==null?Slice.BYTE_NIL:new Slice(value,0,value.Length,value.Length);
     public static string[] strings(Slice value){if(value==null||value.l>MAX)throw new Reject("crypto: invalid input or key");var result=new string[value.l];for(int i=0;i<result.Length;i++)result[i]=(string)value.Get(i);return result;}
     public static Slice strings(string[] value){object[] result=new object[value.Length];Array.Copy(value,result,value.Length);return new Slice(result,0,result.Length,result.Length);}

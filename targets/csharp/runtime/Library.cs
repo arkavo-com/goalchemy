@@ -249,9 +249,8 @@ public static class Library
         public void leave(object value){if(value!=null)path.Remove(value);}
     }
     public static Failure invalid()=>new("invalid_argument");
-    public static void length(int n){if(n>64<<20)throw invalid();}
-    public static byte[] bytes(byte[] value){if(value==null)return null;length(value.Length);return (byte[])value.Clone();}
-    public static string binaryString(string value){value??="";length(value.Length);foreach(char c in value)if(c>255)throw invalid();return value;}
+    public static byte[] bytes(byte[] value){if(value==null)return null;return (byte[])value.Clone();}
+    public static string binaryString(string value){value??="";foreach(char c in value)if(c>255)throw invalid();return value;}
     public static long integer(long value,int bits,bool signed){if(bits<64){long low=signed?-(1L<<(bits-1)):0,high=(1L<<(signed?bits-1:bits))-1;if(value<low||value>high)throw invalid();}return value;}
     /// Source std/io operations behind a host stream view; each one is a library call on the handle. Read completes with (data, eof).
     public sealed class StreamOps

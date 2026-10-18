@@ -437,3 +437,26 @@ Implementation details can be polished during milestones. The initial defaults a
 - [JSON Schema object validation](https://json-schema.org/understanding-json-schema/reference/object): required and closed fields for contract schemas.
 - [Pinned OpenTDF SDK source](https://github.com/opentdf/platform/tree/5d0508fb8c58690f91e1a6e5d1bfe3ea7609f721/sdk): initial survey fixture.
 - [Rust Rc documentation](https://doc.rust-lang.org/std/rc/struct.Rc.html): shared ownership and copy-on-write behavior informing the decision to preserve aliases explicitly.
+
+## Remove fixed library value-size caps
+
+Remove the arbitrary 64 MiB value limits in TypeScript, Python, Java and C#,
+and C's 128 MiB leaf and 256 MiB aggregate byte budgets. Native allocation
+capacity and source descriptor ranges determine representable buffer sizes.
+Keep type, fixed-array shape, integer-range and structural traversal validation,
+owned snapshots and operation-specific capability contracts.
+
+Acceptance: importing consumers round-trip 100 MiB buffers on the four affected
+managed targets, 129 MiB through C, and copy a C value tree containing 270 MiB
+of byte leaves. Verify large binary strings and input ownership, retain malformed
+value rejection, and run existing importing-library checks on affected targets.
+Publish through a reviewed PR with green CI and a signed v0.7.4 release, then
+remeasure the blocked OpenTDF SDK cases using released compiler output.
+
+Local acceptance: the four managed targets passed 100 MiB round trips and
+65 MiB binary strings under both frames and native pausing. C passed a 129 MiB
+round trip and a 270 MiB aggregate copy. Existing library suites passed for
+all five changed targets, including both naming modes where supported and
+actual Chromium imports. Java/C# emitter checks, spec validation and all 1,121
+generated-spec freshness checks passed, as did the installed compiler test.
+Hosted CI on the release PR is the remaining merge and release gate.

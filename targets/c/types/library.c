@@ -13,14 +13,13 @@ void gxc_error_free(gxc_error *e) {
     if (!e) return;
     gxc_value_free(&e->message); gxc_value_free(&e->fields); e->kind=0;
 }
-static int copy_value(gxc_value *d,const gxc_value *s,unsigned depth,size_t *budget,size_t *bytes) {
+static int copy_value(gxc_value *d,const gxc_value *s,unsigned depth,size_t *budget) {
     if (!s || depth>64 || !*budget || s->length>UINT32_MAX) return 1;
     (*budget)--;
     if (s->kind<GXC_NIL || s->kind>GXC_STREAM) return 1;
     d->kind=s->kind; d->integer=s->integer; d->floating=s->floating; d->length=s->length;
     if (s->kind==GXC_BYTES) {
-        if (s->length>*bytes || s->length>128u*1024u*1024u || (s->length && !s->bytes)) return 1;
-        *bytes-=s->length;
+        if (s->length && !s->bytes) return 1;
         d->bytes=malloc(s->length?s->length:1); if (!d->bytes) return 3;
         if (s->length) memcpy(d->bytes,s->bytes,s->length);
     } else if (s->kind==GXC_LIST || s->kind==GXC_RECORD) {
@@ -37,7 +36,7 @@ static int copy_value(gxc_value *d,const gxc_value *s,unsigned depth,size_t *bud
                 for(size_t j=0;j<i;j++) if(!strcmp(s->names[i],s->names[j])) return 1;
                 d->names[i]=malloc(n+1); if(!d->names[i]) return 3; memcpy(d->names[i],s->names[i],n+1);
             }
-            int rc=copy_value(&d->items[i],&s->items[i],depth+1,budget,bytes); if(rc) return rc;
+            int rc=copy_value(&d->items[i],&s->items[i],depth+1,budget); if(rc) return rc;
         }
     } else if (s->kind==GXC_HANDLE) {
         if (s->length || s->bytes || s->items || s->names || s->stream) return 1;
@@ -50,8 +49,8 @@ static int copy_value(gxc_value *d,const gxc_value *s,unsigned depth,size_t *bud
 }
 int gxc_value_copy(gxc_value *d,const gxc_value *s) {
     if(!d) return 1;
-    memset(d,0,sizeof(*d)); size_t budget=1000000,bytes=256u*1024u*1024u;
-    int rc=copy_value(d,s,0,&budget,&bytes); if(rc) gxc_value_free(d); return rc;
+    memset(d,0,sizeof(*d)); size_t budget=1000000;
+    int rc=copy_value(d,s,0,&budget); if(rc) gxc_value_free(d); return rc;
 }
 const gxc_value *gxc_field(const gxc_value *v,const char *name) {
     static const gxc_value nil={0};
