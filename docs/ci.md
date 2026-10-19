@@ -1,7 +1,16 @@
 # CI prerequisites and coverage
 
-Linux x86_64 CI runs twenty independent jobs in parallel. The original
-`go test -short ./...` coverage is partitioned into core packages, native
+Linux x86_64 CI uses at most four runners across the repository, including
+overlapping PRs, optional tests, documentation builds and deployments. Jobs
+share four `repository-runner-*` concurrency groups with `queue: max`, so
+waiting jobs queue without occupying runners or replacing one another. Each
+group can hold up to 100 pending jobs. The test matrix also uses
+`max-parallel: 4`. New commits cancel superseded PR runs of the same workflow.
+
+Every new runner job must use one of these four groups. Workflow-level
+cancellation groups stay separate so workflows do not block their own jobs.
+
+The original `go test -short ./...` coverage is partitioned into core packages, native
 contracts/browser checks, and four integration shards. Float differential
 tests, readable/compact naming tests, and unshort runtime conformance each run
 in their own job across all targets. Each target has its own "Language and
