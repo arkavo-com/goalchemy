@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 3da4ca70e4793af9ffe146ae3342343da987973a432624dae0dc43362c277078
 symbol: "rt.PrintString"
 implementation: runtime/print.go
-implementation_hash: 43ba1d50044a27ca90948930415ba11f58f12230f75c19d745155f7db5799770
+implementation_hash: c487108d3938ec70f191fd74a7b160c690fcacaaa41f712234e17dfc408f5b4d
 summary: "print/println of Booleans, integers, IEEE floats, and strings to standard error."
 suspension: never
 determinism: deterministic
