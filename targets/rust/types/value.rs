@@ -3,8 +3,11 @@
 //! immutable byte strings, and shared storage lives in the traced heap and
 //! is referenced by handle.
 use super::*;
-pub use std::cell::{Cell, RefCell};
+pub use core::cell::{Cell, RefCell};
+#[cfg(not(goalchemy_nostd))]
 pub use std::rc::Rc;
+#[cfg(goalchemy_nostd)]
+pub use alloc::rc::Rc;
 
 /// A heap handle; 0 is never a live object.
 pub type H = u32;
@@ -28,6 +31,7 @@ pub enum V {
     /// Several results of one call; consumed immediately by the caller.
     Tuple(Rc<[V]>),
     /// A resumable frame returned by a starter.
+    #[cfg(not(goalchemy_nostd))]
     Frame(Rc<Frame>),
 }
 
@@ -97,6 +101,7 @@ impl V {
         }
     }
 
+    #[cfg(not(goalchemy_nostd))]
     pub fn frame(&self) -> Rc<Frame> {
         match self {
             V::Frame(f) => f.clone(),
@@ -118,7 +123,7 @@ pub fn tuple(vs: Vec<V>) -> V {
 }
 
 /// Map keys: a hashable encoding of comparable values.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Key {
     Nil,
     Bool(bool),
@@ -172,5 +177,8 @@ pub fn veq(a: &V, b: &V) -> bool {
 
 /// An implementation fault: never a source panic.
 pub fn fault(msg: &str) -> ! {
-    std::panic::resume_unwind(Box::new(format!("goalchemy fault: {}", msg)))
+    #[cfg(not(goalchemy_nostd))]
+    std::panic::resume_unwind(Box::new(format!("goalchemy fault: {}", msg)));
+    #[cfg(goalchemy_nostd)]
+    panic!("goalchemy fault: {}", msg)
 }

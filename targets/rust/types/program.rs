@@ -1,9 +1,14 @@
 //! Program entry, globals, and unrecovered-panic reports.
 use super::*;
+#[cfg(not(goalchemy_nostd))]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(goalchemy_nostd))]
 static EXECUTABLE_ENTRY: AtomicBool = AtomicBool::new(false);
+#[cfg(not(goalchemy_nostd))]
 pub struct EntryReservation;
+#[cfg(not(goalchemy_nostd))]
 impl Drop for EntryReservation { fn drop(&mut self) { EXECUTABLE_ENTRY.store(false, Ordering::Release); } }
+#[cfg(not(goalchemy_nostd))]
 pub fn reserve_entry() -> Result<EntryReservation, HostFault> {
     if EXECUTABLE_ENTRY.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
         return Err(HostFault("overlapping executable entry/reset".into()));
@@ -18,8 +23,12 @@ impl Drop for SourceGuard { fn drop(&mut self) { SOURCE_DEPTH.with(|d| d.set(d.g
 /// large-stack policy. Cooperative chains are separately bounded by call().
 pub fn source_guard() -> SourceGuard {
     SOURCE_DEPTH.with(|d| {
+        #[cfg(not(goalchemy_nostd))]
         let host = SCHED.with(|s| s.borrow().epoch.is_some());
+        #[cfg(not(goalchemy_nostd))]
         if host && d.get() >= 128 { std::panic::resume_unwind(Box::new(SourceStackFatal)); }
+        #[cfg(goalchemy_nostd)]
+        if d.get() >= super::owner::max_depth() { fault("source call depth limit exceeded"); }
         d.set(d.get() + 1);
     });
     SourceGuard
@@ -108,12 +117,14 @@ pub fn format_chain(p: &V) -> Vec<u8> {
     b
 }
 
+#[cfg(not(goalchemy_nostd))]
 pub fn report_panic(p: &V) -> ! {
     let _root = temp_root(&[p.clone()]);
     out::stderr(&format_chain(p));
     std::process::exit(2)
 }
 
+#[cfg(not(goalchemy_nostd))]
 fn report_stats() {
     if std::env::var("GOALCHEMY_HEAP_STATS").is_ok() {
         let (peak, n) = heap_stats();
@@ -122,6 +133,7 @@ fn report_stats() {
 }
 
 /// Runs body on a thread with a large stack, reporting unrecovered panics.
+#[cfg(not(goalchemy_nostd))]
 pub fn run_large(body: impl FnOnce() + Send + 'static) -> ! {
     std::panic::set_hook(Box::new(|info| {
         if info.payload().is::<GoPanicPayload>() {
@@ -146,6 +158,7 @@ pub fn run_large(body: impl FnOnce() + Send + 'static) -> ! {
 }
 
 /// The entry point of a sequential program.
+#[cfg(not(goalchemy_nostd))]
 pub fn program_main(nglobals: usize, init: fn(), entry: fn()) -> ! {
     let reservation = reserve_entry().unwrap_or_else(|e| host_fault(&e.0));
     run_large(move || {
@@ -160,4 +173,10 @@ pub fn program_main(nglobals: usize, init: fn(), entry: fn()) -> ! {
 
 pub fn trace_globals(out: &mut Vec<V>) {
     GLOBALS.with(|g| { if let Some(f) = g.borrow().as_ref() { f.trace(out); } });
+}
+
+#[cfg(goalchemy_nostd)]
+pub fn reset_program() {
+    GLOBALS.reset();
+    SOURCE_DEPTH.reset();
 }

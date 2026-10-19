@@ -90,7 +90,7 @@ pub fn nil_slice(x: &V) -> bool {
 
 /// x.(T) for a concrete T: whether x holds T.
 pub fn is_type(x: &V, t: &'static TypeDesc) -> bool {
-    matches!(dyn_type(x), Some(d) if std::ptr::eq(d, t))
+    matches!(dyn_type(x), Some(d) if core::ptr::eq(d, t))
 }
 
 /// The value of a non-nil interface.

@@ -2,6 +2,7 @@
 //! object; between a throw and its catch no safepoint runs, and catchers
 //! root the panic while deferred calls run.
 use super::*;
+#[cfg(not(goalchemy_nostd))]
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub struct PanicObj {
@@ -19,7 +20,10 @@ pub fn new_panic(value: V) -> V {
 
 /// Raises an existing panic object.
 pub fn raise(p: V) -> ! {
-    resume_unwind(Box::new(GoPanicPayload(p.h())))
+    #[cfg(not(goalchemy_nostd))]
+    resume_unwind(Box::new(GoPanicPayload(p.h())));
+    #[cfg(goalchemy_nostd)]
+    panic!("goalchemy panic: {}", String::from_utf8_lossy(&format_panic_value(&panic_value(&p))))
 }
 
 /// panic(v) with an interface value v.
@@ -29,6 +33,7 @@ pub fn throw(v: V) -> ! {
 }
 
 /// Runs f, returning the Go panic it raised.
+#[cfg(not(goalchemy_nostd))]
 pub fn catch<R>(f: impl FnOnce() -> R) -> Result<R, V> {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(r) => Ok(r),
@@ -203,6 +208,7 @@ pub fn assert_panic(x: &V, iface: &str, target: &str, missing: Option<&str>) -> 
 /// Runs a sequential function's deferred calls after its body finished,
 /// normally or by panic p (Nil when none), and re-raises a panic that is
 /// still active afterwards.
+#[cfg(not(goalchemy_nostd))]
 pub fn run_defers(fr: &Fr, p: V) {
     let mut panicking = p;
     let _root = temp_root(&[panicking.clone()]);
@@ -233,6 +239,7 @@ pub fn run_defers(fr: &Fr, p: V) {
     }
 }
 
+#[cfg(not(goalchemy_nostd))]
 pub fn recover(fid: i64) -> V {
     let t = cur_task();
     let p = t.cur_panic.borrow().clone();
@@ -243,4 +250,15 @@ pub fn recover(fid: i64) -> V {
         x.recovered = true;
         x.value.clone()
     })
+}
+
+// no_std uses the embedding application's panic handler; no source recovery.
+#[cfg(goalchemy_nostd)]
+pub fn catch<R>(f: impl FnOnce() -> R) -> Result<R, V> { Ok(f()) }
+#[cfg(goalchemy_nostd)]
+pub fn run_defers(fr: &Fr, _: V) {
+    while let Some(d) = fr.pop_defer() {
+        let _root = temp_root(&[d.f.clone()]);
+        callv(&d.f, d.args);
+    }
 }

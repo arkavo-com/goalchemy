@@ -36,9 +36,11 @@ func libraryValue(t *ir.Type, seen map[*ir.Type]bool) bool {
 func sourceContext(t *ir.Type) bool { return t.Kind == ir.KOpaque && t.Name == "context.Context" }
 func sourceError(t *ir.Type) bool   { return t.Kind == ir.KNamed && t.Name == "error" }
 func (e *emitter) library() (string, error) {
-	e.use("core.task.spawn")
-	e.use("std.context.with_cancel")
-	e.use("lib.crypto.close")
+	if !e.noStd {
+		e.use("core.task.spawn")
+		e.use("std.context.with_cancel")
+		e.use("lib.crypto.close")
+	}
 	names := map[*ir.Type]string{}
 	roots := map[string]bool{}
 	for _, f := range e.p.Exports {
@@ -48,6 +50,11 @@ func (e *emitter) library() (string, error) {
 	reserved := map[string]bool{}
 	for _, name := range strings.Fields("V H Key Code Func TypeDesc PanicObj GoPanicPayload ErrorKind LibraryError Cancellation ProviderRequest ProviderError Provider CallOptions Operation HostFault HostFatal SourceStackFatal HostWire HostRecord HostMailbox HostToken HostBoundary HostPending Step Results Frame Task Timer Sched Obj Heap Deferred FrData Fr TempRoots KeyIndex Entry GoMap MapIter EntryReservation SourceGuard Waiter WaiterData Chan Mutex WaitGroup ContextHook Context ContextHookHandle BlockedPayload HostError Vec Rc Cell RefCell Option Result String Some None Ok Err LogRecord LogHandler") {
 		reserved[name] = true
+	}
+	if e.noStd {
+		for _, name := range []string{"RuntimeOptions", "CallResult", "HeapStats", "NoStdError", "run"} {
+			reserved[name] = true
+		}
 	}
 	for _, f := range e.p.Exports {
 		name := f.Name[strings.LastIndex(f.Name, ".")+1:]
@@ -232,6 +239,10 @@ func (e *emitter) library() (string, error) {
 				convert(t)
 			}
 		}
+	}
+	if e.noStd {
+		e.noStdLibrary(&b, typ)
+		return b.String(), nil
 	}
 	if e.p.HostIOFunc("ReadView") != nil {
 		for _, name := range []string{"ReadView", "WriteView", "SeekView"} {

@@ -33,6 +33,10 @@ Non-`main` packages emit `src/lib.rs` and an owned Cargo library boundary with `
 
 Values live in a traced heap collected at safepoints; byte leaves use native `Vec<u8>`. Set `GOALCHEMY_HEAP_STATS=1` to print heap statistics and `GOALCHEMY_GC_THRESHOLD` to control collection frequency. `.rs.lines` sidecars retain source positions.
 
+## Embedded no_std profile
+
+Use `-target rust-nostd` for sequential `core` + `alloc` libraries without native dependencies. The application supplies the allocator, panic handler, and entry point. The profile provides configurable collection and call-depth limits, and releases internal allocations between calls. Panic recovery, concurrency, and host capabilities are rejected. See [Rust no_std scope and setup](/targets/details/rust-no-std/).
+
 ## Implementation details
 
 [Library boundary](/targets/details/rust-library-boundary/) · [Host operations](/targets/details/rust-host-operations/) · [Byte storage](/targets/details/rust-byte-storage/)
