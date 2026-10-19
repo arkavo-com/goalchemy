@@ -1,0 +1,418 @@
+{
+ "schema_version": 1,
+ "compiler_sha256": {
+  "candidate": "4233b558ad555a96db6355e157b37da4e126edc0cd5621eea19ed81a26c0a6b9"
+ },
+ "toolchains_lock_sha256": "186108437292303ddb733ee6b7cb036034d17b7dca12c848c2e83667c5898268",
+ "source_integer_bits": 64,
+ "revision": "fd838d62953d5993f0ff812ebad965ac41c9acae",
+ "dirty": false,
+ "host": "macOS-27.0-arm64-arm-64bit-Mach-O",
+ "machine": "arm64",
+ "target": "wasip1",
+ "toolchains": {
+  "go": "go version go1.27.1 darwin/arm64",
+  "tinygo": "tinygo version 0.43.0 darwin/arm64 (using go version go1.27.1 and LLVM version 22.1.4)",
+  "node": "v26.12.0",
+  "wasm-opt": "wasm-opt version 133 (version_133)"
+ },
+ "environment": {
+  "GOMAXPROCS": "2",
+  "GOMEMLIMIT": "1GiB",
+  "GOTOOLCHAIN": "go1.27.1",
+  "BINARYEN_CORES": "1"
+ },
+ "measurement": "wait4 per-child peak RSS in bytes; not heap use or aggregate process-tree peak; compiler caches retained; one build job; one excluded warm-up; wall time includes process startup",
+ "results": {
+  "cpu/candidate": {
+   "source/go": {
+    "build_seconds": 1.4771656668744981,
+    "build_peak_rss_bytes": 201277440,
+    "binary_bytes": 1916499,
+    "run_seconds": {
+     "median": 0.2019382081925869,
+     "min": 0.18765862518921494,
+     "max": 0.20789883332327008,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 54968320,
+     "min": 54837248,
+     "max": 55050240,
+     "n": 7
+    },
+    "outputs": [
+     "cpu 1448508673\n"
+    ],
+    "execution_seconds": {
+     "median": 0.11710254099999999,
+     "min": 0.10405699999999998,
+     "max": 0.12190487500000001,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 2424832,
+     "min": 2424832,
+     "max": 2424832,
+     "n": 7
+    }
+   },
+   "source/tinygo": {
+    "build_seconds": 0.6134572909213603,
+    "build_peak_rss_bytes": 188022784,
+    "binary_bytes": 168302,
+    "run_seconds": {
+     "median": 0.1291411672718823,
+     "min": 0.1224595420062542,
+     "max": 0.13458483386784792,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 47333376,
+     "min": 47251456,
+     "max": 47415296,
+     "n": 7
+    },
+    "outputs": [
+     "cpu 1448508673\n"
+    ],
+    "execution_seconds": {
+     "median": 0.045860125,
+     "min": 0.04258491700000001,
+     "max": 0.046838750000000005,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 262144,
+     "min": 262144,
+     "max": 262144,
+     "n": 7
+    }
+   },
+   "lowered/go": {
+    "build_seconds": 1.3927582912147045,
+    "build_peak_rss_bytes": 90112000,
+    "binary_bytes": 2587434,
+    "run_seconds": {
+     "median": 0.20533529203385115,
+     "min": 0.1887593329884112,
+     "max": 0.22130324970930815,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 57491456,
+     "min": 57409536,
+     "max": 57540608,
+     "n": 7
+    },
+    "outputs": [
+     "cpu 1448508673\n"
+    ],
+    "execution_seconds": {
+     "median": 0.118370292,
+     "min": 0.107060541,
+     "max": 0.1333185,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 3014656,
+     "min": 3014656,
+     "max": 3014656,
+     "n": 7
+    }
+   },
+   "lowered/tinygo": {
+    "build_seconds": 2.5314770829863846,
+    "build_peak_rss_bytes": 294453248,
+    "binary_bytes": 988776,
+    "run_seconds": {
+     "median": 0.13108770875260234,
+     "min": 0.12095416616648436,
+     "max": 0.13742725038900971,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 48939008,
+     "min": 48758784,
+     "max": 49004544,
+     "n": 7
+    },
+    "outputs": [
+     "cpu 1448508673\n"
+    ],
+    "execution_seconds": {
+     "median": 0.045409208,
+     "min": 0.041846417000000004,
+     "max": 0.049380291,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 262144,
+     "min": 262144,
+     "max": 262144,
+     "n": 7
+    }
+   }
+  },
+  "alloc/candidate": {
+   "source/go": {
+    "build_seconds": 0.1399585409089923,
+    "build_peak_rss_bytes": 43466752,
+    "binary_bytes": 1917274,
+    "run_seconds": {
+     "median": 0.14121812488883734,
+     "min": 0.13080862490460277,
+     "max": 0.14963833428919315,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 69009408,
+     "min": 68927488,
+     "max": 69550080,
+     "n": 7
+    },
+    "outputs": [
+     "alloc 25493856 128\n"
+    ],
+    "execution_seconds": {
+     "median": 0.053537333000000006,
+     "min": 0.050435125,
+     "max": 0.05652524999999999,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 7340032,
+     "min": 7340032,
+     "max": 7340032,
+     "n": 7
+    }
+   },
+   "source/tinygo": {
+    "build_seconds": 0.6629967498593032,
+    "build_peak_rss_bytes": 188465152,
+    "binary_bytes": 172933,
+    "run_seconds": {
+     "median": 0.16767354076728225,
+     "min": 0.15768254082649946,
+     "max": 0.17614279175177217,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 50020352,
+     "min": 49889280,
+     "max": 50462720,
+     "n": 7
+    },
+    "outputs": [
+     "alloc 25493856 128\n"
+    ],
+    "execution_seconds": {
+     "median": 0.08664100000000001,
+     "min": 0.081539084,
+     "max": 0.089102417,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 524288,
+     "min": 524288,
+     "max": 524288,
+     "n": 7
+    }
+   },
+   "lowered/go": {
+    "build_seconds": 0.16042704228311777,
+    "build_peak_rss_bytes": 57884672,
+    "binary_bytes": 2588406,
+    "run_seconds": {
+     "median": 0.1441163751296699,
+     "min": 0.13962741661816835,
+     "max": 0.15347787458449602,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 71811072,
+     "min": 71303168,
+     "max": 72171520,
+     "n": 7
+    },
+    "outputs": [
+     "alloc 25493856 128\n"
+    ],
+    "execution_seconds": {
+     "median": 0.05859191699999999,
+     "min": 0.05758675,
+     "max": 0.063677709,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 7602176,
+     "min": 7602176,
+     "max": 7602176,
+     "n": 7
+    }
+   },
+   "lowered/tinygo": {
+    "build_seconds": 2.61182091711089,
+    "build_peak_rss_bytes": 297598976,
+    "binary_bytes": 992778,
+    "run_seconds": {
+     "median": 0.16875874996185303,
+     "min": 0.1664215000346303,
+     "max": 0.17975799972191453,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 51986432,
+     "min": 51888128,
+     "max": 52068352,
+     "n": 7
+    },
+    "outputs": [
+     "alloc 25493856 128\n"
+    ],
+    "execution_seconds": {
+     "median": 0.089857209,
+     "min": 0.08823666699999999,
+     "max": 0.095213417,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 524288,
+     "min": 524288,
+     "max": 524288,
+     "n": 7
+    }
+   }
+  },
+  "maps/candidate": {
+   "source/go": {
+    "build_seconds": 0.14422524999827147,
+    "build_peak_rss_bytes": 43450368,
+    "binary_bytes": 1925771,
+    "run_seconds": {
+     "median": 0.1599008752964437,
+     "min": 0.15065520768985152,
+     "max": 0.16245812503620982,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 57606144,
+     "min": 57196544,
+     "max": 57704448,
+     "n": 7
+    },
+    "outputs": [
+     "maps 332651682176 1023\n"
+    ],
+    "execution_seconds": {
+     "median": 0.07342454200000001,
+     "min": 0.071331958,
+     "max": 0.076784667,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 2424832,
+     "min": 2424832,
+     "max": 2424832,
+     "n": 7
+    }
+   },
+   "source/tinygo": {
+    "build_seconds": 0.6751064579002559,
+    "build_peak_rss_bytes": 188366848,
+    "binary_bytes": 175196,
+    "run_seconds": {
+     "median": 0.1442633750848472,
+     "min": 0.14142045797780156,
+     "max": 0.1524235000833869,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 51314688,
+     "min": 50806784,
+     "max": 51593216,
+     "n": 7
+    },
+    "outputs": [
+     "maps 332651682176 1023\n"
+    ],
+    "execution_seconds": {
+     "median": 0.06465845899999999,
+     "min": 0.06327091700000001,
+     "max": 0.067497,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 262144,
+     "min": 262144,
+     "max": 262144,
+     "n": 7
+    }
+   },
+   "lowered/go": {
+    "build_seconds": 0.1660856669768691,
+    "build_peak_rss_bytes": 57622528,
+    "binary_bytes": 2617384,
+    "run_seconds": {
+     "median": 0.34785949997603893,
+     "min": 0.3309008749201894,
+     "max": 0.36301366705447435,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 68878336,
+     "min": 68567040,
+     "max": 69042176,
+     "n": 7
+    },
+    "outputs": [
+     "maps 332651682176 1023\n"
+    ],
+    "execution_seconds": {
+     "median": 0.266409,
+     "min": 0.248575083,
+     "max": 0.271647125,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 7602176,
+     "min": 7602176,
+     "max": 8388608,
+     "n": 7
+    }
+   },
+   "lowered/tinygo": {
+    "build_seconds": 2.55641333386302,
+    "build_peak_rss_bytes": 296337408,
+    "binary_bytes": 1026513,
+    "run_seconds": {
+     "median": 0.4101924169808626,
+     "min": 0.38290949957445264,
+     "max": 0.41636983305215836,
+     "n": 7
+    },
+    "run_peak_rss_bytes": {
+     "median": 55967744,
+     "min": 55525376,
+     "max": 56197120,
+     "n": 7
+    },
+    "outputs": [
+     "maps 332651682176 1023\n"
+    ],
+    "execution_seconds": {
+     "median": 0.32199908299999996,
+     "min": 0.304033,
+     "max": 0.328108583,
+     "n": 7
+    },
+    "peak_linear_memory_bytes": {
+     "median": 524288,
+     "min": 524288,
+     "max": 524288,
+     "n": 7
+    }
+   }
+  }
+ }
+}

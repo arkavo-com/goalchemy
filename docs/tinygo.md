@@ -106,3 +106,30 @@ the Go compiler process, not LLVM's native allocations or generated programs.
 
 See [the benchmark guide](benchmarks.md) for other targets. The `micro`
 command also reports runtime peak RSS beside its timing statistics.
+
+## Recorded WASI results
+
+[The complete report](../reports/performance-tinygo-wasi.json) records a clean
+`fd838d6` revision on macOS arm64, TinyGo 0.43.0, Go 1.27.1, Binaryen 133 and
+Node 26.12.0. These are medians of seven runs, comparing the same lowered
+program built with each compiler on the same WASI host:
+
+| Workload | Compiler | WASI execution (ms) | Process wall time (ms) | Peak host RSS (MiB) | Peak linear memory (MiB) | Wasm file (KiB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| cpu | go | 118.37 | 205.34 | 54.83 | 2.88 | 2526.8 |
+| cpu | tinygo | 45.41 | 131.09 | 46.67 | 0.25 | 965.6 |
+| alloc | go | 58.59 | 144.12 | 68.48 | 7.25 | 2527.7 |
+| alloc | tinygo | 89.86 | 168.76 | 49.58 | 0.50 | 969.5 |
+| maps | go | 266.41 | 347.86 | 65.69 | 7.25 | 2556.0 |
+| maps | tinygo | 322.00 | 410.19 | 53.38 | 0.50 | 1002.5 |
+
+TinyGo reduces linear memory in these workloads. Its CPU loop runs faster;
+allocation churn and the ordered-map workload run slower. The source-only
+rows in the JSON show that ordered-map bookkeeping adds cost under both
+compilers, so source TinyGo speed alone does not predict lowered performance.
+
+Building the lowered TinyGo modules took 2.53–2.61 seconds with 281–284 MiB
+of reported peak RSS. The corresponding Go builds took 0.16–1.39 seconds
+with 55–86 MiB. These are single build observations with caches retained,
+not universal compiler speed or memory bounds. The JSON includes all build
+measurements, sample extrema, outputs, toolchain and compiler hashes.

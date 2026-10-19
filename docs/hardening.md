@@ -1,6 +1,6 @@
 # Hardening and upgrades
 
-`cmd/hardening` records three independent results for all targets, including
+`cmd/hardening` records three independent results for the standard target matrix, including
 experimental Swift. Install the pinned Linux x64 toolchains from
 `toolchains.lock` first, then run it from the repository root. The installer
 verifies every archive's SHA-256 and builds bdwgc with POSIX thread support.
@@ -92,3 +92,11 @@ Run a nightly campaign with explicit time budgets per family, for example
 `compat` for 15 minutes, `fuzz` for 30 minutes, and `baseline` for 15 minutes.
 The amount of generated fuzz work varies with target speed; the seed and
 completed case counts make each run auditable.
+
+The experimental [TinyGo WASI profile](tinygo.md) has its own opt-in
+`GOALCHEMY_TEST_TINYGO=1 go test -p 1 ./internal/driver -run TinyGo` suite and
+`scripts/bench/bench.py tinygo` benchmark. It is not included in the full
+language/conformance matrix because its accepted subset is narrower. The
+[WASI performance report](../reports/performance-tinygo-wasi.json) records
+build and execution timing with peak process RSS and Wasm linear-memory
+usage beside those timings, including source versus lowered comparisons.
