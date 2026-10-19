@@ -156,7 +156,7 @@ b7:
 		return
 	}
 	_fr._9 = _fr.tasks
-	_fr._8 = len(_fr._9)
+	_fr._8 = int(len(_fr._9))
 	_fr._7 = int(0)
 	for _fr._7 < _fr._8 {
 		_fr.t = _fr._9[_fr._7]

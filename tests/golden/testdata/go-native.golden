@@ -109,7 +109,7 @@ func main_2(_t *rt.Task) {
 		return
 	}
 	_9 = tasks
-	_8 = len(_9)
+	_8 = int(len(_9))
 	_7 = int(0)
 	for _7 < _8 {
 		t = _9[_7]
