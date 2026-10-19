@@ -117,6 +117,18 @@ watchdog is disabled in QEMU, matching the SDK emulator launcher. The CPU,
 byte-buffer and map fixtures exercise bounded workloads; map lookups allocate
 encoded keys, which are included in the arena high-water mark.
 
+## Recorded measurements
+
+Reports from clean implementation commit `9f1df56`: [host JSON](../reports/performance-c-micro-host.json) and [ESP32-C3 QEMU JSON](../reports/performance-c-micro-esp32c3.json). Host medians use seven fresh processes; QEMU medians use three cold boots. All outputs matched Go.
+
+| Workload | Host execution ms | Host peak RSS MiB | QEMU execution ms | ESP32 arena peak B | ESP32 stack used B | Firmware B |
+|---|---:|---:|---:|---:|---:|---:|
+| cpu | 1.452 | 1.75 | 99.201 | 64 | 1,892 | 160,768 |
+| bytes | 1.652 | 1.77 | 89.099 | 4,128 | 2,340 | 162,128 |
+| maps | 0.034 | 1.78 | 1.239 | 25,184 | 2,148 | 162,048 |
+
+Every firmware reserves the full 65,536-byte arena and a 16,384-byte task stack regardless of peak use. ESP-IDF reports 113,748 linked RAM bytes; all three booted with 260,400 bytes of free heap at the measurement point. Fresh configured firmware builds took 33.6–38.0 seconds with one compiler job and 86.7–90.3 MiB host peak RSS. These are SDK/QEMU and macOS arm64 host measurements, not physical-board measurements.
+
 ## Validation
 
 `go test ./internal/driver -run TestMicroC` checks 14 differential fixtures,

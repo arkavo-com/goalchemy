@@ -1,0 +1,266 @@
+{
+  "revision": "9f1df564d6000bdd1b0ca82ce6e453144a6a31d5",
+  "dirty": false,
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "compiler_sha256": "9369718f329015853ab5c2ce6cefb7cff45c1bd3a170da35adbcbd6d1f262333",
+  "cc": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "cflags": "-Os",
+  "cppflags": "",
+  "source_integer_bits": 64,
+  "measurements": "Host monotonic execution time includes output callback; arena peak includes alignment. RSS is fresh child peak, not ESP32 RAM. Native build is a single compiler driver.",
+  "workloads": {
+    "cpu": {
+      "build_seconds": 0.4329648329876363,
+      "build_peak_rss_bytes": 45236224,
+      "executable_bytes": 58968,
+      "execution_seconds": {
+        "median": 0.001452,
+        "min": 0.001361,
+        "max": 0.001674,
+        "n": 7
+      },
+      "host_peak_rss_bytes": {
+        "median": 1835008,
+        "min": 1835008,
+        "max": 1851392,
+        "n": 7
+      },
+      "arena_peak_bytes": 56,
+      "arena_capacity_bytes": 65536,
+      "samples": [
+        {
+          "execution_seconds": 0.001452,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 56,
+          "allocations": 2,
+          "peak_source_depth": 1,
+          "process_seconds": 0.06488970899954438
+        },
+        {
+          "execution_seconds": 0.001434,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 56,
+          "allocations": 2,
+          "peak_source_depth": 1,
+          "process_seconds": 0.004834083840250969
+        },
+        {
+          "execution_seconds": 0.001501,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 56,
+          "allocations": 2,
+          "peak_source_depth": 1,
+          "process_seconds": 0.004401874728500843
+        },
+        {
+          "execution_seconds": 0.001674,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 56,
+          "allocations": 2,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0044914172030985355
+        },
+        {
+          "execution_seconds": 0.001434,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 56,
+          "allocations": 2,
+          "peak_source_depth": 1,
+          "process_seconds": 0.004326750058680773
+        },
+        {
+          "execution_seconds": 0.001455,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 56,
+          "allocations": 2,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0042072501964867115
+        },
+        {
+          "execution_seconds": 0.001361,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 56,
+          "allocations": 2,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0040789577178657055
+        }
+      ]
+    },
+    "bytes": {
+      "build_seconds": 0.47469958290457726,
+      "build_peak_rss_bytes": 45105152,
+      "executable_bytes": 58680,
+      "execution_seconds": {
+        "median": 0.001652,
+        "min": 0.001428,
+        "max": 0.003656,
+        "n": 7
+      },
+      "host_peak_rss_bytes": {
+        "median": 1851392,
+        "min": 1851392,
+        "max": 1851392,
+        "n": 7
+      },
+      "arena_peak_bytes": 4128,
+      "arena_capacity_bytes": 65536,
+      "samples": [
+        {
+          "execution_seconds": 0.001652,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 4128,
+          "allocations": 3,
+          "peak_source_depth": 1,
+          "process_seconds": 0.06409320887178183
+        },
+        {
+          "execution_seconds": 0.001428,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 4128,
+          "allocations": 3,
+          "peak_source_depth": 1,
+          "process_seconds": 0.004474000073969364
+        },
+        {
+          "execution_seconds": 0.001635,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 4128,
+          "allocations": 3,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0048795416951179504
+        },
+        {
+          "execution_seconds": 0.001672,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 4128,
+          "allocations": 3,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0048783752135932446
+        },
+        {
+          "execution_seconds": 0.001665,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 4128,
+          "allocations": 3,
+          "peak_source_depth": 1,
+          "process_seconds": 0.00447541568428278
+        },
+        {
+          "execution_seconds": 0.001457,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 4128,
+          "allocations": 3,
+          "peak_source_depth": 1,
+          "process_seconds": 0.004857250023633242
+        },
+        {
+          "execution_seconds": 0.003656,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 4128,
+          "allocations": 3,
+          "peak_source_depth": 1,
+          "process_seconds": 0.00673083309084177
+        }
+      ]
+    },
+    "maps": {
+      "build_seconds": 0.44841958303004503,
+      "build_peak_rss_bytes": 45301760,
+      "executable_bytes": 58488,
+      "execution_seconds": {
+        "median": 3.4e-05,
+        "min": 3e-05,
+        "max": 5.2e-05,
+        "n": 7
+      },
+      "host_peak_rss_bytes": {
+        "median": 1867776,
+        "min": 1867776,
+        "max": 1867776,
+        "n": 7
+      },
+      "arena_peak_bytes": 27032,
+      "arena_capacity_bytes": 65536,
+      "samples": [
+        {
+          "execution_seconds": 5.2e-05,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 27032,
+          "allocations": 584,
+          "peak_source_depth": 1,
+          "process_seconds": 0.063767250161618
+        },
+        {
+          "execution_seconds": 4e-05,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 27032,
+          "allocations": 584,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0029355832375586033
+        },
+        {
+          "execution_seconds": 3.2e-05,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 27032,
+          "allocations": 584,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0025982502847909927
+        },
+        {
+          "execution_seconds": 3e-05,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 27032,
+          "allocations": 584,
+          "peak_source_depth": 1,
+          "process_seconds": 0.002572542056441307
+        },
+        {
+          "execution_seconds": 3.4e-05,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 27032,
+          "allocations": 584,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0026448327116668224
+        },
+        {
+          "execution_seconds": 3e-05,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 27032,
+          "allocations": 584,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0025230408646166325
+        },
+        {
+          "execution_seconds": 4e-05,
+          "status": 0,
+          "arena_capacity_bytes": 65536,
+          "arena_peak_bytes": 27032,
+          "allocations": 584,
+          "peak_source_depth": 1,
+          "process_seconds": 0.0026592500507831573
+        }
+      ]
+    }
+  }
+}
