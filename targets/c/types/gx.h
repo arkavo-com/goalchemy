@@ -5,6 +5,7 @@
  * immutable byte arrays. Structs, arrays, slice backing arrays, maps,
  * channels, closures, and interface boxes are Boehm-collected objects;
  * the collector scans stacks, globals, and heap objects conservatively.
+ * GX_MICRO instead retains objects in a bounded invocation arena.
  * Go panics unwind with longjmp to the innermost handler. */
 #ifndef GX_H
 #define GX_H
@@ -13,12 +14,18 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#ifdef GX_MICRO
+#include "micro.h"
+#define GC_MALLOC(n) gx_micro_alloc(n)
+#define GC_MALLOC_ATOMIC(n) gx_micro_alloc(n)
+#else
 #ifndef GC_THREADS
 #define GC_THREADS
 #endif
 #include <pthread.h>
-#include <sys/types.h>
 #include <gc.h>
+#endif
+#include <sys/types.h>
 #include <time.h>
 #include <setjmp.h>
 #include <stdbool.h>
@@ -356,7 +363,9 @@ struct gx_Sched {
     gx_Timer *timers;
     size_t ntimers, tcap;
     bool harness, host, retiring, retired;
+#ifndef GX_MICRO
     pthread_t thread;
+#endif
     struct timespec epoch;
     gx_Task *all;
     gx_Context *contexts;

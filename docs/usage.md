@@ -15,7 +15,7 @@ The repository's `go.mod` selects the Go 1.27.1 reference toolchain. Source prog
 | Command | Purpose |
 | --- | --- |
 | `goalchemy check [-gate g] [-tags t] [-json] [packages]` | Load, type-check, and validate against the language gate. |
-| `goalchemy compile -target <go\|typescript\|python\|java\|csharp\|rust\|c\|swift\|ir> -out <dir> [packages]` | Write a complete, runnable target directory. |
+| `goalchemy compile -target <go\|typescript\|python\|java\|csharp\|rust\|c\|c-micro\|swift\|ir> -out <dir> [packages]` | Write a complete, runnable target directory. |
 | `goalchemy build [-config goalchemy.yaml]` | Compile every target listed in a project configuration. |
 | `goalchemy docs -format json\|markdown\|site -out <dir> [packages]` | Generate consumer API documentation from library packages. |
 | `goalchemy run -target <name> [packages]` | Compile to a temporary directory and run the program. |
@@ -686,3 +686,6 @@ binary string copies. See the bounded [TypeScript evidence](typescript-byte-stor
 [Python evidence](python-byte-storage.md), [Rust evidence](rust-byte-storage.md)
 and [C evidence](c-byte-storage.md)
 for coverage and remaining SDK, browser and library requirements.
+
+For bounded ESP32 applications, see the [Micro C profile](c-micro.md):
+`goalchemy compile -target c-micro -out out/esp32 .`.

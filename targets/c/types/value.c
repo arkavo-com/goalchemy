@@ -6,12 +6,15 @@
 #include <math.h>
 #include <stdatomic.h>
 
+#ifndef GX_MICRO
 _Noreturn void gx_fault(const char *msg) {
     if (gx_sched && gx_sched->host && !gx_sched->retired && pthread_equal(gx_sched->thread, pthread_self())) gx_host_fault(msg);
     fprintf(stderr, "goalchemy runtime fault: goalchemy fault: %s\n", msg);
     fflush(stderr);
     abort();
 }
+
+#endif
 
 gx_V gx_str(const char *b, size_t n) {
     gx_V v = {0};
@@ -203,8 +206,14 @@ void gx_vkey(gx_V v, gx_Buf *out) {
     case GX_FLOAT: {
         uint64_t raw;
         if (isnan(v.u.f)) {
+#ifdef GX_MICRO
+            /* Micro entry is serialized; no 64-bit atomic library on RV32. */
+            static uint64_t next_nan = 0;
+            raw = next_nan++;
+#else
             static _Atomic uint64_t next_nan = 0;
             raw = atomic_fetch_add(&next_nan, 1);
+#endif
             if (raw == UINT64_MAX) gx_fault("NaN key identity exhausted");
             gx_buf_put(out, "Q", 1);
         } else {

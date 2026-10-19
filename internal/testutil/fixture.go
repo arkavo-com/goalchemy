@@ -304,6 +304,7 @@ var Runners = map[string]Runner{
 	"csharp": func(out string) (Observation, error) {
 		return run(out, 3*time.Minute, "sh", "run.sh")
 	},
+	"c-micro": func(out string) (Observation, error) { return run(out, 3*time.Minute, "sh", "run.sh") },
 	"c": func(out string) (Observation, error) {
 		return run(out, 3*time.Minute, "sh", "run.sh")
 	},
@@ -394,6 +395,9 @@ func BuildRust(out string) (string, error) {
 // EmitTarget maps a runner name to the target it compiles: runner
 // variants such as c-sanitize share their base target's output.
 func EmitTarget(runner string) string {
+	if runner == "c-micro" {
+		return runner
+	}
 	if base, _, ok := strings.Cut(runner, "-"); ok {
 		return base
 	}

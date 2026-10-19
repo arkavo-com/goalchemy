@@ -83,6 +83,9 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 		result.IR = &program
 		result.ObserveAPI = opts.ObserveAPI
 		res = &result
+		if name == "c-micro" && res.Catalog != nil {
+			res.Catalog = microCCatalog(res.Catalog)
+		}
 		if name == "go" && len(opts.Host) > 0 {
 			hosts, err := HostNames(opts.Host)
 			if err != nil {
@@ -190,12 +193,18 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 // on C runtime macros expand to host calls inside generated functions.
 var unqualifiedRuntime = map[string]naming.RuntimeScan{
 	"java": {}, "csharp": {}, "rust": {Types: true, Calls: true}, "swift": {Types: true, Calls: true},
-	"c": {Types: true, Calls: true, LocalCalls: true},
+	"c":       {Types: true, Calls: true, LocalCalls: true},
+	"c-micro": {Types: true, Calls: true, LocalCalls: true},
 }
 
 func runtimeNames(fsys fs.FS, target string, scan naming.RuntimeScan) (declared, called []string, err error) {
 	var roots []string
-	for _, dir := range []string{"runtime", "types", "native"} {
+	dirs := []string{"runtime", "types", "native"}
+	if target == "c-micro" {
+		target = "c"
+		dirs = append(dirs, "micro")
+	}
+	for _, dir := range dirs {
 		root := "targets/" + target + "/" + dir
 		if _, err := fs.Stat(fsys, root); err == nil {
 			roots = append(roots, root)

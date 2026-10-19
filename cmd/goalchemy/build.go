@@ -147,11 +147,12 @@ var runners = map[string]func(ctx context.Context, out string) *exec.Cmd{
 	"python": func(ctx context.Context, out string) *exec.Cmd {
 		return exec.CommandContext(ctx, "python3", filepath.Join(out, "main.py"))
 	},
-	"java":   shellRunner,
-	"csharp": shellRunner,
-	"rust":   shellRunner,
-	"c":      shellRunner,
-	"swift":  shellRunner,
+	"java":    shellRunner,
+	"csharp":  shellRunner,
+	"rust":    shellRunner,
+	"c":       shellRunner,
+	"c-micro": shellRunner,
+	"swift":   shellRunner,
 }
 
 func shellRunner(ctx context.Context, out string) *exec.Cmd {

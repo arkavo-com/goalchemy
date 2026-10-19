@@ -165,6 +165,7 @@ Non-`main` packages compile to value libraries for every target. See the [usage 
 | C# | `Main.cs`, `main.csproj` | .NET SDK 8 |
 | Rust | `src/main.rs`, `Cargo.toml` | Stable Rust, edition 2021 |
 | C | `main.c`, `run.sh` | C17 compiler and bdwgc 8.x with threads |
+| [Micro C](docs/c-micro.md) (`c-micro`) | C sources, bounded arena, ESP-IDF project | ESP-IDF 5.5.1 (ESP32-C3), or C17 host smoke runner |
 | Swift (experimental) | `main.swift`, `run.sh` | Swift 6.4, C compiler, pkg-config, OpenSSL 3, zlib, libcurl; Linux x86_64 |
 
 Each output directory also contains its runtime files, a `README.md`, a line map back to the Go source, and a `goalchemy.manifest.json` recording the compiler version, contracts, and files. Output is deterministic for the same inputs.

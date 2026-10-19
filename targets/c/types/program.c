@@ -7,6 +7,7 @@
 
 int gx_blocked_signal;
 
+#ifndef GX_MICRO
 void gx_stderr(const void *b, size_t n) {
     const char *p = b;
     while (n > 0) {
@@ -16,6 +17,8 @@ void gx_stderr(const void *b, size_t n) {
         n -= (size_t)w;
     }
 }
+
+#endif
 
 static void indented(gx_V s, gx_Buf *out) {
     const uint8_t *b = gx_sbytes(s);
@@ -97,6 +100,7 @@ const char *gx_panic_text(gx_Panic *p) {
     return (const char *)b.b;
 }
 
+#ifndef GX_MICRO
 _Noreturn void gx_report_panic(gx_Panic *p) {
     if (gx_sched && gx_sched->host && gx_sched->escape) {
         gx_sched->panic = p;
@@ -191,3 +195,5 @@ void gx_opaque_set(gx_V d, gx_V s) {
         if (ws->nw) memcpy(wd->waiters, ws->waiters, ws->nw * sizeof(gx_Task *));
     }
 }
+
+#endif /* !GX_MICRO */

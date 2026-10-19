@@ -14,6 +14,15 @@ import (
 // Emit writes source-owned definitions directly to separately compiled native
 // translation units. The private header shares declarations, never bodies.
 func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
+	return emit(p, symbols, false)
+}
+
+// EmitMicro shares C lowering with a bounded, returning embedded entry point.
+func EmitMicro(p *ir.Program, symbols map[string]string) (*Output, error) {
+	return emit(p, symbols, true)
+}
+
+func emit(p *ir.Program, symbols map[string]string, micro bool) (*Output, error) {
 	layout, err := artifact.NewLayout(p)
 	if err != nil {
 		return nil, err
@@ -83,7 +92,11 @@ func Emit(p *ir.Program, symbols map[string]string) (*Output, error) {
 		if p.Main != nil {
 			fmt.Fprintf(root, "    %s();\n", e.fnName(p.Main.Sym, "f_"))
 		}
-		root.WriteString("}\n\nint main(void) {\n    gx_program_main(_init_zero_globals, _entry);\n}\n")
+		if micro {
+			root.WriteString("}\n\nint goalchemy_micro_run(void *arena, size_t capacity, gx_micro_output output, void *state, gx_micro_stats *stats) {\n    return gx_micro_run(_init_zero_globals, _entry, arena, capacity, output, state, stats);\n}\n")
+		} else {
+			root.WriteString("}\n\nint main(void) {\n    gx_program_main(_init_zero_globals, _entry);\n}\n")
+		}
 	}
 	e.externWrappers(root)
 	e.flushHelpers()
