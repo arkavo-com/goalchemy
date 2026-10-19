@@ -14,34 +14,39 @@ jobs:
   checks:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: repository-runner-${{ matrix.runner_slot || 4 }}
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: ${{ matrix.timeout || 45 }}
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
-          - {name: Core compiler, suite: core}
-          - {name: Language and corpus (Go), suite: language, target: go}
-          - {name: Language and corpus (TypeScript), suite: language, target: typescript}
-          - {name: Language and corpus (Python), suite: language, target: python}
-          - {name: Language and corpus (Java), suite: language, target: java}
-          - {name: Language and corpus (C#), suite: language, target: csharp}
-          - {name: Language and corpus (Rust), suite: language, target: rust, timeout: 60}
-          - {name: Language and corpus (C), suite: language, target: c}
-          - {name: Language and corpus (Swift), suite: language, target: swift}
-          - {name: Native contracts and browser, suite: contracts}
-          - {name: HTTP contracts all targets, suite: contracts, shard: 1}
-          - {name: Integration 1 of 4, suite: integration, shard: 0}
-          - {name: Integration 2 of 4, suite: integration, shard: 1}
-          - {name: Integration 3 of 4, suite: integration, shard: 2}
-          - {name: Integration 4 of 4, suite: integration, shard: 3}
-          - {name: Examples and reproducible output all targets, suite: examples}
-          - {name: Memory and sanitizers, suite: memory}
-          - {name: Float differential all targets, suite: floats}
-          - {name: Naming modes all targets, suite: naming}
-          - {name: Runtime conformance all targets, suite: runtime}
-          - {name: Native pause model, suite: pause}
-          - {name: Native pause model (Python), suite: pause, target: python}
-          - {name: Native pause model (Java), suite: pause-java}
+          - {name: Core compiler, suite: core, runner_slot: 1}
+          - {name: Language and corpus (Go), suite: language, target: go, runner_slot: 2}
+          - {name: Language and corpus (TypeScript), suite: language, target: typescript, runner_slot: 3}
+          - {name: Language and corpus (Python), suite: language, target: python, runner_slot: 4}
+          - {name: Language and corpus (Java), suite: language, target: java, runner_slot: 1}
+          - {name: Language and corpus (C#), suite: language, target: csharp, runner_slot: 2}
+          - {name: Language and corpus (Rust), suite: language, target: rust, timeout: 60, runner_slot: 3}
+          - {name: Language and corpus (C), suite: language, target: c, runner_slot: 4}
+          - {name: Language and corpus (Swift), suite: language, target: swift, runner_slot: 4}
+          - {name: Native contracts and browser, suite: contracts, runner_slot: 2}
+          - {name: HTTP contracts all targets, suite: contracts, shard: 1, runner_slot: 3}
+          - {name: Integration 1 of 4, suite: integration, shard: 0, runner_slot: 4}
+          - {name: Integration 2 of 4, suite: integration, shard: 1, runner_slot: 1}
+          - {name: Integration 3 of 4, suite: integration, shard: 2, runner_slot: 2}
+          - {name: Integration 4 of 4, suite: integration, shard: 3, runner_slot: 3}
+          - {name: Examples and reproducible output all targets, suite: examples, runner_slot: 4}
+          - {name: Memory and sanitizers, suite: memory, runner_slot: 1}
+          - {name: Float differential all targets, suite: floats, runner_slot: 2}
+          - {name: Naming modes all targets, suite: naming, runner_slot: 3}
+          - {name: Runtime conformance all targets, suite: runtime, runner_slot: 4}
+          - {name: Native pause model, suite: pause, runner_slot: 1}
+          - {name: Native pause model (Python), suite: pause, target: python, runner_slot: 2}
+          - {name: Native pause model (Java), suite: pause-java, runner_slot: 3}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -107,6 +112,10 @@ jobs:
   swift-native:
     name: Native pause model (Swift, optional)
     runs-on: ubuntu-latest
+    concurrency:
+      group: repository-runner-4
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 150
     continue-on-error: true
     steps:
@@ -131,6 +140,10 @@ jobs:
   rust-native:
     name: Native pause model (Rust, optional)
     runs-on: ubuntu-latest
+    concurrency:
+      group: repository-runner-3
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 180
     continue-on-error: true
     steps:
@@ -163,6 +176,10 @@ jobs:
     needs: checks
     if: always()
     runs-on: ubuntu-latest
+    concurrency:
+      group: repository-runner-2
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 5
     steps:
       - name: Require all CI checks
