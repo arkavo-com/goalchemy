@@ -83,6 +83,9 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 		result.IR = &program
 		result.ObserveAPI = opts.ObserveAPI
 		res = &result
+		if name == "tinygo" && res.Catalog != nil {
+			res.Catalog = tinyGoCatalog(res.Catalog)
+		}
 		if name == "go" && len(opts.Host) > 0 {
 			hosts, err := HostNames(opts.Host)
 			if err != nil {

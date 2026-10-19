@@ -14,7 +14,7 @@ if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
 fi
 
 only=${1:-all}
-case "$only" in all|jdk|dotnet|bdwgc|llvm|swift) ;; *) echo "unknown toolchain: $only" >&2; exit 2 ;; esac
+case "$only" in all|jdk|dotnet|bdwgc|llvm|swift|tinygo|binaryen) ;; *) echo "unknown toolchain: $only" >&2; exit 2 ;; esac
 
 fetch() {
   local url=$1 hash=$2 archive=$3
@@ -103,6 +103,18 @@ if [[ $only == all || $only == swift ]]; then
   archive="$tc/downloads/swift-$SWIFT_VERSION-RELEASE-ubuntu22.04.tar.gz"
   fetch "$SWIFT_URL" "$SWIFT_SHA256" "$archive"
   install_tar "$archive" "$tc/swift-$SWIFT_VERSION" 1 "$tc/swift-$SWIFT_VERSION/usr/bin/swiftc" "$SWIFT_SHA256"
+fi
+
+if [[ $only == all || $only == tinygo ]]; then
+  archive="$tc/downloads/tinygo$TINYGO_VERSION.linux-amd64.tar.gz"
+  fetch "$TINYGO_URL" "$TINYGO_SHA256" "$archive"
+  install_tar "$archive" "$tc/tinygo" 1 "$tc/tinygo/bin/tinygo" "$TINYGO_SHA256"
+fi
+
+if [[ $only == all || $only == tinygo || $only == binaryen ]]; then
+  archive="$tc/downloads/binaryen-version_$BINARYEN_VERSION-x86_64-linux.tar.gz"
+  fetch "$BINARYEN_URL" "$BINARYEN_SHA256" "$archive"
+  install_tar "$archive" "$tc/binaryen" 1 "$tc/binaryen/bin/wasm-opt" "$BINARYEN_SHA256"
 fi
 
 echo "toolchains ready under $tc"

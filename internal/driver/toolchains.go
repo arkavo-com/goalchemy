@@ -41,6 +41,12 @@ func ToolchainRoot() string {
 
 func withToolchains(env []string, tc string) []string {
 	var bins []string
+	if isDirectory(filepath.Join(tc, "binaryen", "bin")) {
+		bins = append(bins, filepath.Join(tc, "binaryen", "bin"))
+	}
+	if isDirectory(filepath.Join(tc, "tinygo", "bin")) {
+		bins = append(bins, filepath.Join(tc, "tinygo", "bin"))
+	}
 	set := map[string]string{}
 	if native := filepath.Join(tc, "pkgconfig"); isDirectory(native) {
 		set["PKG_CONFIG_PATH"] = native

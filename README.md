@@ -217,3 +217,8 @@ Per-target details live in [`docs/`](docs): library boundaries, byte storage, an
 ## License
 
 Goalchemy is licensed under [Apache-2.0](LICENSE).
+
+An experimental [TinyGo WASI profile](docs/tinygo.md) emits WebAssembly
+commands while preserving 64-bit source integers. Its benchmark report compares
+direct and lowered Go/TinyGo builds with performance, peak RSS, and Wasm linear
+memory side by side.

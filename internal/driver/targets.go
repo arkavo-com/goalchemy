@@ -32,7 +32,7 @@ func init() {
 // nameRules gives each target's constraints on source names, for reporting
 // collisions before emission.
 var nameRules = map[string]func(*ir.Program) naming.Rules{
-	"go": golang.NameRules, "typescript": ts.NameRules, "python": py.NameRules, "java": java.NameRules,
+	"go": golang.NameRules, "tinygo": golang.NameRules, "typescript": ts.NameRules, "python": py.NameRules, "java": java.NameRules,
 	"csharp": csharp.NameRules, "rust": rust.NameRules, "c": cemit.NameRules, "swift": swiftemit.NameRules,
 }
 
@@ -42,8 +42,16 @@ func emitErr(code, msg string) []diagnostics.Diagnostic {
 }
 
 func emitGo(res *Result, out string) []diagnostics.Diagnostic {
+	return emitGoTarget(res, out, "go")
+}
+
+func emitGoTarget(res *Result, out, target string) []diagnostics.Diagnostic {
 	abs, _ := filepath.Abs(out)
-	o, err := golang.Emit(res.IR, abs, symbols(res, "go"))
+	emitter := golang.Emit
+	if target == "tinygo" {
+		emitter = golang.EmitTinyGo
+	}
+	o, err := emitter(res.IR, abs, symbols(res, target))
 	if err != nil {
 		var boundary *golang.LibraryBoundaryError
 		if errors.As(err, &boundary) {
@@ -57,11 +65,11 @@ func emitGo(res *Result, out string) []diagnostics.Diagnostic {
 	if res.ObserveAPI != nil {
 		res.ObserveAPI(o.API)
 	}
-	refs, files, ds := link.Plan(res.Catalog, "go", o.Contracts)
+	refs, files, ds := link.Plan(res.Catalog, target, o.Contracts)
 	if len(ds) > 0 {
 		return ds
 	}
-	rtFiles, err := link.CopyRuntime(res.Catalog, "go", files, out, "rt", true)
+	rtFiles, err := link.CopyRuntime(res.Catalog, target, files, out, "rt", true)
 	if err != nil {
 		return emitErr("GCE005", err.Error())
 	}
@@ -135,12 +143,22 @@ func emitGo(res *Result, out string) []diagnostics.Diagnostic {
 	if res.IR.Library {
 		usage = "go build ./... (import module goalchemyout, package generated; replace module path for distribution)"
 	}
-	if err := link.WriteFile(out, "README.md", []byte(readme("go", usage, "Requires Go 1.25 or later."))); err != nil {
+	requirements := "Requires Go 1.25 or later."
+	if target == "tinygo" {
+		usage, requirements = "sh run.sh", tinyGoRequirements
+		for name, data := range map[string]string{"run.sh": tinyGoRun, "build.sh": tinyGoBuild, "run.mjs": tinyGoWASIRunner, "rt/tinygo_profile.go": tinyGoGuard} {
+			if err := link.WriteFile(out, name, []byte(data)); err != nil {
+				return emitErr("GCE005", err.Error())
+			}
+			generated = append(generated, name)
+		}
+	}
+	if err := link.WriteFile(out, "README.md", []byte(readme(target, usage, requirements))); err != nil {
 		return emitErr("GCE005", err.Error())
 	}
 	generated = append(generated, "README.md", "go.mod")
 	sort.Strings(generated)
-	if err := link.WriteManifest(out, res.Catalog, "go", refs, rtFiles, generated, res.Program, o.Packages...); err != nil {
+	if err := link.WriteManifest(out, res.Catalog, target, refs, rtFiles, generated, res.Program, o.Packages...); err != nil {
 		return emitErr("GCE005", err.Error())
 	}
 	return nil

@@ -33,6 +33,7 @@ type Output struct {
 }
 
 type emitter struct {
+	tinygo      bool
 	api         []artifact.APIDeclaration
 	p           *ir.Program
 	names       *naming.Names
@@ -53,11 +54,21 @@ type emitter struct {
 
 // Emit generates source-package-owned files; outDir anchors source positions.
 func Emit(p *ir.Program, outDir string, symbols map[string]string) (*Output, error) {
+	return emit(p, outDir, symbols, false)
+}
+
+// EmitTinyGo shares the Go lowering but uses the explicit output contract:
+// TinyGo's built-in print writes stdout instead of the reference stderr.
+func EmitTinyGo(p *ir.Program, outDir string, symbols map[string]string) (*Output, error) {
+	return emit(p, outDir, symbols, true)
+}
+
+func emit(p *ir.Program, outDir string, symbols map[string]string, tinygo bool) (*Output, error) {
 	layout, err := artifact.NewLayout(p)
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{p: p, names: naming.New(p, NameRules(p)), outDir: outDir, symbols: symbols, typeNames: map[*ir.Type]string{}, syms: map[string]bool{}, contracts: map[string]bool{}, closures: map[*ir.Func]bool{}, layout: layout, files: map[string]*bytes.Buffer{}, owners: map[string]string{}}
+	e := &emitter{p: p, tinygo: tinygo, names: naming.New(p, NameRules(p)), outDir: outDir, symbols: symbols, typeNames: map[*ir.Type]string{}, syms: map[string]bool{}, contracts: map[string]bool{}, closures: map[*ir.Func]bool{}, layout: layout, files: map[string]*bytes.Buffer{}, owners: map[string]string{}}
 	e.selectFile("main.go", "")
 	for _, f := range p.Funcs {
 		if f.Closure {
@@ -351,6 +362,14 @@ func (e *emitter) typ(t *ir.Type) string {
 	}
 	switch t.Kind {
 	case ir.KBool, ir.KInt, ir.KString, ir.KFloat:
+		if e.tinygo {
+			switch t.Basic {
+			case "int":
+				return "rt.Int"
+			case "uint":
+				return "rt.Uint"
+			}
+		}
 		return t.Basic
 	case ir.KNamed:
 		if t.Name == "error" {
@@ -976,7 +995,7 @@ func (fe *fnEmitter) resume(op ir.Instr) {
 			fe.w("%s = _t.RV[1].(bool)\n", fe.val(i.Ok))
 		}
 	case *ir.Select:
-		fe.w("%s = _t.RV[0].(int)\n", fe.val(i.Index))
+		fe.w("%s = %s(_t.RV[0].(int))\n", fe.val(i.Index), fe.e.typ(i.Index.Type))
 		for k, c := range i.Cases {
 			if c.Send || c.Dst == nil && c.Ok == nil {
 				continue
@@ -1471,16 +1490,23 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			return
 		}
 		fe.w("{\nvar %s bool\n%s, %s = %s.(%s)\n", ok, fe.val(i.Dst), ok, fe.val(i.X), e.typ(i.T))
-		args := []string{fe.val(i.X), strconv.Quote(ir.TypeString(i.X.IRType())), strconv.Quote(ir.TypeString(i.T))}
-		if i.T.IsInterface() {
-			args = append(args, "(*"+e.typ(i.T)+")(nil)")
+		fe.w("if !%s {\n", ok)
+		if i.T.IsInterface() && len(i.T.U().Methods) > 0 {
+			// Test method sets statically: TinyGo cannot reflect on method
+			// signatures, and native assertions already enforce identity.
+			fe.w("if %s != nil {\n", fe.val(i.X))
 			for _, m := range i.T.U().Methods {
-				args = append(args, strconv.Quote(e.methodName(m.ID, m.Name)), strconv.Quote(m.Name))
+				sig := e.syncType(m.Sig)
+				if e.p.SuspMethods[m.ID] {
+					sig = e.startType(m.Sig)
+				}
+				method := e.methodName(m.ID, m.Name) + strings.TrimPrefix(sig, "func")
+				fe.w("if !rt.HasType[interface{ %s }](%s) { rt.PanicAssertMissing(%s, %q, %q) }\n",
+					method, fe.val(i.X), fe.val(i.X), ir.TypeString(i.T), m.Name)
 			}
-		} else {
-			args = append(args, "nil")
+			fe.w("}\n")
 		}
-		fe.w("if !%s {\nrt.PanicAssert(%s)\n}\n}\n", ok, strings.Join(args, ", "))
+		fe.w("rt.PanicAssert(%s, %q, %q, nil)\n}\n}\n", fe.val(i.X), ir.TypeString(i.X.IRType()), ir.TypeString(i.T))
 	case *ir.Call:
 		if i.Kind == ir.CallExtern && fe.externAdapts(i) {
 			return
@@ -1513,24 +1539,29 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.Len:
 		if i.X.IRType().U().Kind == ir.KChan {
 			e.use("core.chan.len")
-			fe.w("%s = %s.Len()\n", fe.val(i.Dst), fe.chanVal(i.X))
+			fe.w("%s = %s(%s.Len())\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.chanVal(i.X))
 			return
 		}
 		if i.X.IRType().U().Kind == ir.KMap {
 			e.use("core.map.len")
-			fe.w("%s = %s.Len()\n", fe.val(i.Dst), fe.mapVal(i.X))
+			fe.w("%s = %s(%s.Len())\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.mapVal(i.X))
 			return
 		}
-		fe.w("%s = len(%s)\n", fe.val(i.Dst), fe.val(i.X))
+		fe.w("%s = %s(len(%s))\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.val(i.X))
 	case *ir.Cap:
 		if i.X.IRType().U().Kind == ir.KChan {
 			e.use("core.chan.cap")
-			fe.w("%s = %s.Cap()\n", fe.val(i.Dst), fe.chanVal(i.X))
+			fe.w("%s = %s(%s.Cap())\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.chanVal(i.X))
 			return
 		}
-		fe.w("%s = cap(%s)\n", fe.val(i.Dst), fe.val(i.X))
+		fe.w("%s = %s(cap(%s))\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.val(i.X))
 	case *ir.MakeSlice:
-		fe.w("%s = make(%s, %s, %s)\n", fe.val(i.Dst), e.typ(i.Dst.Type), fe.val(i.Len), fe.val(i.Cap))
+		length, capacity := fe.val(i.Len), fe.val(i.Cap)
+		if e.tinygo {
+			length = "rt.NativeSize(" + length + ", \"makeslice: len out of range\")"
+			capacity = "rt.NativeSize(" + capacity + ", \"makeslice: cap out of range\")"
+		}
+		fe.w("%s = make(%s, %s, %s)\n", fe.val(i.Dst), e.typ(i.Dst.Type), length, capacity)
 	case *ir.MakeMap:
 		e.use("core.map.make")
 		m := i.Dst.Type.U()
@@ -1554,7 +1585,7 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 			fe.w("%s = rt.Append(%s)\n", fe.val(i.Dst), strings.Join(append([]string{fe.val(i.S)}, es...), ", "))
 		}
 	case *ir.Copy:
-		fe.w("%s = copy(%s, %s)\n", fe.val(i.N), fe.val(i.Dst), fe.val(i.Src))
+		fe.w("%s = %s(copy(%s, %s))\n", fe.val(i.N), e.typ(i.N.Type), fe.val(i.Dst), fe.val(i.Src))
 	case *ir.IndexString:
 		fe.w("%s = %s[%s]\n", fe.val(i.Dst), fe.val(i.S), fe.val(i.I))
 	case *ir.SliceOp:
@@ -1590,7 +1621,11 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		}
 	case *ir.DecodeRune:
 		e.use("core.string.decode_rune")
-		fe.w("%s, %s = rt.DecodeRune(%s, %s)\n", fe.val(i.Rune), fe.val(i.Width), fe.val(i.S), fe.val(i.I))
+		decoder := "rt.DecodeRune"
+		if e.tinygo {
+			decoder = "rt.DecodeRune64"
+		}
+		fe.w("%s, %s = %s(%s, %s)\n", fe.val(i.Rune), fe.val(i.Width), decoder, fe.val(i.S), fe.val(i.I))
 	case *ir.MapIterInit:
 		e.use("core.map.iterate")
 		fe.w("%s = %s.Iter()\n", fe.val(i.Iter), fe.mapVal(i.M))
@@ -1600,6 +1635,34 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 		var as []string
 		for _, a := range i.Args {
 			as = append(as, fe.val(a))
+		}
+		if e.tinygo {
+			e.use("core.print")
+			separator := ""
+			if i.Newline {
+				separator = " "
+			}
+			for j, arg := range as {
+				t := i.Args[j].IRType().U()
+				basic := t.Basic
+				if basic == "int" {
+					basic = "int64"
+				}
+				if basic == "uint" {
+					basic = "uint64"
+				}
+				arg = basic + "(" + arg + ")"
+				as[j] = "rt.PrintString(" + arg + ")"
+			}
+			expr := strings.Join(as, " + "+strconv.Quote(separator)+" + ")
+			if expr == "" {
+				expr = "\"\""
+			}
+			if i.Newline {
+				expr += " + \"\\n\""
+			}
+			fe.w("rt.WritePrint(%s)\n", expr)
+			return
 		}
 		fn := "print"
 		if i.Newline {
@@ -1631,7 +1694,11 @@ func (fe *fnEmitter) instr(in ir.Instr) {
 	case *ir.MakeChan:
 		e.use("core.chan.make")
 		ct := i.Dst.Type.U()
-		mk := fmt.Sprintf("rt.MakeChan[%s](%s)", e.typ(ct.Elem), fe.val(i.Size))
+		size := fe.val(i.Size)
+		if e.tinygo {
+			size = "rt.NativeSize(" + size + ", \"makechan: size out of range\")"
+		}
+		mk := fmt.Sprintf("rt.MakeChan[%s](%s)", e.typ(ct.Elem), size)
 		if i.Dst.Type.Kind == ir.KNamed {
 			mk = e.typ(i.Dst.Type) + "(" + mk + ")"
 		}
@@ -1895,7 +1962,11 @@ func (fe *fnEmitter) term(t ir.Terminator) {
 		}
 		fe.w("return %s\n", strings.Join(rs, ", "))
 	case *ir.Panic:
-		fe.w("panic(%s)\n", fe.val(t.X))
+		if fe.e.tinygo {
+			fe.w("panic(rt.SourcePanicValue(%s))\n", fe.val(t.X))
+		} else {
+			fe.w("panic(%s)\n", fe.val(t.X))
+		}
 	case *ir.PanicRuntime:
 		fe.w("panic(rt.PlainError(%q))\n", t.Msg)
 	case *ir.Unreachable:

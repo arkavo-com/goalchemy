@@ -88,6 +88,18 @@ func PanicAssert(x any, iface, target string, want any, methods ...string) {
 	panic(&TypeAssertionError{"interface conversion: " + iface + " is " + dyn + ", not " + target})
 }
 
+// HasType checks a statically supplied type without reflective signatures.
+func HasType[T any](value any) bool {
+	_, ok := value.(T)
+	return ok
+}
+
+// PanicAssertMissing reports the first method absent from a failed assertion.
+// Generated code checks one-method interfaces without reflective signatures.
+func PanicAssertMissing(x any, target, method string) {
+	panic(&TypeAssertionError{"interface conversion: " + TypeName(reflect.TypeOf(x)) + " is not " + target + ": missing method " + method})
+}
+
 // sameMethod reports whether method type m, whose first input is the
 // receiver, has interface method type im.
 func sameMethod(m, im reflect.Type) bool {
@@ -205,7 +217,7 @@ func FormatPanic(v any) string {
 	}
 	rv := reflect.ValueOf(v)
 	name := TypeName(rv.Type())
-	builtin := rv.Type().PkgPath() == "" && rv.Type().Name() != "" && names[rv.Type()] == ""
+	builtin := (rv.Type().PkgPath() == "" && rv.Type().Name() != "" && names[rv.Type()] == "") || names[rv.Type()] == "int" || names[rv.Type()] == "uint"
 	var s string
 	switch rv.Kind() {
 	case reflect.String:
@@ -229,6 +241,15 @@ func FormatPanic(v any) string {
 		return name + "(" + s + ")"
 	}
 	return s
+}
+
+// SourcePanicValue normalizes nil before TinyGo's native panic machinery sees it.
+// Otherwise a nil source panic is indistinguishable from no panic to Main.
+func SourcePanicValue(value any) any {
+	if value == nil {
+		value = RuntimeError("panic called with nil argument")
+	}
+	return value
 }
 
 // mainHook is set by the scheduler when the program uses tasks.

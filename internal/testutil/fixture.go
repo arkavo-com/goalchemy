@@ -281,6 +281,9 @@ func BuildJava(out string) ([]string, error) {
 }
 
 var Runners = map[string]Runner{
+	"tinygo": func(out string) (Observation, error) {
+		return run(out, 5*time.Minute, "sh", "run.sh")
+	},
 	"swift": func(out string) (Observation, error) {
 		swiftBuilds <- struct{}{}
 		defer func() { <-swiftBuilds }()

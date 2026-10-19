@@ -20,7 +20,7 @@ python3 scripts/bench/bench.py swift-sdk --sdk ../opentdf-sdk before=/tmp/gc-bef
 
 ## micro
 
-Process wall time of three cooperative programs in
+Process wall time and per-child peak RSS of three cooperative programs in
 `scripts/bench/testdata`, median of `--runs` (default 7), with a check that
 every build prints the same output:
 
@@ -29,7 +29,7 @@ every build prints the same output:
   then `fib(27)` through suspending recursion.
 - `pingpong`: 300k round trips over unbuffered channels between three tasks.
 
-`--targets` selects targets (`go`, `typescript`, `python`, `swift`, `csharp`, `java`;
+`--targets` selects targets (`go`, `typescript`, `python`, `swift`, `csharp`, `java`, `rust`, `tinygo`;
 default `go,typescript`), and `--pause-model native` selects the pause model of
 the targets that implement both (Go, TypeScript, Swift, C#, Python, Java). Swift programs are
 built in release mode (`-O -wmo`) before timing; C# programs are compiled with
@@ -37,6 +37,22 @@ their `run.sh` compiler line and timed as `dotnet bin/main.dll`; Java programs
 are compiled the same way and timed with their `run.sh` `java` command line. A compiler named `NAME@MODEL`
 uses that pause model, so one run can compare models:
 `bench.py micro --targets typescript base=/tmp/gc-before after@frames=/tmp/gc-after after@native=/tmp/gc-after`.
+
+## tinygo
+
+`bench.py tinygo --runs 7 candidate=/tmp/gc-after` compares direct source
+and lowered output with both Go and TinyGo, using CPU, allocation and map
+workloads. The console and JSON report include build seconds/peak RSS bytes,
+run seconds/peak RSS bytes, Wasm execution seconds/peak linear memory bytes,
+and executable size. The default is WASI Preview 1 on Node; use
+`--tinygo-platform native` for the optional native comparison. See the [TinyGo guide](tinygo.md)
+for the supported profile and measurement limits.
+
+RSS measurement in `micro` and `tinygo` requires Linux or macOS. `wait4`
+returns a per-command process high-water mark; the runner does not subtract
+cumulative `RUSAGE_CHILDREN` peaks. Linux KiB and macOS bytes are normalized
+to bytes. These values include process overhead and are not heap allocation
+counts or simultaneous process-tree peaks.
 
 ## swift-matrix
 

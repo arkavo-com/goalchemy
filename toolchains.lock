@@ -24,3 +24,11 @@ LIBTINFO5_SHA256='4df4288404108f1a156d014e8764a064e977e34e6d44931ab60451694c03c9
 SWIFT_VERSION='6.4.0'
 SWIFT_URL='https://download.swift.org/swift-6.4.0-release/ubuntu2204/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubuntu22.04.tar.gz'
 SWIFT_SHA256='bce85ea80f1471b85f39993f9285dbc798ec8e1eac5f677e24b2ac693856f9f8'
+
+TINYGO_VERSION='0.43.0'
+TINYGO_URL='https://github.com/tinygo-org/tinygo/releases/download/v0.43.0/tinygo0.43.0.linux-amd64.tar.gz'
+TINYGO_SHA256='ca9fc6d055e3889462dea4450a2e42a92242d88b5c362a7ec39bdb563413d78a'
+
+BINARYEN_VERSION='133'
+BINARYEN_URL='https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz'
+BINARYEN_SHA256='2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489'

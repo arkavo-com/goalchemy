@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in Goalchemy benchmarks (docs/benchmarks.md). Not run by go test or CI.
 
+  bench.py tinygo [--runs 7] NAME=COMPILER ...
   bench.py micro [--targets go,typescript,swift] [--pause-model frames|native] [--runs 7] NAME[@MODEL]=COMPILER ...
   bench.py swift-matrix [--variants A,B,C] [--blocks 50,200,1000] [--modes debug,release] NAME[@MODEL]=COMPILER ...
   bench.py csharp-matrix [--variants C] [--blocks 50,200,1000] NAME[@MODEL]=COMPILER ...
@@ -9,7 +10,7 @@
 Each NAME=COMPILER is a goalchemy binary; several compare builds A/B. Timings
 alternate compilers per run. Results print as a table and are written as
 JSON to --json (default bench-<command>.json in the work directory)."""
-import argparse, json, os, re, shutil, statistics, subprocess, sys, time
+import argparse, json, os, re, shutil, statistics, subprocess, sys, time, tempfile, platform, hashlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -31,6 +32,39 @@ def timed(cmd, cwd=None, env=None):
     return time.perf_counter() - start, out
 
 
+def measured(cmd, cwd=None, env=None):
+    """Wall time and this child's wait4 peak RSS; never a cumulative delta.
+
+    Files avoid pipe deadlock while wait4 reaps the exact child. RSS is a
+    process high-water mark, not heap bytes or simultaneous process-tree RSS.
+    """
+    if sys.platform not in ('linux', 'darwin'):
+        raise RuntimeError('peak RSS measurement requires Linux or macOS')
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        start = time.perf_counter()
+        p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
+        try:
+            _, status, usage = os.wait4(p.pid, 0)
+        except BaseException:
+            p.kill()
+            p.wait()
+            raise
+        elapsed = time.perf_counter() - start
+        p.returncode = os.waitstatus_to_exitcode(status)
+        stdout.seek(0)
+        stderr.seek(0)
+        out = stdout.read().decode() + stderr.read().decode()
+        if p.returncode:
+            raise subprocess.CalledProcessError(p.returncode, cmd, output=out)
+        rss = usage.ru_maxrss * (1024 if sys.platform == 'linux' else 1)
+        return elapsed, out, rss
+
+
+def file_hash(path):
+    with open(path, 'rb') as source:
+        return hashlib.sha256(source.read()).hexdigest()
+
+
 def stats(xs):
     return {'median': statistics.median(xs), 'min': min(xs), 'max': max(xs), 'n': len(xs)}
 
@@ -48,6 +82,12 @@ def compilers(specs):
 def toolchain_env():
     env = dict(os.environ)
     tc = os.path.join(ROOT, '.toolchains')
+    tinygo = os.path.join(tc, 'tinygo', 'bin')
+    if os.path.isdir(tinygo):
+        env['PATH'] = tinygo + os.pathsep + env['PATH']
+    binaryen = os.path.join(tc, 'binaryen', 'bin')
+    if os.path.isdir(binaryen):
+        env['PATH'] = binaryen + os.pathsep + env['PATH']
     swift = os.path.join(tc, 'swift-6.4.0', 'usr', 'bin')
     if shutil.which('swiftc') is None and os.path.isdir(swift):
         env['PATH'] = swift + os.pathsep + env['PATH']
@@ -69,8 +109,10 @@ def csharp_build(out, env):
 
 def micro(args, comps, work):
     env = toolchain_env()
+    env.setdefault('BINARYEN_CORES', '1')
     runners = {
         'rust': (lambda out: run(['cargo', 'build', '--release', '--quiet'], cwd=out, env=env), ['target/release/main']),
+        'tinygo': (lambda out: run(['tinygo', 'build', '-p', '1', '-target', 'wasip1', '-opt=2', '-o', 'main.wasm', '.'], cwd=out, env=env), ['node', '--disable-warning=ExperimentalWarning', 'run.mjs']),
         'go': (lambda out: run(['go', 'build', '-o', 'prog', '.'], cwd=out), ['./prog']),
         'typescript': (None, ['node', 'main.ts']),
         'python': (None, ['python3', 'main.py']),
@@ -94,18 +136,98 @@ def micro(args, comps, work):
                     build(out)
                 dirs[name] = out
             times = {n: [] for n in dirs}
+            memory = {n: [] for n in dirs}
             outputs = {n: set() for n in dirs}
             for i in range(args.runs):
                 names = list(dirs) if i % 2 == 0 else list(reversed(dirs))
                 for n in names:
-                    t, o = timed(cmd, cwd=dirs[n], env=env)
+                    t, o, rss = measured(cmd, cwd=dirs[n], env=env)
                     times[n].append(t)
+                    memory[n].append(rss)
                     outputs[n].add(o)
             key = f'{prog}/{target}'
-            res[key] = {n: {**stats(v), 'output': sorted(outputs[n])} for n, v in times.items()}
-            print(key, ' '.join(f'{n}={statistics.median(v) * 1000:.0f}ms' for n, v in times.items()),
+            res[key] = {n: {**stats(v), 'peak_rss_bytes': stats(memory[n]), 'output': sorted(outputs[n])} for n, v in times.items()}
+            print(key, ' '.join(f'{n}={statistics.median(v) * 1000:.0f}ms/{statistics.median(memory[n]) / 1048576:.2f}MiB RSS' for n, v in times.items()),
                   'outputs agree' if len({tuple(sorted(o)) for o in outputs.values()}) == 1 else 'OUTPUTS DIFFER', flush=True)
     return res
+
+
+def tinygo_compare(args, comps, work):
+    """Separate source/compiler effects from Goalchemy lowering/runtime costs."""
+    env = toolchain_env()
+    env.setdefault('GOMAXPROCS', '2')
+    env.setdefault('GOMEMLIMIT', '1GiB')
+    env.setdefault('BINARYEN_CORES', '1')
+    wasi = args.tinygo_platform == 'wasip1'
+    results = {}
+    for prog in ('cpu', 'alloc', 'maps'):
+        src = os.path.join(HERE, 'testdata', 'tinygo-' + prog)
+        for name, comp in comps.items():
+            lowered = os.path.join(work, f'tinygo-{prog}-{name}')
+            run([comp, 'compile', '-target', 'tinygo', '-out', lowered, '.'], cwd=src, env=env)
+            variants = {}
+            for source, directory in (('source', src), ('lowered', lowered)):
+                for compiler in ('go', 'tinygo'):
+                    key = source + '/' + compiler
+                    binary = os.path.join(lowered, source + '-' + compiler + ('.wasm' if wasi else ''))
+                    build_env = dict(env)
+                    if wasi and compiler == 'go':
+                        build_env.update(GOOS='wasip1', GOARCH='wasm', CGO_ENABLED='0')
+                    flags = ['-p', '1'] if compiler == 'go' else ['-p', '1', '-opt=2']
+                    if wasi and compiler == 'tinygo':
+                        flags += ['-target', 'wasip1']
+                    build, _, rss = measured([compiler, 'build', *flags, '-o', binary, '.'], cwd=directory, env=build_env)
+                    cmd = ['node', '--disable-warning=ExperimentalWarning', os.path.join(lowered, 'run.mjs'), binary] if wasi else [binary]
+                    variants[key] = {'build_seconds': build, 'build_peak_rss_bytes': rss,
+                                     'binary_bytes': os.path.getsize(binary), 'run_seconds': [],
+                                     'run_peak_rss_bytes': [], 'command': cmd, 'outputs': set(),
+                                     'execution_seconds': [], 'peak_linear_memory_bytes': []}
+                    measured(cmd, env=env)  # excluded warm-up
+            for i in range(args.runs):
+                keys = list(variants)
+                keys = keys[i % len(keys):] + keys[:i % len(keys)]
+                for key in keys:
+                    v = variants[key]
+                    run_env = dict(env)
+                    metrics_path = os.path.join(lowered, 'metrics.json')
+                    if wasi:
+                        run_env['GOALCHEMY_WASM_METRICS'] = metrics_path
+                    elapsed, out, rss = measured(v['command'], env=run_env)
+                    if wasi:
+                        with open(metrics_path) as metrics_file:
+                            metrics = json.load(metrics_file)
+                        for metric in ('execution_seconds', 'peak_linear_memory_bytes'):
+                            v[metric].append(metrics[metric])
+                    v['run_seconds'].append(elapsed)
+                    v['run_peak_rss_bytes'].append(rss)
+                    v['outputs'].add(out)
+            if any(len(v['outputs']) != 1 for v in variants.values()) or len({tuple(sorted(v['outputs'])) for v in variants.values()}) != 1:
+                raise RuntimeError(f'{prog}: source/lowered/compiler outputs differ')
+            for key, v in variants.items():
+                del v['command']
+                for metric in ('execution_seconds', 'peak_linear_memory_bytes'):
+                    if wasi:
+                        v[metric] = stats(v[metric])
+                    else:
+                        del v[metric]
+                v['outputs'] = sorted(v['outputs'])
+                v['run_seconds'] = stats(v['run_seconds'])
+                v['run_peak_rss_bytes'] = stats(v['run_peak_rss_bytes'])
+                print(f"{prog}/{name}/{key}: build {v['build_seconds']:.3f}s / {v['build_peak_rss_bytes']/1048576:.2f}MiB RSS; "
+                      f"run {v['run_seconds']['median']*1000:.2f}ms / {v['run_peak_rss_bytes']['median']/1048576:.2f}MiB RSS; "
+                      f"binary {v['binary_bytes']} bytes" +
+                      (f"; WASI execution {v['execution_seconds']['median']*1000:.2f}ms / {v['peak_linear_memory_bytes']['median']/1048576:.2f}MiB linear memory" if wasi else ''), flush=True)
+            results[prog + '/' + name] = variants
+    return {'schema_version': 1,
+            'compiler_sha256': {name: file_hash(binary) for name, binary in comps.items()},
+            'toolchains_lock_sha256': file_hash(os.path.join(ROOT, 'toolchains.lock')),
+            'source_integer_bits': 64, 'revision': run(['git', 'rev-parse', 'HEAD'], ROOT).strip(),
+            'dirty': bool(run(['git', 'status', '--porcelain'], ROOT).strip()),
+            'host': platform.platform(), 'machine': platform.machine(), 'target': args.tinygo_platform,
+            'toolchains': {c: output([c, 'version' if c in ('go', 'tinygo') else '--version'], env=env).strip() for c in ('go', 'tinygo', 'node', 'wasm-opt')},
+            'environment': {k: env.get(k, '') for k in ('GOMAXPROCS', 'GOMEMLIMIT', 'GOTOOLCHAIN', 'BINARYEN_CORES')},
+            'measurement': 'wait4 per-child peak RSS in bytes; not heap use or aggregate process-tree peak; compiler caches retained; one build job; one excluded warm-up; wall time includes process startup',
+            'results': results}
 
 
 def segments(n):
@@ -222,7 +344,7 @@ def swift_sdk(args, comps, work):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('command', choices=['micro', 'swift-matrix', 'csharp-matrix', 'swift-sdk'])
+    ap.add_argument('command', choices=['tinygo', 'micro', 'swift-matrix', 'csharp-matrix', 'swift-sdk'])
     ap.add_argument('compilers', nargs='+', help='NAME=PATH to a goalchemy binary')
     ap.add_argument('--work', default=os.path.join(ROOT, 'out', 'bench'))
     ap.add_argument('--json')
@@ -233,6 +355,7 @@ def main():
     ap.add_argument('--variants', default='A,B,C')
     ap.add_argument('--blocks', default='50,200,1000')
     ap.add_argument('--modes', default='debug,release')
+    ap.add_argument('--tinygo-platform', choices=['wasip1', 'native'], default='wasip1')
     ap.add_argument('--sdk')
     args = ap.parse_args()
     comps = compilers(args.compilers)
@@ -240,7 +363,11 @@ def main():
     if args.sdk:
         args.sdk = os.path.abspath(args.sdk)
     os.makedirs(args.work, exist_ok=True)
-    if args.command == 'micro':
+    if args.runs < 1:
+        ap.error('--runs must be positive')
+    if args.command == 'tinygo':
+        res = tinygo_compare(args, comps, args.work)
+    elif args.command == 'micro':
         res = micro(args, comps, args.work)
     elif args.command == 'swift-matrix':
         res = swift_matrix(args, comps, args.work)

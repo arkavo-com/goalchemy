@@ -686,3 +686,9 @@ binary string copies. See the bounded [TypeScript evidence](typescript-byte-stor
 [Python evidence](python-byte-storage.md), [Rust evidence](rust-byte-storage.md)
 and [C evidence](c-byte-storage.md)
 for coverage and remaining SDK, browser and library requirements.
+
+## TinyGo
+
+Use `-target tinygo` for the experimental WASI Preview 1 compiler profile.
+See [TinyGo support](tinygo.md) for subset restrictions, build commands, the
+Node WASI runner, and performance/memory measurements.

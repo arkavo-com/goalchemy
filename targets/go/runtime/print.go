@@ -1,6 +1,12 @@
 package rt
 
-import "strconv"
+import (
+	"os"
+	"strconv"
+)
+
+// WritePrint preserves the source print stream across Go implementations.
+func WritePrint(s string) { _, _ = os.Stderr.WriteString(s) }
 
 // PrintString renders one print operand exactly as print and println do.
 func PrintString(v any) string {

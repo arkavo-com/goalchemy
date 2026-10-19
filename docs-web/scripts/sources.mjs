@@ -1,5 +1,6 @@
 // The repository documents remain the authority. These entries only define publication metadata.
 export const sources = [
+  ['docs/tinygo.md', 'targets/details/tinygo', 'TinyGo profile', 'TinyGo WASI support, source subset limits, and performance/memory measurements.', 1],
   ['docs/api-documentation.md', 'guides/api-documentation', 'Generate SDK documentation', 'Consumer API catalogs, portable Markdown, and an Astro Starlight site template.', 7],
   ['docs/usage.md', 'guides/usage', 'Commands and output', 'CLI usage, project configuration, generated names, and output layouts.', 8],
   ['specs/language.md', 'language/specification', 'Language specification', 'The accepted Go subset, semantics, feature gates, and compatibility contract.', 2],
