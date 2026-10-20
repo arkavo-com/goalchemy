@@ -164,6 +164,7 @@ Non-`main` packages compile to value libraries for every target. See the [usage 
 | Java | `Main.java`, `run.sh` | JDK 21 or later |
 | C# | `Main.cs`, `main.csproj` | .NET SDK 8 |
 | Rust | `src/main.rs`, `Cargo.toml` | Stable Rust, edition 2021 |
+| Rust `no_std` (experimental) | `src/lib.rs`, `Cargo.toml` | `-target rust-nostd`; allocator and platform entry supplied by the application |
 | C | `main.c`, `run.sh` | C17 compiler and bdwgc 8.x with threads |
 | Swift (experimental) | `main.swift`, `run.sh` | Swift 6.4, C compiler, pkg-config, OpenSSL 3, zlib, libcurl; Linux x86_64 |
 
@@ -206,6 +207,7 @@ The public documentation is at [goalchemy.dev](https://goalchemy.dev). The Astro
 | Supported feature matrix | [`specs/features.yaml`](specs/features.yaml) |
 | Runtime and type contracts | [`specs/runtime`](specs/runtime), [`specs/types`](specs/types) |
 | Host lifecycles per target | [Host operations](docs/host-operations.md) |
+| Embedded Rust with `core` and `alloc` | [Rust no_std profile](docs/rust-no-std.md) |
 | Implementing a new target language | [Adding a language](docs/adding-language.md) |
 | Swift setup, representation, libraries and verification | [Swift target](docs/swift-target.md) |
 | Testing, toolchains, reports | [Hardening](docs/hardening.md) |

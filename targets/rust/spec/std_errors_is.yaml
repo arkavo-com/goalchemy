@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: d5a4ff7fb1ecc4d0232969d48db2118c1fa5902cd96073a12cb7a09d563e3eb8
 symbol: "std_errors_is"
 implementation: runtime/std_errors_is.rs
-implementation_hash: ddb5795a53da68f7c4b22f55406a75069bc59daebb986fe6fd5bc7c34ad1eac3
+implementation_hash: b71e686e0a494d105f0b992b627a3681bc897473c5f6e58d3564194b2982a426
 summary: "errors.Is: whether any error in err's Unwrap chain matches target."
 suspension: never
 determinism: deterministic

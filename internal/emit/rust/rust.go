@@ -28,6 +28,7 @@ type Output struct {
 }
 
 type emitter struct {
+	noStd     bool
 	api       []artifact.APIDeclaration
 	p         *ir.Program
 	names     *naming.Names

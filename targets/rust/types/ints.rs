@@ -35,6 +35,6 @@ pub fn u64s(v: V) -> V {
     s((v.i() as u64).to_string().as_bytes())
 }
 
-pub fn cmpu(a: &V, b: &V) -> std::cmp::Ordering {
+pub fn cmpu(a: &V, b: &V) -> core::cmp::Ordering {
     (a.i() as u64).cmp(&(b.i() as u64))
 }

@@ -96,6 +96,9 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 			res.IR.HostNames = hosts
 		}
 	}
+	if name == "rust-nostd" && res != nil && res.Catalog != nil {
+		res.Catalog = rustNoStdCatalog(res.Catalog)
+	}
 	e, ok := emitters[name]
 	if !ok {
 		return []diagnostics.Diagnostic{{Code: "GCE001", Severity: diagnostics.Error, Feature: "target",
@@ -133,7 +136,7 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 			}
 		}
 	}
-	if res.IR != nil && res.IR.Library && name != "c" && name != "go" && name != "typescript" && name != "java" && name != "csharp" && name != "python" && name != "rust" && name != "swift" && name != "ir" {
+	if res.IR != nil && res.IR.Library && name != "c" && name != "go" && name != "typescript" && name != "java" && name != "csharp" && name != "python" && name != "rust" && name != "rust-nostd" && name != "swift" && name != "ir" {
 		return []diagnostics.Diagnostic{{Code: "GCE006", Severity: diagnostics.Error, Feature: "library build",
 			Message: "target " + name + " cannot build a library",
 			Remedy:  "Compile package main for this target, or choose a target with a supported library API."}}
@@ -192,13 +195,18 @@ func EmitWithOptions(name string, res *Result, out string, opts EmitOptions) (ds
 // namespace with the runtime, so its own references to types count too, and
 // on C runtime macros expand to host calls inside generated functions.
 var unqualifiedRuntime = map[string]naming.RuntimeScan{
-	"java": {}, "csharp": {}, "rust": {Types: true, Calls: true}, "swift": {Types: true, Calls: true},
+	"java": {}, "csharp": {}, "rust": {Types: true, Calls: true}, "rust-nostd": {Types: true, Calls: true}, "swift": {Types: true, Calls: true},
 	"c": {Types: true, Calls: true, LocalCalls: true},
 }
 
 func runtimeNames(fsys fs.FS, target string, scan naming.RuntimeScan) (declared, called []string, err error) {
 	var roots []string
-	for _, dir := range []string{"runtime", "types", "native"} {
+	dirs := []string{"runtime", "types", "native"}
+	if target == "rust-nostd" {
+		target = "rust"
+		dirs = append(dirs, "nostd")
+	}
+	for _, dir := range dirs {
 		root := "targets/" + target + "/" + dir
 		if _, err := fs.Stat(fsys, root); err == nil {
 			roots = append(roots, root)

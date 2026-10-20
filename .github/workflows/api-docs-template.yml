@@ -24,9 +24,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   template:
     runs-on: ubuntu-latest
+    concurrency:
+      group: repository-runner-2
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7

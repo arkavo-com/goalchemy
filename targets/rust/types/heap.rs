@@ -3,11 +3,17 @@
 //! every live value is held in a registered root: function frames (Fr),
 //! globals, task frames, temporary runtime roots, and in-flight panics.
 use super::*;
+#[cfg(not(goalchemy_nostd))]
+use std::collections::BTreeMap as RootMap;
+#[cfg(goalchemy_nostd)]
+use alloc::collections::BTreeMap as RootMap;
+#[cfg(not(goalchemy_nostd))]
 use std::collections::HashMap;
 
 pub enum Obj {
     Free,
     /// Owner-associated native registry identity; never private key material.
+    #[cfg(not(goalchemy_nostd))]
     NativeKey(u64,u64),
     /// Struct fields, array elements, slice backing arrays, and cells.
     Vals(Vec<V>),
@@ -16,15 +22,21 @@ pub enum Obj {
     Map(GoMap),
     Box(&'static TypeDesc, V),
     Func(Func),
+    #[cfg(not(goalchemy_nostd))]
     Chan(Chan),
+    #[cfg(not(goalchemy_nostd))]
     Mutex(Mutex),
+    #[cfg(not(goalchemy_nostd))]
     WaitGroup(WaitGroup),
+    #[cfg(not(goalchemy_nostd))]
     Context(Context),
     Iter(MapIter),
     Panic(PanicObj),
+    #[cfg(not(goalchemy_nostd))]
     Future(FutureState),
 }
 
+#[cfg(not(goalchemy_nostd))]
 pub struct FutureState {
     pub done: bool,
     pub observed: bool,
@@ -47,9 +59,13 @@ pub struct Heap {
 
 /// Allocations between collections, at least; GOALCHEMY_GC_THRESHOLD
 /// overrides it (1 collects at every safepoint).
+#[cfg(not(goalchemy_nostd))]
 fn min_threshold() -> usize {
     std::env::var("GOALCHEMY_GC_THRESHOLD").ok().and_then(|v| v.parse().ok()).unwrap_or(50_000)
 }
+
+#[cfg(goalchemy_nostd)]
+fn min_threshold() -> usize { super::owner::gc_threshold() }
 
 thread_local! {
     static HEAP: RefCell<Heap> = RefCell::new(Heap {
@@ -67,7 +83,7 @@ thread_local! {
     static TEMP: RefCell<Vec<V>> = RefCell::new(Vec::new());
     static PERM: RefCell<Vec<V>> = RefCell::new(Vec::new());
     /// Source objects referenced by library handles of this owner thread.
-    pub static LIBRARY_ROOTS: RefCell<std::collections::BTreeMap<u64, V>> = RefCell::new(std::collections::BTreeMap::new());
+    pub static LIBRARY_ROOTS: RefCell<RootMap<u64, V>> = RefCell::new(RootMap::new());
 }
 
 /// Keeps a runtime-owned value alive for the rest of the program.
@@ -127,7 +143,7 @@ pub fn slot(h: H, i: usize) -> V {
 #[inline]
 pub fn set_slot(h: H, i: usize, x: V) {
     let old = with(h, |o| match o {
-        Obj::Vals(v) => std::mem::replace(&mut v[i], x),
+        Obj::Vals(v) => core::mem::replace(&mut v[i], x),
         Obj::Bytes(v) => { v[i] = x.i() as u8; V::Nil },
         _ => fault("slot of non-storage object"),
     });
@@ -168,6 +184,7 @@ pub struct Fr {
     p: *mut FrData,
     idx: usize,
     rooted: bool,
+    #[cfg(not(goalchemy_nostd))]
     task: Option<std::rc::Weak<Task>>,
 }
 
@@ -179,17 +196,18 @@ impl Fr {
             r.push(p);
             r.len() - 1
         });
-        Fr { p, idx, rooted: true, task: None }
+        Fr { p, idx, rooted: true, #[cfg(not(goalchemy_nostd))] task: None }
     }
 
     pub fn unrooted(n: usize) -> Fr {
         let p = Box::into_raw(Box::new(FrData { v: vec![V::Nil; n], d: Vec::new() }));
-        Fr { p, idx: 0, rooted: false, task: None }
+        Fr { p, idx: 0, rooted: false, #[cfg(not(goalchemy_nostd))] task: None }
     }
 
     /// Async activations belong to their task, not the synchronous TLS stack.
     /// Registrations are removed by identity: dropping a parked future need
     /// not follow construction order, even within a single task.
+    #[cfg(not(goalchemy_nostd))]
     pub fn task(t: &Rc<Task>, n: usize) -> Fr {
         let mut fr = Fr::unrooted(n);
         t.native_roots.borrow_mut().push(fr.p);
@@ -206,7 +224,7 @@ impl Fr {
 
     #[inline]
     pub fn s(&self, i: usize, x: V) {
-        let old = unsafe { std::mem::replace(&mut (&mut (*self.p).v)[i], x) };
+        let old = unsafe { core::mem::replace(&mut (&mut (*self.p).v)[i], x) };
         drop(old);
     }
 
@@ -233,7 +251,7 @@ impl Fr {
     /// Leaks the frame data as a permanent root (globals).
     pub fn leak(self) -> *mut FrData {
         let p = self.p;
-        std::mem::forget(self);
+        core::mem::forget(self);
         p
     }
 }
@@ -244,6 +262,7 @@ impl Drop for Fr {
             let idx = self.idx;
             ROOTS.with(|r| r.borrow_mut().truncate(idx));
         }
+        #[cfg(not(goalchemy_nostd))]
         if let Some(t) = self.task.as_ref().and_then(|t| t.upgrade()) {
             t.native_roots.borrow_mut().retain(|p| *p != self.p);
         }
@@ -276,7 +295,11 @@ pub fn temp_root(vs: &[V]) -> TempRoots {
 impl Drop for TempRoots {
     fn drop(&mut self) {
         let n = self.0;
+        #[cfg(goalchemy_nostd)]
+        TEMP.with(|t| t.borrow_mut().truncate(n));
+        #[cfg(not(goalchemy_nostd))]
         let old: Vec<V> = TEMP.with(|t| t.borrow_mut().drain(n..).collect());
+        #[cfg(not(goalchemy_nostd))]
         drop(old);
     }
 }
@@ -296,6 +319,7 @@ pub fn safepoint() {
 
 pub fn collect() {
     let mut stack: Vec<V> = Vec::new();
+    #[cfg(not(goalchemy_nostd))]
     let mut frames: Vec<Rc<Frame>> = Vec::new();
     ROOTS.with(|r| {
         for p in r.borrow().iter() {
@@ -306,7 +330,9 @@ pub fn collect() {
     PERM.with(|t| stack.extend(t.borrow().iter().cloned()));
     LIBRARY_ROOTS.with(|t| stack.extend(t.borrow().values().cloned()));
     trace_globals(&mut stack);
+    #[cfg(not(goalchemy_nostd))]
     trace_sched(&mut stack, &mut frames);
+    #[cfg(not(goalchemy_nostd))]
     let mut seen_frames: Vec<*const Frame> = Vec::new();
     let garbage = HEAP.with(|hp| {
         let mut hp = hp.borrow_mut();
@@ -322,6 +348,7 @@ pub fn collect() {
                         stack.extend(t.iter().cloned());
                         continue;
                     }
+                    #[cfg(not(goalchemy_nostd))]
                     V::Frame(f) => {
                         frames.push(f.clone());
                         continue;
@@ -332,35 +359,52 @@ pub fn collect() {
                     continue;
                 }
                 hp.marks[h as usize] = true;
-                trace_obj(&hp.objs[h as usize], &mut stack, &mut frames);
+                trace_obj(&hp.objs[h as usize], &mut stack, #[cfg(not(goalchemy_nostd))] &mut frames);
             }
-            let Some(f) = frames.pop() else { break };
-            let fp = Rc::as_ptr(&f);
-            if seen_frames.contains(&fp) {
-                continue;
+            #[cfg(goalchemy_nostd)]
+            break;
+            #[cfg(not(goalchemy_nostd))]
+            {
+                let Some(f) = frames.pop() else { break };
+                let fp = Rc::as_ptr(&f);
+                if seen_frames.contains(&fp) {
+                    continue;
+                }
+                seen_frames.push(fp);
+                f.trace(&mut stack, &mut frames);
             }
-            seen_frames.push(fp);
-            f.trace(&mut stack, &mut frames);
         }
+        #[cfg(not(goalchemy_nostd))]
         let mut garbage = Vec::new();
         for h in 1..hp.objs.len() {
             if !hp.marks[h] && !matches!(hp.objs[h], Obj::Free) {
-                garbage.push(std::mem::replace(&mut hp.objs[h], Obj::Free));
+                #[cfg(not(goalchemy_nostd))]
+                garbage.push(core::mem::replace(&mut hp.objs[h], Obj::Free));
+                // no_std objects contain no task frames or native destructors
+                // that could reenter HEAP. Avoid a second Vec of dead objects.
+                #[cfg(goalchemy_nostd)]
+                { hp.objs[h] = Obj::Free; }
                 hp.free.push(h as H);
                 hp.live -= 1;
             }
         }
         hp.since = 0;
-        hp.threshold = if min_threshold() < 50_000 { min_threshold() } else { min_threshold().max(hp.live) };
+        #[cfg(not(goalchemy_nostd))]
+        { hp.threshold = if min_threshold() < 50_000 { min_threshold() } else { min_threshold().max(hp.live) }; }
+        #[cfg(goalchemy_nostd)]
+        { hp.threshold = min_threshold().max(hp.live); }
         hp.collections += 1;
-        garbage
+        #[cfg(not(goalchemy_nostd))]
+        { garbage }
     });
     drop(garbage);
 }
 
-pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) {
+pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, #[cfg(not(goalchemy_nostd))] frames: &mut Vec<Rc<Frame>>) {
     match o {
-        Obj::Free | Obj::Bytes(_) | Obj::NativeKey(_,_) => {}
+        Obj::Free | Obj::Bytes(_) => {}
+        #[cfg(not(goalchemy_nostd))]
+        Obj::NativeKey(_,_) => {}
         Obj::Vals(v) => out.extend(v.iter().cloned()),
         Obj::Map(m) => {
             for e in m.entries.iter() {
@@ -371,6 +415,7 @@ pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) 
         }
         Obj::Box(_, v) => out.push(v.clone()),
         Obj::Func(f) => out.extend(f.env.iter().cloned()),
+        #[cfg(not(goalchemy_nostd))]
         Obj::Chan(c) => {
             out.extend(c.buf.iter().cloned());
             for w in c.recvq.iter().chain(c.sendq.iter()) {
@@ -378,16 +423,19 @@ pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) 
                 if let Some(t) = w.task.upgrade() { trace_task(&t, out, frames); }
             }
         }
+        #[cfg(not(goalchemy_nostd))]
         Obj::Mutex(m) => {
             for t in m.waiters.iter() {
                 trace_task(t, out, frames);
             }
         }
+        #[cfg(not(goalchemy_nostd))]
         Obj::WaitGroup(w) => {
             for t in w.waiters.iter() {
                 trace_task(t, out, frames);
             }
         }
+        #[cfg(not(goalchemy_nostd))]
         Obj::Context(c) => {
             out.push(c.done.clone());
             out.push(c.err.clone());
@@ -404,6 +452,7 @@ pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) 
             out.push(it.k.clone());
             out.push(it.v.clone());
         }
+        #[cfg(not(goalchemy_nostd))]
         Obj::Future(f) => {
             out.push(f.results.clone());
             out.push(f.panic.clone());
@@ -416,8 +465,9 @@ pub(crate) fn trace_obj(o: &Obj, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) 
     }
 }
 
+#[cfg(not(goalchemy_nostd))]
 impl Frame {
-    fn trace(&self, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) {
+    fn trace(&self, out: &mut Vec<V>, #[cfg(not(goalchemy_nostd))] frames: &mut Vec<Rc<Frame>>) {
         self.l.trace(out);
         out.push(self.panicking.borrow().clone());
         for link in [&self.parent, &self.a, &self.b] {
@@ -428,7 +478,8 @@ impl Frame {
     }
 }
 
-pub fn trace_task(t: &Rc<Task>, out: &mut Vec<V>, frames: &mut Vec<Rc<Frame>>) {
+#[cfg(not(goalchemy_nostd))]
+pub fn trace_task(t: &Rc<Task>, out: &mut Vec<V>, #[cfg(not(goalchemy_nostd))] frames: &mut Vec<Rc<Frame>>) {
     for p in t.native_roots.borrow().iter() { trace_data(*p, out); }
     if let Some(f) = t.frame.borrow().as_ref() {
         frames.push(f.clone());
@@ -452,4 +503,18 @@ pub fn heap_live() -> usize {
     HEAP.with(|hp| hp.borrow().live)
 }
 
+#[cfg(not(goalchemy_nostd))]
 pub type KeyIndex = HashMap<Key, usize>;
+
+#[cfg(goalchemy_nostd)]
+pub type KeyIndex = alloc::collections::BTreeMap<Key, usize>;
+
+/// Release retained capacities as well as objects after an embedded call.
+#[cfg(goalchemy_nostd)]
+pub fn reset_heap() {
+    ROOTS.reset();
+    TEMP.reset();
+    PERM.reset();
+    LIBRARY_ROOTS.reset();
+    HEAP.reset();
+}

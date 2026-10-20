@@ -1,5 +1,8 @@
 //! UTF-8 over byte strings.
 
+#[cfg(goalchemy_nostd)]
+use alloc::vec::Vec;
+
 pub const RUNE_ERROR: i64 = 0xFFFD;
 
 /// Decodes the rune at byte offset i: (rune, width).

@@ -323,6 +323,7 @@ var Runners = map[string]Runner{
 			"ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=0",
 		}, "sh", "run.sh")
 	},
+	"rust-nostd": func(out string) (Observation, error) { return run(out, 3*time.Minute, "sh", "run.sh") },
 	"rust": func(out string) (Observation, error) {
 		bin, err := BuildRust(out)
 		if err != nil {

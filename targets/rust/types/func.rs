@@ -102,7 +102,7 @@ pub fn dyn_type(x: &V) -> Option<&'static TypeDesc> {
 pub fn ifeq(a: &V, b: &V) -> bool {
     match (unbox(a), unbox(b)) {
         (None, None) => true,
-        (Some((ta, va)), Some((tb, vb))) => std::ptr::eq(ta, tb) && (ta.eq)(&va, &vb),
+        (Some((ta, va)), Some((tb, vb))) => core::ptr::eq(ta, tb) && (ta.eq)(&va, &vb),
         _ => false,
     }
 }

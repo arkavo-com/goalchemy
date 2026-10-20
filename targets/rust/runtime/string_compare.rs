@@ -6,6 +6,6 @@ pub fn scompare(a: V, b: V) -> V {
 }
 
 /// Bytewise ordering for the comparison operators.
-pub fn scmp(a: &V, b: &V) -> std::cmp::Ordering {
+pub fn scmp(a: &V, b: &V) -> core::cmp::Ordering {
     a.bytes()[..].cmp(&b.bytes()[..])
 }

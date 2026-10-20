@@ -5,7 +5,7 @@ contract_version: 1.0.0
 contract_hash: 210a1cc38ef60c6958749b2712507cedd842d101b8e213b133ea0e4dd6bde0c4
 symbol: "scompare"
 implementation: runtime/string_compare.rs
-implementation_hash: 7c9c77074c1533dd70f23dc5d8db9f507e10e4b7b2548c948755dc9d4cf63676
+implementation_hash: a3351dca99b7d98cea6653b86bd48909d929fb257d1ba11fed2b47dc1ef679de
 summary: "Bytewise lexicographic three-way comparison."
 suspension: never
 determinism: deterministic
