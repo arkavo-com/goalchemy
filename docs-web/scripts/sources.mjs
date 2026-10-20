@@ -1,5 +1,6 @@
 // The repository documents remain the authority. These entries only define publication metadata.
 export const sources = [
+  ['docs/rust-no-std.md', 'targets/details/rust-no-std', 'Rust: no_std profile', 'Embedded Rust with core and alloc, memory controls, and supported scope.', 1],
   ['docs/api-documentation.md', 'guides/api-documentation', 'Generate SDK documentation', 'Consumer API catalogs, portable Markdown, and an Astro Starlight site template.', 7],
   ['docs/usage.md', 'guides/usage', 'Commands and output', 'CLI usage, project configuration, generated names, and output layouts.', 8],
   ['specs/language.md', 'language/specification', 'Language specification', 'The accepted Go subset, semantics, feature gates, and compatibility contract.', 2],

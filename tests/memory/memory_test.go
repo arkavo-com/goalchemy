@@ -15,7 +15,12 @@ import (
 
 var stats = regexp.MustCompile(`heap: peak (\d+) live (\d+) collections (\d+)\n`)
 
-func TestRustHeap(t *testing.T) {
+func TestRustHeap(t *testing.T) { testRustHeap(t, "rust") }
+
+func TestRustNoStdHeap(t *testing.T) { testRustHeap(t, "rust-nostd") }
+
+func testRustHeap(t *testing.T, target string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("heap stress tests run in the full suite")
 	}
@@ -31,6 +36,12 @@ func TestRustHeap(t *testing.T) {
 		{"tasks", "cooperative", "1000", 0},
 	}
 	for _, c := range cases {
+		if target == "rust-nostd" && c.gate == "cooperative" {
+			continue
+		}
+		if target == "rust-nostd" && c.name == "cycles" {
+			c.maxPeak = 512
+		}
 		t.Run(c.name, func(t *testing.T) {
 			dir := filepath.Join("testdata", c.name)
 			want, err := testutil.Native(dir, t.TempDir())
@@ -38,12 +49,12 @@ func TestRustHeap(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := t.TempDir()
-			if ds := testutil.CompileGate(dir, "rust", out, c.gate); len(ds) > 0 {
+			if ds := testutil.CompileGate(dir, target, out, c.gate); len(ds) > 0 {
 				t.Fatal(ds)
 			}
 			t.Setenv("GOALCHEMY_HEAP_STATS", "1")
 			t.Setenv("GOALCHEMY_GC_THRESHOLD", c.threshold)
-			got, err := testutil.Runners["rust"](out)
+			got, err := testutil.Runners[target](out)
 			if err != nil {
 				t.Fatal(err)
 			}

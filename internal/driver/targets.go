@@ -33,7 +33,7 @@ func init() {
 // collisions before emission.
 var nameRules = map[string]func(*ir.Program) naming.Rules{
 	"go": golang.NameRules, "typescript": ts.NameRules, "python": py.NameRules, "java": java.NameRules,
-	"csharp": csharp.NameRules, "rust": rust.NameRules, "c": cemit.NameRules, "swift": swiftemit.NameRules,
+	"csharp": csharp.NameRules, "rust": rust.NameRules, "rust-nostd": rust.NoStdNameRules, "c": cemit.NameRules, "swift": swiftemit.NameRules,
 }
 
 func emitErr(code, msg string) []diagnostics.Diagnostic {

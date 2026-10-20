@@ -11,7 +11,7 @@ pub fn std_errors_is(err: V, target: V) -> V {
     loop {
         let Some((ct, cv)) = unbox(&cur) else { return V::Bool(false) };
         let _keep = temp_root(&[cur.clone()]);
-        if tt.comparable && std::ptr::eq(ct, tt) && (ct.eq)(&cv, &tv) {
+        if tt.comparable && core::ptr::eq(ct, tt) && (ct.eq)(&cv, &tv) {
             return V::Bool(true);
         }
         if let Some((_, is)) = ct.method("Is") {

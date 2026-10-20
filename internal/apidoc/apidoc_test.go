@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +16,10 @@ import (
 	"github.com/eugenioenko/goalchemy/internal/emit/artifact"
 	"github.com/eugenioenko/goalchemy/internal/link"
 )
+
+// This fixture exposes handles and context; embedded profiles deliberately
+// reject that ABI and must remain explicit unavailable entries in the catalog.
+var libraryFixtureTargets = []string{"c", "csharp", "go", "java", "python", "rust", "swift", "typescript"}
 
 func fixture(t *testing.T) *Catalog {
 	t.Helper()
@@ -34,10 +39,23 @@ func find(c *Catalog, suffix string) *Symbol {
 }
 func TestCatalogAndNativeBoundaries(t *testing.T) {
 	c := fixture(t)
-	if len(c.Targets) != 8 {
+	if len(c.Targets) != len(driver.Targets()) {
 		t.Fatalf("targets: %v", c.Targets)
 	}
 	for _, target := range c.Targets {
+		if !slices.Contains(libraryFixtureTargets, target.Name) {
+			if target.Status != "unavailable" || target.Reason == "" {
+				t.Errorf("restricted library target must explain its unavailable status: %+v", target)
+			}
+			for _, symbol := range c.Symbols {
+				for _, binding := range symbol.Bindings {
+					if binding.Target == target.Name {
+						t.Errorf("unavailable target %s has binding for %s", target.Name, symbol.ID)
+					}
+				}
+			}
+			continue
+		}
 		if target.Status != "available" {
 			t.Errorf("%s: %s", target.Name, target.Reason)
 		}
@@ -75,13 +93,13 @@ func TestCatalogAndNativeBoundaries(t *testing.T) {
 				t.Fatal("missing C call selector")
 			}
 		}
-		if len(seen) != 8 {
+		if len(seen) != len(libraryFixtureTargets) {
 			t.Fatalf("%s target bindings: %v", s.ID, seen)
 		}
 	}
 	pages := c.Markdown()
 	assertLinks(t, pages)
-	if len(item.Bindings) != 7 {
+	if len(item.Bindings) != len(libraryFixtureTargets)-1 {
 		t.Fatalf("expected native value representations outside C's generic interface: %v", item.Bindings)
 	}
 	if bytes.Contains(bytes.Join(mapValues(pages), nil), []byte("such as <script>")) {
@@ -215,7 +233,7 @@ func TestObserverPreservesGeneratedSource(t *testing.T) {
 	if diagnostics.HasErrors(ds) {
 		t.Fatal(ds)
 	}
-	for _, target := range driver.Targets() {
+	for _, target := range libraryFixtureTargets {
 		t.Run(target, func(t *testing.T) {
 			root := t.TempDir()
 			first, second := filepath.Join(root, "first"), filepath.Join(root, "second")

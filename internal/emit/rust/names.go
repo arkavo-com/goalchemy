@@ -22,3 +22,9 @@ func NameRules(p *ir.Program) naming.Rules {
 		"AsMut", "Extend", "std", "core", "alloc", "main", "run_host", "rt", "shared",
 	}}
 }
+
+func NoStdNameRules(p *ir.Program) naming.Rules {
+	r := NameRules(p)
+	r.Reserved = append(r.Reserved, "run", "RuntimeOptions", "CallResult", "HeapStats", "NoStdError")
+	return r
+}
